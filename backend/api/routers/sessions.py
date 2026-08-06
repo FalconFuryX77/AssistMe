@@ -31,6 +31,15 @@ from api.schemas.audit_recording import (
     RecordingStatusResponse,
     RecordingStopRequest,
 )
+from api.schemas.chat_file import (
+    ChatMessageListResponse,
+    ChatMessageResponse,
+    ChatMessageSendRequest,
+    FileChunkUploadRequest,
+    FileTransferInitiateRequest,
+    FileTransferListResponse,
+    FileTransferResponse,
+)
 from api.schemas.e2ee import (
     E2EEKeyExchangeRequest,
     E2EEKeyRotationRequest,
@@ -59,6 +68,7 @@ from api.schemas.voice import (
 from api.schemas.webrtc import ICEServersResponse
 from api.services.adaptive_streaming_service import AdaptiveStreamingService
 from api.services.audit_recording_service import AuditRecordingService
+from api.services.chat_file_service import ChatFileService
 from api.services.e2ee_service import E2EEService
 from api.services.multiparty_service import MultiPartyService
 from api.services.remote_control_service import RemoteControlService
@@ -981,5 +991,163 @@ async def list_session_participants(
     return await MultiPartyService.get_participants(
         session_id=session_id,
         current_user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# In-App Chat & File Transfer Routes (Phase 11)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/chat/messages", response_model=ChatMessageResponse)
+async def send_chat_message(
+    session_id: str,
+    payload: ChatMessageSendRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Send an in-app text chat message or E2EE encrypted message payload."""
+    msg = await ChatFileService.send_chat_message(
+        session_id=session_id,
+        sender_id=current_user.id,
+        content=payload.content,
+        is_encrypted=payload.is_encrypted,
+        encrypted_payload=payload.encrypted_payload,
+        db=db,
+    )
+    return {
+        "id": msg.id,
+        "session_id": msg.session_id,
+        "sender_id": msg.sender_id,
+        "content": msg.content,
+        "is_encrypted": msg.is_encrypted,
+        "encrypted_payload": msg.encrypted_payload,
+        "timestamp": msg.timestamp,
+    }
+
+
+@router.get("/{session_id}/chat/messages", response_model=ChatMessageListResponse)
+async def list_chat_messages(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Retrieve all in-app chat messages for session."""
+    return await ChatFileService.list_chat_messages(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+@router.post("/{session_id}/files/initiate", response_model=FileTransferResponse)
+async def initiate_file_transfer(
+    session_id: str,
+    payload: FileTransferInitiateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Register a new chunked file transfer session."""
+    transfer = await ChatFileService.initiate_file_transfer(
+        session_id=session_id,
+        sender_id=current_user.id,
+        filename=payload.filename,
+        file_size_bytes=payload.file_size_bytes,
+        mime_type=payload.mime_type,
+        checksum_sha256=payload.checksum_sha256,
+        total_chunks=payload.total_chunks,
+        db=db,
+    )
+    return {
+        "id": transfer.id,
+        "session_id": transfer.session_id,
+        "sender_id": transfer.sender_id,
+        "filename": transfer.filename,
+        "file_size_bytes": transfer.file_size_bytes,
+        "mime_type": transfer.mime_type,
+        "checksum_sha256": transfer.checksum_sha256,
+        "status": transfer.status,
+        "total_chunks": transfer.total_chunks,
+        "received_chunks": transfer.received_chunks,
+        "download_url": transfer.download_url,
+        "created_at": transfer.created_at,
+    }
+
+
+@router.post("/{session_id}/files/{file_transfer_id}/chunk", response_model=FileTransferResponse)
+async def upload_file_chunk(
+    session_id: str,
+    file_transfer_id: str,
+    payload: FileChunkUploadRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Upload an individual file chunk."""
+    transfer = await ChatFileService.upload_file_chunk(
+        session_id=session_id,
+        file_transfer_id=file_transfer_id,
+        user_id=current_user.id,
+        chunk_index=payload.chunk_index,
+        chunk_data_base64=payload.chunk_data_base64,
+        chunk_checksum=payload.chunk_checksum,
+        db=db,
+    )
+    return {
+        "id": transfer.id,
+        "session_id": transfer.session_id,
+        "sender_id": transfer.sender_id,
+        "filename": transfer.filename,
+        "file_size_bytes": transfer.file_size_bytes,
+        "mime_type": transfer.mime_type,
+        "checksum_sha256": transfer.checksum_sha256,
+        "status": transfer.status,
+        "total_chunks": transfer.total_chunks,
+        "received_chunks": transfer.received_chunks,
+        "download_url": transfer.download_url,
+        "created_at": transfer.created_at,
+    }
+
+
+@router.post("/{session_id}/files/{file_transfer_id}/complete", response_model=FileTransferResponse)
+async def complete_file_transfer(
+    session_id: str,
+    file_transfer_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Finalize file transfer and verify SHA-256 integrity checksum."""
+    transfer = await ChatFileService.complete_file_transfer(
+        session_id=session_id,
+        file_transfer_id=file_transfer_id,
+        user_id=current_user.id,
+        db=db,
+    )
+    return {
+        "id": transfer.id,
+        "session_id": transfer.session_id,
+        "sender_id": transfer.sender_id,
+        "filename": transfer.filename,
+        "file_size_bytes": transfer.file_size_bytes,
+        "mime_type": transfer.mime_type,
+        "checksum_sha256": transfer.checksum_sha256,
+        "status": transfer.status,
+        "total_chunks": transfer.total_chunks,
+        "received_chunks": transfer.received_chunks,
+        "download_url": transfer.download_url,
+        "created_at": transfer.created_at,
+    }
+
+
+@router.get("/{session_id}/files/transfers", response_model=FileTransferListResponse)
+async def list_file_transfers(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """List all file transfers for session."""
+    return await ChatFileService.list_file_transfers(
+        session_id=session_id,
+        user_id=current_user.id,
         db=db,
     )

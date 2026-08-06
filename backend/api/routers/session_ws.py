@@ -313,6 +313,27 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "chat_message_received",
+                "file_transfer_initiated",
+                "file_chunk_received",
+                "file_transfer_completed",
+            ):
+                # Broadcast real-time text chat messages, E2EE payloads, and chunked file transfer signals
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "message_id": msg.get("message_id"),
+                    "content": msg.get("content"),
+                    "is_encrypted": msg.get("is_encrypted"),
+                    "encrypted_payload": msg.get("encrypted_payload"),
+                    "file_transfer_id": msg.get("file_transfer_id"),
+                    "filename": msg.get("filename"),
+                    "chunk_index": msg.get("chunk_index"),
+                    "download_url": msg.get("download_url"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}

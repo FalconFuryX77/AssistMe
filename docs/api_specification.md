@@ -1028,6 +1028,96 @@ Get all participants in a multi-party session.
 
 ---
 
+## In-App Chat & File Transfer (Phase 11)
+
+### `POST /sessions/{session_id}/chat/messages`
+
+Send an in-app text chat message or E2EE encrypted message payload.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "content": "Hello! I am ready to guide you.",
+  "is_encrypted": false,
+  "encrypted_payload": null
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/chat/messages`
+
+Retrieve all in-app chat messages for a session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/files/initiate`
+
+Register a new chunked file transfer session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "filename": "diagnostics_report.pdf",
+  "file_size_bytes": 1048576,
+  "mime_type": "application/pdf",
+  "checksum_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "total_chunks": 2
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/files/{file_transfer_id}/chunk`
+
+Upload an individual file chunk.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "chunk_index": 0,
+  "chunk_data_base64": "UEsDBBQAAAAIAAA=="
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/files/{file_transfer_id}/complete`
+
+Finalize file transfer and verify SHA-256 integrity checksum.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/files/transfers`
+
+List all file transfers for a session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
