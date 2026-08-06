@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 9 COMPLETE ✅
+## Current Status: Phase 10 COMPLETE ✅
 
-**Last updated:** 2026-08-06T17:21Z
+**Last updated:** 2026-08-06T17:25Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 111/111
+**All tests passing:** 118/118
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
@@ -109,37 +109,44 @@ Completed:
 
 **Pull Request:** [#7 — Phase 9: Session Recording & Audit Trails](https://github.com/FalconFuryX77/AssistMe/pull/7) (Merged into `main`)
 
+- Models: `recording_consent_granted`, `recording_scope`, `is_recording`, `recording_url`, `recording_file_size_bytes`, `recording_duration_seconds`, `AuditLog`
+- REST API: Recording consent, start recording (consent enforced), stop recording & metadata, audit trail query
+- WebSockets: Real-time event broadcasting
+- 111 passing tests
+
+### Phase 10 — Multi-party Assistance Sessions ✅
+
+**Pull Request:** [#8 — Phase 10: Multi-party Assistance Sessions](https://github.com/FalconFuryX77/AssistMe/pull/8) (Merged into `main`)
+
 #### What was built:
 
-1. **Database Models (`backend/models/session.py` & `models/audit_log.py`)**:
-   - `recording_consent_granted` (bool), `recording_scope` (`screen_and_audio`, `screen_only`, `audio_only`), `is_recording` (bool), `recording_url` (str), `recording_file_size_bytes` (int), `recording_duration_seconds` (int).
-   - Created `AuditLog` ORM model for privacy compliance event tracking (`session_id`, `user_id`, `event_type`, `detail`, `timestamp`).
-2. **Session Recording & Audit Trail REST API (`backend/api/routers/sessions.py` & `audit_recording_service.py`)**:
-   - `POST /sessions/{session_id}/recording/consent` — Helpee grants/revokes recording consent.
-   - `POST /sessions/{session_id}/recording/start` — Initiate recording (strictly enforces `recording_consent_granted == True`).
-   - `POST /sessions/{session_id}/recording/stop` — Stop recording and store file metadata.
-   - `GET /sessions/{session_id}/recording/status` — Get active recording status & file metadata.
-   - `GET /sessions/{session_id}/audit-trail` — Retrieve privacy compliance audit log items.
+1. **Database Model Updates (`backend/models/session_participant.py`)**:
+   - `is_active_speaker` (bool).
+2. **Multi-party Session REST API (`backend/api/routers/sessions.py` & `multiparty_service.py`)**:
+   - `POST /sessions/{session_id}/participants/invite` — Invite secondary helpers or observers.
+   - `PATCH /sessions/{session_id}/participants/{participant_id}/role` — Creator-only role updates (`primary_helper`, `secondary_helper`, `observer`, `helpee`).
+   - `POST /sessions/{session_id}/active-speaker` — Signal active speaker for multi-stream layout switching.
+   - `GET /sessions/{session_id}/participants` — Retrieve multi-party participant list with stream & role metadata.
 3. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
-   - WebSocket broadcast handlers for `recording_consent_updated`, `recording_started`, and `recording_stopped`.
-4. **Pydantic Schemas (`backend/api/schemas/audit_recording.py`)**:
-   - `RecordingConsentRequest`, `RecordingStartRequest`, `RecordingStopRequest`, `RecordingStatusResponse`, `AuditEventItem`, `AuditTrailResponse`.
-5. **Test Suite (111 passing tests)**:
-   - 7 new tests in `backend/tests/test_audit_recording.py` covering recording consent, consent enforcement (403 Forbidden without consent), stop recording & metadata storage, recording status, and structured audit trail queries.
+   - WebSocket broadcast handlers for `participant_invited`, `participant_role_updated`, and `active_speaker_changed`.
+4. **Pydantic Schemas (`backend/api/schemas/multiparty.py`)**:
+   - `ParticipantInviteRequest`, `ParticipantRoleUpdateRequest`, `ActiveSpeakerSignalRequest`, `ActiveSpeakerStatusResponse`, `MultiPartyParticipantListResponse`.
+5. **Test Suite (118 passing tests)**:
+   - 7 new tests in `backend/tests/test_multiparty.py` covering secondary helper/observer invites, RBAC role updates, 403 permission guards, active speaker switching, and participant listing.
 
 ---
 
-## What's Next: Phase 10 — Multi-party Assistance Sessions
+## What's Next: Phase 11 — In-App Chat & File Transfer
 
-Per the roadmap, the next phase covers Multi-party Assistance Sessions:
-- Multi-participant Mesh / SFU routing logic & schemas
-- Secondary helper invite workflows & permissions matrix (`primary_helper`, `secondary_helper`, `observer`, `helpee`)
-- Participant role updates & disconnect handling (`POST /sessions/{session_id}/participants/role`)
-- Active speaker detection & multi-video feed WebSockets dispatch
+Per the roadmap, the next phase covers In-App Chat & File Transfer:
+- Text messaging signaling & encrypted chat message schemas (`POST /sessions/{session_id}/chat/message`)
+- File transfer initiation, chunked upload/download signaling, and file size constraint validation (`POST /sessions/{session_id}/files/transfer`)
+- WebSockets real-time chat & file transfer message forwarders
+- E2EE payload wrapping for sensitive in-session file attachments
 
 ### Recommended Workflow for Next Contributor:
-1. Create feature branch: `git checkout -b feature/phase-10-multiparty-sessions`
-2. Build multi-party participant schemas, service, REST routes, WebSocket handlers, and unit tests
+1. Create feature branch: `git checkout -b feature/phase-11-chat-file-transfer`
+2. Build chat & file transfer schemas, service, REST routes, WebSocket handlers, and unit tests
 3. Open PR via `gh pr create`
 4. Automated CI workflow runs pytest tests in GitHub Actions
 5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
@@ -157,5 +164,5 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- All 111 unit & integration tests pass cleanly.
+- All 118 unit & integration tests pass cleanly.
 - CI/CD workflow is active on GitHub.
