@@ -42,6 +42,7 @@ class ParticipantResponse(BaseModel):
     video_fps: int = 30
     rtt_ms: float = 50.0
     packet_loss_percent: float = 0.0
+    is_active_speaker: bool = False
 
     model_config = {"from_attributes": True}
 

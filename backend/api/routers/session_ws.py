@@ -297,6 +297,22 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "participant_invited",
+                "participant_role_updated",
+                "active_speaker_changed",
+            ):
+                # Broadcast multi-party role changes, participant invitations, and active speaker signals
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "target_user_id": msg.get("target_user_id"),
+                    "role": msg.get("role"),
+                    "active_speaker_user_id": msg.get("active_speaker_user_id"),
+                    "audio_level_db": msg.get("audio_level_db"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}

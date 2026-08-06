@@ -963,6 +963,71 @@ Retrieve structured privacy compliance audit logs for session.
 
 ---
 
+## Multi-party Assistance Sessions (Phase 10)
+
+### `POST /sessions/{session_id}/participants/invite`
+
+Invite secondary helper or observer to an active session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "email_or_user_id": "secondary_helper@example.com",
+  "role": "secondary_helper"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `PATCH /sessions/{session_id}/participants/{participant_id}/role`
+
+Update a participant's role (`primary_helper`, `secondary_helper`, `observer`, `helpee`).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "role": "observer"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/active-speaker`
+
+Signal active speaker change for multi-stream video layout routing.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "active_speaker_user_id": "uuid",
+  "audio_level_db": -12.5
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/participants`
+
+Get all participants in a multi-party session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
