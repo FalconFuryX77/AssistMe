@@ -860,6 +860,109 @@ Get active E2EE status, safety number fingerprint, and MITM verification state.
 
 ---
 
+## Session Recording & Audit Trails (Phase 9)
+
+### `POST /sessions/{session_id}/recording/consent`
+
+Update session recording consent state and scope.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "consent_granted": true,
+  "recording_scope": "screen_and_audio"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "is_recording": false,
+  "consent_granted": true,
+  "recording_scope": "screen_and_audio",
+  "recording_url": null,
+  "file_size_bytes": null,
+  "duration_seconds": null
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/recording/start`
+
+Initiate session recording stream (requires `consent_granted == true`).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "storage_provider": "local_encrypted"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/recording/stop`
+
+Stop active session recording and save storage metadata.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "file_url": "https://storage.assistme.internal/recordings/rec_123.mp4",
+  "file_size_bytes": 15420000,
+  "duration_seconds": 180
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/recording/status`
+
+Get recording status and metadata for session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/audit-trail`
+
+Retrieve structured privacy compliance audit logs for session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "total_events": 2,
+  "events": [
+    {
+      "id": "uuid",
+      "session_id": "uuid",
+      "user_id": "uuid",
+      "event_type": "recording_consent_updated",
+      "detail": "Consent: true, Scope: screen_and_audio",
+      "timestamp": "2026-08-06T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
