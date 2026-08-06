@@ -33,6 +33,10 @@ class ParticipantResponse(BaseModel):
     screen_share_platform: str | None = None
     is_flag_secure_active: bool = False
     screen_orientation: str = "portrait"
+    is_in_audio_call: bool = False
+    is_audio_muted: bool = False
+    audio_route: str = "speaker"
+    audio_quality: str = "high"
 
     model_config = {"from_attributes": True}
 

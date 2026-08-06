@@ -532,6 +532,107 @@ Get current screen share status for a session.
 
 ---
 
+## Voice Communication (Phase 5)
+
+### `POST /sessions/{session_id}/audio/start`
+
+Start audio call stream participation.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "is_muted": false,
+  "audio_route": "speaker"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "is_in_audio_call": true,
+  "is_audio_muted": false,
+  "audio_route": "speaker",
+  "audio_quality": "high",
+  "participant_user_id": "uuid"
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/audio/stop`
+
+Stop audio call stream participation.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/audio/mute`
+
+Toggle microphone mute state.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "is_muted": true
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/audio/route`
+
+Change audio output routing (speaker, earpiece, bluetooth, headset).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "audio_route": "bluetooth"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/audio/degradation`
+
+Report network degradation and adjust audio quality level.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "quality_level": "low",
+  "packet_loss": 15.2
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/audio/status`
+
+Get active voice communication status for session participant.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
