@@ -24,6 +24,13 @@ from api.schemas.adaptive_streaming import (
     StreamAdaptRequest,
     StreamConfigResponse,
 )
+from api.schemas.audit_recording import (
+    AuditTrailResponse,
+    RecordingConsentRequest,
+    RecordingStartRequest,
+    RecordingStatusResponse,
+    RecordingStopRequest,
+)
 from api.schemas.e2ee import (
     E2EEKeyExchangeRequest,
     E2EEKeyRotationRequest,
@@ -44,6 +51,7 @@ from api.schemas.voice import (
 )
 from api.schemas.webrtc import ICEServersResponse
 from api.services.adaptive_streaming_service import AdaptiveStreamingService
+from api.services.audit_recording_service import AuditRecordingService
 from api.services.e2ee_service import E2EEService
 from api.services.remote_control_service import RemoteControlService
 from api.services.screen_share_service import ScreenShareService
@@ -736,6 +744,117 @@ async def get_e2ee_status(
 ) -> dict:
     """Get active E2EE status and security fingerprint for session."""
     return await E2EEService.get_status(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Session Recording & Audit Trails Routes (Phase 9)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/recording/consent", response_model=RecordingStatusResponse)
+async def update_recording_consent(
+    session_id: str,
+    payload: RecordingConsentRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Update session recording consent state."""
+    session = await AuditRecordingService.update_consent(
+        session_id=session_id,
+        user_id=current_user.id,
+        consent_granted=payload.consent_granted,
+        recording_scope=payload.recording_scope,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "is_recording": session.is_recording,
+        "consent_granted": session.recording_consent_granted,
+        "recording_scope": session.recording_scope,
+        "recording_url": session.recording_url,
+        "file_size_bytes": session.recording_file_size_bytes,
+        "duration_seconds": session.recording_duration_seconds,
+    }
+
+
+@router.post("/{session_id}/recording/start", response_model=RecordingStatusResponse)
+async def start_recording(
+    session_id: str,
+    payload: RecordingStartRequest = RecordingStartRequest(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Start session recording (requires recording_consent_granted == True)."""
+    session = await AuditRecordingService.start_recording(
+        session_id=session_id,
+        user_id=current_user.id,
+        storage_provider=payload.storage_provider,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "is_recording": session.is_recording,
+        "consent_granted": session.recording_consent_granted,
+        "recording_scope": session.recording_scope,
+        "recording_url": session.recording_url,
+        "file_size_bytes": session.recording_file_size_bytes,
+        "duration_seconds": session.recording_duration_seconds,
+    }
+
+
+@router.post("/{session_id}/recording/stop", response_model=RecordingStatusResponse)
+async def stop_recording(
+    session_id: str,
+    payload: RecordingStopRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Stop active session recording and save file metadata."""
+    session = await AuditRecordingService.stop_recording(
+        session_id=session_id,
+        user_id=current_user.id,
+        file_url=payload.file_url,
+        file_size_bytes=payload.file_size_bytes,
+        duration_seconds=payload.duration_seconds,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "is_recording": session.is_recording,
+        "consent_granted": session.recording_consent_granted,
+        "recording_scope": session.recording_scope,
+        "recording_url": session.recording_url,
+        "file_size_bytes": session.recording_file_size_bytes,
+        "duration_seconds": session.recording_duration_seconds,
+    }
+
+
+@router.get("/{session_id}/recording/status", response_model=RecordingStatusResponse)
+async def get_recording_status(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get recording status and metadata for session."""
+    return await AuditRecordingService.get_recording_status(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+@router.get("/{session_id}/audit-trail", response_model=AuditTrailResponse)
+async def get_session_audit_trail(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Retrieve privacy compliance audit logs for session."""
+    return await AuditRecordingService.get_audit_trail(
         session_id=session_id,
         user_id=current_user.id,
         db=db,

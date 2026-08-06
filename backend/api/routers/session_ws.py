@@ -282,6 +282,21 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "recording_consent_updated",
+                "recording_started",
+                "recording_stopped",
+            ):
+                # Broadcast session recording consent and status events
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "consent_granted": msg.get("consent_granted"),
+                    "recording_scope": msg.get("recording_scope"),
+                    "recording_url": msg.get("recording_url"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
