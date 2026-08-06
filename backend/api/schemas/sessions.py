@@ -29,6 +29,10 @@ class ParticipantResponse(BaseModel):
     status: str
     joined_at: datetime
     last_seen_at: datetime
+    is_screen_sharing: bool = False
+    screen_share_platform: str | None = None
+    is_flag_secure_active: bool = False
+    screen_orientation: str = "portrait"
 
     model_config = {"from_attributes": True}
 
