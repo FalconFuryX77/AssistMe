@@ -19,6 +19,11 @@ from api.schemas.screen_share import (
     ScreenShareStatusResponse,
     ScreenShareStopRequest,
 )
+from api.schemas.remote_control import (
+    RemoteControlGrantRequest,
+    RemoteControlInputEvent,
+    RemoteControlStatusResponse,
+)
 from api.schemas.voice import (
     AudioCallStartRequest,
     AudioDegradationReportRequest,
@@ -27,6 +32,7 @@ from api.schemas.voice import (
     AudioStatusResponse,
 )
 from api.schemas.webrtc import ICEServersResponse
+from api.services.remote_control_service import RemoteControlService
 from api.services.screen_share_service import ScreenShareService
 from api.services.session_service import SessionService
 from api.services.voice_service import VoiceService
@@ -47,6 +53,9 @@ def _enrich_session(session: Session) -> dict:
         "title": session.title,
         "session_code": session.session_code,
         "timeout_minutes": session.timeout_minutes,
+        "remote_control_granted": session.remote_control_granted,
+        "remote_control_granted_at": session.remote_control_granted_at,
+        "remote_control_platform": session.remote_control_platform,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
         "ended_at": session.ended_at,
@@ -452,6 +461,83 @@ async def get_audio_status(
 ) -> dict:
     """Get active audio call status for current user in session."""
     return await VoiceService.get_audio_status(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Remote Control Protocol Routes (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/remote-control/grant", response_model=RemoteControlStatusResponse)
+async def grant_remote_control(
+    session_id: str,
+    payload: RemoteControlGrantRequest = RemoteControlGrantRequest(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Grant remote control permission to session helper."""
+    session = await RemoteControlService.grant_remote_control(
+        session_id=session_id,
+        user_id=current_user.id,
+        platform=payload.platform,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "remote_control_granted": session.remote_control_granted,
+        "remote_control_granted_at": session.remote_control_granted_at,
+        "remote_control_platform": session.remote_control_platform,
+    }
+
+
+@router.post("/{session_id}/remote-control/revoke", response_model=RemoteControlStatusResponse)
+async def revoke_remote_control(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Instantly revoke remote control permission."""
+    session = await RemoteControlService.revoke_remote_control(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "remote_control_granted": session.remote_control_granted,
+        "remote_control_granted_at": session.remote_control_granted_at,
+        "remote_control_platform": session.remote_control_platform,
+    }
+
+
+@router.post("/{session_id}/remote-control/input")
+async def dispatch_remote_control_input(
+    session_id: str,
+    payload: RemoteControlInputEvent,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Dispatch remote gesture/key input event (Tap, Drag, Long Press, Gestures, Key Events)."""
+    return await RemoteControlService.dispatch_input_event(
+        session_id=session_id,
+        user_id=current_user.id,
+        input_event=payload,
+        db=db,
+    )
+
+
+@router.get("/{session_id}/remote-control/status", response_model=RemoteControlStatusResponse)
+async def get_remote_control_status(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get remote control permission status."""
+    return await RemoteControlService.get_status(
         session_id=session_id,
         user_id=current_user.id,
         db=db,
