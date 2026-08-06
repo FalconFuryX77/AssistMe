@@ -249,6 +249,22 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "streaming_adapted",
+                "network_metrics_reported",
+            ):
+                # Broadcast adaptive video resolution / FPS / network metrics updates
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "video_resolution": msg.get("video_resolution"),
+                    "video_bitrate_kbps": msg.get("video_bitrate_kbps"),
+                    "video_fps": msg.get("video_fps"),
+                    "rtt_ms": msg.get("rtt_ms"),
+                    "packet_loss_percent": msg.get("packet_loss_percent"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}

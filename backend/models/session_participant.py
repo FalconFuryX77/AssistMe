@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -86,6 +86,21 @@ class SessionParticipant(Base):
     )
     audio_quality: Mapped[str] = mapped_column(
         String(20), default="high", nullable=False  # "high", "medium", "low"
+    )
+    video_resolution: Mapped[str] = mapped_column(
+        String(10), default="720p", nullable=False  # "1080p", "720p", "480p", "360p"
+    )
+    video_bitrate_kbps: Mapped[int] = mapped_column(
+        Integer, default=1500, nullable=False
+    )
+    video_fps: Mapped[int] = mapped_column(
+        Integer, default=30, nullable=False
+    )
+    rtt_ms: Mapped[float] = mapped_column(
+        Float, default=50.0, nullable=False
+    )
+    packet_loss_percent: Mapped[float] = mapped_column(
+        Float, default=0.0, nullable=False
     )
 
     # Relationships
