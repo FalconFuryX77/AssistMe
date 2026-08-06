@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 11 COMPLETE ✅
+## Current Status: Phase 12 COMPLETE ✅
 
-**Last updated:** 2026-08-06T17:28Z
+**Last updated:** 2026-08-06T17:31Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 125/125
+**All tests passing:** 129/129
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
@@ -127,38 +127,43 @@ Completed:
 
 **Pull Request:** [#9 — Phase 11: In-App Chat & Chunked File Transfer](https://github.com/FalconFuryX77/AssistMe/pull/9) (Merged into `main`)
 
+- Models: `ChatMessage`, `FileTransfer`
+- REST API: Text chat, E2EE chat payloads, chat history query, chunked file transfer initiation/chunk upload/completion & SHA-256 verification, file transfers query
+- WebSockets: Real-time event broadcasting
+- 125 passing tests
+
+### Phase 12 — Mobile App Core Architecture & Security Foundation ✅
+
+**Pull Request:** [#10 — Phase 12: Mobile App Core Architecture & Security Foundation](https://github.com/FalconFuryX77/AssistMe/pull/10) (Merged into `main`)
+
 #### What was built:
 
-1. **Database Models (`backend/models/chat_message.py` & `models/file_transfer.py`)**:
-   - `ChatMessage` ORM model (`session_id`, `sender_id`, `content`, `is_encrypted`, `encrypted_payload`, `timestamp`).
-   - `FileTransfer` ORM model (`session_id`, `sender_id`, `filename`, `file_size_bytes`, `mime_type`, `checksum_sha256`, `status`, `total_chunks`, `received_chunks`, `download_url`, `created_at`).
-2. **In-App Chat & File Transfer REST API (`backend/api/routers/sessions.py` & `chat_file_service.py`)**:
-   - `POST /sessions/{session_id}/chat/messages` — Send text chat message or E2EE encrypted chat payload.
-   - `GET /sessions/{session_id}/chat/messages` — Retrieve in-app chat history.
-   - `POST /sessions/{session_id}/files/initiate` — Register chunked file transfer session (`filename`, `file_size_bytes`, `mime_type`, `checksum_sha256`, `total_chunks`).
-   - `POST /sessions/{session_id}/files/{file_transfer_id}/chunk` — Upload file chunk and track progress.
-   - `POST /sessions/{session_id}/files/{file_transfer_id}/complete` — Finalize file transfer and generate secure download URL.
-   - `GET /sessions/{session_id}/files/transfers` — List all file transfers for session.
-3. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
-   - WebSocket broadcast handlers for `chat_message_received`, `file_transfer_initiated`, `file_chunk_received`, and `file_transfer_completed`.
-4. **Pydantic Schemas (`backend/api/schemas/chat_file.py`)**:
-   - `ChatMessageSendRequest`, `ChatMessageResponse`, `ChatMessageListResponse`, `FileTransferInitiateRequest`, `FileChunkUploadRequest`, `FileTransferResponse`, `FileTransferListResponse`.
-5. **Test Suite (125 passing tests)**:
-   - 7 new tests in `backend/tests/test_chat_file.py` covering text messaging, E2EE chat payloads, chat history listing, chunked file initiation/chunk upload/completion, and file transfer listing.
+1. **Mobile Security & Storage (`mobile/lib/core/security/secure_storage_service.dart`)**:
+   - Encrypted Keychain / EncryptedSharedPreferences wrapper for JWT access & refresh tokens and E2EE identity keys.
+2. **Mobile Network Client (`mobile/lib/core/network/api_client.dart`)**:
+   - HTTP client with automatic Bearer token header injection and token refresh handling.
+3. **Mobile WebRTC Engine (`mobile/lib/core/webrtc/webrtc_engine.dart`)**:
+   - WebRTC PeerConnection engine wrapper: STUN/TURN server configuration, SDP offer/answer creation, ICE candidate trickle, and Android MediaProjection / iOS ReplayKit screen capture.
+4. **Mobile E2EE Engine (`mobile/lib/core/security/e2ee_engine.dart`)**:
+   - Signal Double Ratchet key exchange and SAS safety number fingerprint verification.
+5. **Mobile State Management (`mobile/lib/features/session/bloc/session_bloc.dart`)**:
+   - BLoC state management handlers (`SessionInitial`, `SessionConnecting`, `SessionActive`, `SessionEnded`, `SessionError`).
+6. **Automated Integration Test Suite (129 passing tests)**:
+   - 4 new integration tests in `backend/tests/test_mobile_bridge.py` verifying token lifecycle, WebRTC ICE config fetch, mobile E2EE key exchange, and BLoC state transitions.
 
 ---
 
-## What's Next: Phase 12 — Mobile App Core Architecture & Security Foundation
+## What's Next: Phase 13 — Web Client Core Architecture & WebRTC Client Integration
 
-Per the roadmap, Phase 12 initiates the mobile client application development (Flutter / Native Android & iOS wrappers):
-- Mobile state management & clean architecture (BLoC / Riverpod state handlers)
-- Secure Storage integration (Keychain / EncryptedSharedPreferences for JWT token storage)
-- WebRTC PeerConnection engine & MediaProjection permission handlers
-- Accessibility Service & AssistiveTouch bridge initialization
+Per the roadmap, Phase 13 shifts focus to the Web Application Client architecture:
+- React / TypeScript or Next.js Web App Core framework initialization
+- WebRTC PeerConnection browser adapter & canvas rendering engine
+- WebSocket signaling client & WebRTC Insertable Streams frame transformation for web browsers
+- Web UI Session dashboard, remote screen viewer, active speaker layout, and in-app chat widget
 
 ### Recommended Workflow for Next Contributor:
-1. Create feature branch: `git checkout -b feature/phase-12-mobile-core-security`
-2. Implement mobile architecture foundation or mobile backend API bridge modules
+1. Create feature branch: `git checkout -b feature/phase-13-web-core-webrtc`
+2. Build Web application framework & WebRTC web client bridge
 3. Open PR via `gh pr create`
 4. Automated CI workflow runs pytest tests in GitHub Actions
 5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
@@ -176,5 +181,5 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- All 125 unit & integration tests pass cleanly.
+- All 129 unit & integration tests pass cleanly.
 - CI/CD workflow is active on GitHub.
