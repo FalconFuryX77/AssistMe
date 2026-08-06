@@ -59,6 +59,24 @@ class Session(Base):
     e2ee_mitm_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
+    recording_consent_granted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    recording_scope: Mapped[str | None] = mapped_column(
+        String(30), nullable=True  # "screen_and_audio", "screen_only", "audio_only"
+    )
+    is_recording: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    recording_url: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    recording_file_size_bytes: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
+    recording_duration_seconds: Mapped[int | None] = mapped_column(
+        Integer, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -77,4 +95,7 @@ class Session(Base):
     # Relationships
     participants = relationship(
         "SessionParticipant", back_populates="session", cascade="all, delete-orphan"
+    )
+    audit_logs = relationship(
+        "AuditLog", back_populates="session", cascade="all, delete-orphan"
     )
