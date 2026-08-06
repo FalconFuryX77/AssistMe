@@ -12,7 +12,9 @@ from api.schemas.sessions import (
     SessionResponse,
     ParticipantResponse,
 )
+from api.schemas.webrtc import ICEServersResponse
 from api.services.session_service import SessionService
+from api.services.webrtc_service import WebRTCService
 from core.database import get_db
 from models.session import Session
 from models.user import User
@@ -108,6 +110,22 @@ async def get_session(
         db=db,
     )
     return _enrich_session(session)
+
+
+@router.get("/{session_id}/ice-servers", response_model=ICEServersResponse)
+async def get_ice_servers(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ICEServersResponse:
+    """Get WebRTC RTCIceServer configuration (STUN/TURN) for this session."""
+    # Verify participant access
+    await SessionService.get_session(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+    return WebRTCService.get_ice_servers()
 
 
 @router.post("/{session_id}/leave", response_model=SessionResponse)

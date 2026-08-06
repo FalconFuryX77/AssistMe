@@ -178,6 +178,27 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                     await _broadcast(session_id, {"type": "session_ended"})
                 break  # Close the WebSocket after leaving
 
+            elif msg_type in ("signal_offer", "signal_answer", "signal_ice_candidate"):
+                # Forward WebRTC signaling payload to target user or broadcast
+                target_user_id = msg.get("target_user_id")
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "sdp": msg.get("sdp"),
+                    "candidate": msg.get("candidate"),
+                }
+                if target_user_id:
+                    room = _connections.get(session_id, {})
+                    target_ws = room.get(target_user_id)
+                    if target_ws:
+                        await target_ws.send_json(payload)
+                    else:
+                        await websocket.send_json(
+                            {"type": "error", "detail": "Target user not connected"}
+                        )
+                else:
+                    await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
