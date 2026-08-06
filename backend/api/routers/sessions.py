@@ -24,6 +24,12 @@ from api.schemas.adaptive_streaming import (
     StreamAdaptRequest,
     StreamConfigResponse,
 )
+from api.schemas.e2ee import (
+    E2EEKeyExchangeRequest,
+    E2EEKeyRotationRequest,
+    E2EESecurityStatusResponse,
+    E2EEVerificationRequest,
+)
 from api.schemas.remote_control import (
     RemoteControlGrantRequest,
     RemoteControlInputEvent,
@@ -38,6 +44,7 @@ from api.schemas.voice import (
 )
 from api.schemas.webrtc import ICEServersResponse
 from api.services.adaptive_streaming_service import AdaptiveStreamingService
+from api.services.e2ee_service import E2EEService
 from api.services.remote_control_service import RemoteControlService
 from api.services.screen_share_service import ScreenShareService
 from api.services.session_service import SessionService
@@ -62,6 +69,10 @@ def _enrich_session(session: Session) -> dict:
         "remote_control_granted": session.remote_control_granted,
         "remote_control_granted_at": session.remote_control_granted_at,
         "remote_control_platform": session.remote_control_platform,
+        "e2ee_enabled": session.e2ee_enabled,
+        "e2ee_key_exchange_complete": session.e2ee_key_exchange_complete,
+        "e2ee_fingerprint": session.e2ee_fingerprint,
+        "e2ee_mitm_verified": session.e2ee_mitm_verified,
         "created_at": session.created_at,
         "updated_at": session.updated_at,
         "ended_at": session.ended_at,
@@ -636,3 +647,96 @@ async def get_stream_config(
         "auto_adapted": False,
         "participant_user_id": participant.user_id,
     }
+
+
+# ---------------------------------------------------------------------------
+# End-to-End Encryption (E2EE) Routes (Phase 8)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/e2ee/keys/exchange", response_model=E2EESecurityStatusResponse)
+async def exchange_e2ee_keys(
+    session_id: str,
+    payload: E2EEKeyExchangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Exchange E2EE identity keys and prekeys for WebRTC Insertable Streams."""
+    session = await E2EEService.exchange_keys(
+        session_id=session_id,
+        user_id=current_user.id,
+        identity_key=payload.identity_key,
+        signed_prekey=payload.signed_prekey,
+        ephemeral_key=payload.ephemeral_key,
+        algorithm=payload.algorithm,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "e2ee_enabled": session.e2ee_enabled,
+        "key_exchange_complete": session.e2ee_key_exchange_complete,
+        "fingerprint": session.e2ee_fingerprint,
+        "is_mitm_verified": session.e2ee_mitm_verified,
+    }
+
+
+@router.post("/{session_id}/e2ee/keys/rotate", response_model=E2EESecurityStatusResponse)
+async def rotate_e2ee_keys(
+    session_id: str,
+    payload: E2EEKeyRotationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Rotate Double Ratchet ephemeral keys for forward secrecy."""
+    session = await E2EEService.rotate_keys(
+        session_id=session_id,
+        user_id=current_user.id,
+        new_ephemeral_key=payload.new_ephemeral_key,
+        ratchet_counter=payload.ratchet_counter,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "e2ee_enabled": session.e2ee_enabled,
+        "key_exchange_complete": session.e2ee_key_exchange_complete,
+        "fingerprint": session.e2ee_fingerprint,
+        "is_mitm_verified": session.e2ee_mitm_verified,
+    }
+
+
+@router.post("/{session_id}/e2ee/verify", response_model=E2EESecurityStatusResponse)
+async def verify_e2ee_fingerprint(
+    session_id: str,
+    payload: E2EEVerificationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Verify SAS safety number fingerprint to prevent Man-In-The-Middle (MITM) attacks."""
+    session = await E2EEService.verify_fingerprint(
+        session_id=session_id,
+        user_id=current_user.id,
+        safety_number_fingerprint=payload.safety_number_fingerprint,
+        is_verified_by_user=payload.is_verified_by_user,
+        db=db,
+    )
+    return {
+        "session_id": session.id,
+        "e2ee_enabled": session.e2ee_enabled,
+        "key_exchange_complete": session.e2ee_key_exchange_complete,
+        "fingerprint": session.e2ee_fingerprint,
+        "is_mitm_verified": session.e2ee_mitm_verified,
+    }
+
+
+@router.get("/{session_id}/e2ee/status", response_model=E2EESecurityStatusResponse)
+async def get_e2ee_status(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get active E2EE status and security fingerprint for session."""
+    return await E2EEService.get_status(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
