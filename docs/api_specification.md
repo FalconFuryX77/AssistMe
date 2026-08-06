@@ -300,6 +300,144 @@ Remove a trusted contact.
 
 ---
 
+## Sessions (Phase 2)
+
+### `POST /sessions/`
+
+Create a new assistance session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "title": "Help with device settings",
+  "timeout_minutes": 30
+}
+```
+
+**Response:** `201 Created`
+```json
+{
+  "id": "uuid",
+  "creator_id": "uuid",
+  "status": "waiting",
+  "title": "Help with device settings",
+  "session_code": "ABC123",
+  "timeout_minutes": 30,
+  "created_at": "2026-08-06T12:00:00Z",
+  "updated_at": "2026-08-06T12:00:00Z",
+  "ended_at": null,
+  "participants": [
+    {
+      "id": "uuid",
+      "user_id": "uuid",
+      "role": "helper",
+      "status": "connected",
+      "joined_at": "2026-08-06T12:00:00Z",
+      "last_seen_at": "2026-08-06T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### `POST /sessions/join`
+
+Join a session using a session code.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "session_code": "ABC123"
+}
+```
+
+**Response:** `200 OK` (returns updated Session object with new participant)
+
+---
+
+### `GET /sessions/`
+
+List sessions for the current user.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Query Parameters:**
+- `status` (optional): `waiting`, `active`, `ended`
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}`
+
+Get details of a specific session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/leave`
+
+Leave a session voluntarily.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/end`
+
+End a session (creator only).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/recover`
+
+Recover a disconnected session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "session_id": "uuid"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/heartbeat`
+
+Send a heartbeat signal for a session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `204 No Content`
+
+---
+
+### WebSocket Endpoint: `ws://localhost:8000/ws/session/{session_id}?token=<JWT>`
+
+Real-time session events stream.
+- Inbound: `{"type": "heartbeat"}`, `{"type": "leave"}`
+- Outbound: `user_joined`, `user_left`, `user_disconnected`, `user_reconnected`, `session_ended`, `heartbeat_ack`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:

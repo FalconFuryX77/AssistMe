@@ -1,0 +1,68 @@
+"""Session participant database model."""
+
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from core.database import Base
+
+
+class SessionParticipant(Base):
+    """A user participating in an assistance session.
+
+    Roles:
+        - helper:  the user providing assistance (session creator)
+        - helpee:  the user receiving assistance
+
+    Status:
+        - connected:    currently in the session
+        - disconnected: lost connection (eligible for recovery)
+        - left:         voluntarily left the session
+    """
+
+    __tablename__ = "session_participants"
+    __table_args__ = (
+        UniqueConstraint("session_id", "user_id", name="uq_session_user"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False  # "helper" or "helpee"
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), default="connected", nullable=False
+    )
+    joined_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    left_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    # Relationships
+    session = relationship("Session", back_populates="participants")

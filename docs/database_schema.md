@@ -70,12 +70,57 @@ Stores trusted contact relationships between users (directional).
 
 ---
 
-## Future Tables (Phase 2+)
+### `sessions`
+
+Stores assistance sessions between users.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK, default `gen_random_uuid()` | Session identifier |
+| `creator_id` | `UUID` | FK → `users.id`, NOT NULL | User who created the session (helper) |
+| `status` | `VARCHAR(20)` | NOT NULL, default `'waiting'` | `waiting`, `active`, `ended` |
+| `title` | `VARCHAR(200)` | NULL | Optional session title |
+| `session_code` | `VARCHAR(8)` | UNIQUE, NOT NULL | Short code for joining |
+| `timeout_minutes` | `INTEGER` | NOT NULL, default `30` | Auto-expire timeout |
+| `created_at` | `TIMESTAMP` | NOT NULL, default `now()` | Session creation time |
+| `updated_at` | `TIMESTAMP` | NOT NULL, default `now()` | Last update time |
+| `ended_at` | `TIMESTAMP` | NULL | When session was ended |
+
+**Indexes:**
+- `ix_sessions_creator_id` — index on `creator_id`
+- `ix_sessions_status` — index on `status`
+- `ix_sessions_session_code` — unique index on `session_code`
+
+---
+
+### `session_participants`
+
+Tracks users participating in sessions with their roles and connection state.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | `UUID` | PK, default `gen_random_uuid()` | Participant record ID |
+| `session_id` | `UUID` | FK → `sessions.id`, NOT NULL | The session |
+| `user_id` | `UUID` | FK → `users.id`, NOT NULL | The participant |
+| `role` | `VARCHAR(20)` | NOT NULL | `helper` or `helpee` |
+| `status` | `VARCHAR(20)` | NOT NULL, default `'connected'` | `connected`, `disconnected`, `left` |
+| `joined_at` | `TIMESTAMP` | NOT NULL, default `now()` | When user joined |
+| `left_at` | `TIMESTAMP` | NULL | When user left/disconnected |
+| `last_seen_at` | `TIMESTAMP` | NOT NULL, default `now()` | Last heartbeat |
+
+**Constraints:**
+- `UNIQUE(session_id, user_id)` — one record per user per session
+
+**Indexes:**
+- `ix_session_participants_session_id` — index on `session_id`
+- `ix_session_participants_user_id` — index on `user_id`
+
+---
+
+## Future Tables (Phase 10+)
 
 These tables will be added in later phases:
 
-- `sessions` — Phase 2 (Session Management)
-- `session_participants` — Phase 2
 - `audit_logs` — Phase 10 (Audit & Security)
 - `consent_logs` — Phase 10
 - `assistance_history` — Phase 11 (Intelligent Assistance)

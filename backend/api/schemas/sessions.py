@@ -1,0 +1,69 @@
+"""Pydantic schemas for session management endpoints."""
+
+from datetime import datetime
+
+from pydantic import BaseModel
+
+
+class SessionCreateRequest(BaseModel):
+    """Request body for creating a new assistance session."""
+
+    title: str | None = None
+    timeout_minutes: int = 30
+
+
+class SessionJoinRequest(BaseModel):
+    """Request body for joining a session by code."""
+
+    session_code: str
+
+
+class ParticipantResponse(BaseModel):
+    """A participant in a session."""
+
+    id: str
+    user_id: str
+    user_email: str | None = None
+    user_display_name: str | None = None
+    role: str
+    status: str
+    joined_at: datetime
+    last_seen_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class SessionResponse(BaseModel):
+    """Full session representation returned by the API."""
+
+    id: str
+    creator_id: str
+    status: str
+    title: str | None = None
+    session_code: str
+    timeout_minutes: int
+    created_at: datetime
+    updated_at: datetime
+    ended_at: datetime | None = None
+    participants: list[ParticipantResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+class SessionListItem(BaseModel):
+    """Compact session representation for list endpoints."""
+
+    id: str
+    status: str
+    title: str | None = None
+    session_code: str
+    created_at: datetime
+    participant_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class SessionRecoverRequest(BaseModel):
+    """Request body for recovering a disconnected session."""
+
+    session_id: str
