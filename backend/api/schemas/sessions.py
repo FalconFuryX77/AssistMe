@@ -50,6 +50,9 @@ class SessionResponse(BaseModel):
     title: str | None = None
     session_code: str
     timeout_minutes: int
+    remote_control_granted: bool = False
+    remote_control_granted_at: datetime | None = None
+    remote_control_platform: str | None = None
     created_at: datetime
     updated_at: datetime
     ended_at: datetime | None = None

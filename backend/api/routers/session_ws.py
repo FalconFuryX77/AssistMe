@@ -235,6 +235,20 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "remote_control_grant",
+                "remote_control_revoke",
+                "remote_control_input",
+            ):
+                # Broadcast or forward remote control gesture/key events
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "platform": msg.get("platform"),
+                    "event": msg.get("event"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
