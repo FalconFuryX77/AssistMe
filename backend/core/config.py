@@ -24,5 +24,14 @@ class Settings:
     # --- Password policy ---
     PASSWORD_MIN_LENGTH: int = 8
 
+    # --- WebRTC STUN / TURN ---
+    STUN_SERVERS: list[str] = [
+        os.getenv("STUN_SERVER_1", "stun:stun.l.google.com:19302"),
+        os.getenv("STUN_SERVER_2", "stun:stun1.l.google.com:19302"),
+    ]
+    TURN_SERVER_URL: str | None = os.getenv("TURN_SERVER_URL", None)
+    TURN_SERVER_USERNAME: str | None = os.getenv("TURN_SERVER_USERNAME", None)
+    TURN_SERVER_CREDENTIAL: str | None = os.getenv("TURN_SERVER_CREDENTIAL", None)
+
 
 settings = Settings()
