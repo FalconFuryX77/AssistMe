@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 4 COMPLETE ✅
+## Current Status: Phase 5 COMPLETE ✅
 
-**Last updated:** 2026-08-06T17:02Z
+**Last updated:** 2026-08-06T17:06Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 73/73
+**All tests passing:** 81/81
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
@@ -64,35 +64,46 @@ Completed:
 
 **Pull Request:** [#2 — Phase 4: Screen Sharing (Android MediaProjection & iOS ReplayKit)](https://github.com/FalconFuryX77/AssistMe/pull/2) (Merged into `main`)
 
+- Models: `is_screen_sharing`, `screen_share_platform`, `is_flag_secure_active`, `screen_orientation`
+- REST API: Start, stop, orientation update, `FLAG_SECURE` / protected app security events, status queries
+- WebSocket broadcasting for screen sharing state & security events
+- 73 passing tests
+
+### Phase 5 — Voice Communication ✅
+
+**Pull Request:** [#3 — Phase 5: Voice Communication & Audio Routing](https://github.com/FalconFuryX77/AssistMe/pull/3) (Merged into `main`)
+
 #### What was built:
 
 1. **Database Model Updates (`backend/models/session_participant.py`)**:
-   - `is_screen_sharing` (bool), `screen_share_platform` (`android` / `ios`), `is_flag_secure_active` (bool), `screen_orientation` (`portrait` / `landscape`).
-2. **Screen Sharing REST API (`backend/api/routers/sessions.py` & `screen_share_service.py`)**:
-   - `POST /sessions/{session_id}/screen-share/start` — Start screen sharing (Android MediaProjection / iOS ReplayKit).
-   - `POST /sessions/{session_id}/screen-share/stop` — Stop screen sharing stream.
-   - `POST /sessions/{session_id}/screen-share/orientation` — Update orientation.
-   - `POST /sessions/{session_id}/screen-share/security-event` — Report FLAG_SECURE / protected app protection events.
-   - `GET /sessions/{session_id}/screen-share/status` — Get active screen share status.
+   - `is_in_audio_call` (bool), `is_audio_muted` (bool), `audio_route` (`speaker`, `earpiece`, `bluetooth`, `headset`), `audio_quality` (`high`, `medium`, `low`).
+2. **Voice Communication REST API (`backend/api/routers/sessions.py` & `voice_service.py`)**:
+   - `POST /sessions/{session_id}/audio/start` — Start audio call participation.
+   - `POST /sessions/{session_id}/audio/stop` — Stop audio call.
+   - `POST /sessions/{session_id}/audio/mute` — Mute / unmute microphone.
+   - `POST /sessions/{session_id}/audio/route` — Change audio output route (speaker, earpiece, bluetooth, headset).
+   - `POST /sessions/{session_id}/audio/degradation` — Report network degradation & trigger quality level adaptation.
+   - `GET /sessions/{session_id}/audio/status` — Query active audio call status.
 3. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
-   - WebSocket handlers for `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, and `screen_share_security_event`.
-4. **Pydantic Schemas (`backend/api/schemas/screen_share.py`)**:
-   - `ScreenShareStartRequest`, `ScreenShareStopRequest`, `ScreenShareOrientationRequest`, `ScreenShareSecurityEventRequest`, `ScreenShareStatusResponse`.
-5. **Test Suite (73 passing tests)**:
-   - 9 new tests in `backend/tests/test_screen_share.py` covering Android MediaProjection, iOS ReplayKit, orientation updates, FLAG_SECURE activation/deactivation, and status queries.
+   - WebSocket broadcast handlers for `audio_call_start`, `audio_call_stop`, `audio_mute_toggle`, `audio_route_change`, and `audio_degradation_report`.
+4. **Pydantic Schemas (`backend/api/schemas/voice.py`)**:
+   - `AudioCallStartRequest`, `AudioMuteToggleRequest`, `AudioRouteChangeRequest`, `AudioDegradationReportRequest`, `AudioStatusResponse`.
+5. **Test Suite (81 passing tests)**:
+   - 8 new tests in `backend/tests/test_voice.py` covering call start/stop, muting, Bluetooth/earpiece/headset routing, network degradation reporting, and audio status.
 
 ---
 
-## What's Next: Phase 5 — Voice Communication
+## What's Next: Phase 6 — Remote Control Protocol
 
-Per the roadmap, the next phase covers Voice Communication:
-- Audio call setup & state management (`POST /sessions/{session_id}/audio/call/start`, `stop`, `mute`)
-- Reconnection & audio routing state handling (Bluetooth, speaker, earpiece)
-- Network degradation audio bitrate adaptation signaling over WebSocket
+Per the roadmap, the next phase covers Remote Control Protocol:
+- Android Accessibility Service event schemas & dispatch
+- iOS AssistiveTouch / Custom Touch input event contracts
+- Touch events: Tap (`click`), Drag (`swipe`), Long Press, Gesture injection, Key event dispatch (`home`, `back`, `recents`)
+- Security & Permission checks: Explicit helpee approval requirement for remote input execution
 
 ### Recommended Workflow for Next Contributor:
-1. Create feature branch: `git checkout -b feature/phase-5-voice-communication`
-2. Build audio state models, schemas, REST routes, WebSocket signals, and unit tests
+1. Create feature branch: `git checkout -b feature/phase-6-remote-control`
+2. Build input event models, schemas, service, REST routes, WebSocket handlers, and unit tests
 3. Open PR via `gh pr create`
 4. Automated CI workflow runs pytest tests in GitHub Actions
 5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
@@ -110,5 +121,5 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- All 73 unit & integration tests pass cleanly.
+- All 81 unit & integration tests pass cleanly.
 - CI/CD workflow is active on GitHub.
