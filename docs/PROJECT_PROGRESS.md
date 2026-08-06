@@ -6,11 +6,13 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 2 COMPLETE ✅
+## Current Status: Phase 3 COMPLETE ✅
 
-**Last updated:** 2026-08-06T16:52Z
+**Last updated:** 2026-08-06T16:58Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 57/57
+**All tests passing:** 64/64
+**CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
+**Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
 ---
 
@@ -41,50 +43,51 @@ Completed:
 
 ### Phase 2 — Session Management ✅
 
-**Commit:** Pending — "Phase 2: Session Management — full lifecycle REST + WebSocket signaling events — 57 tests passing"
+**Commit:** `e6171e5`, `691773a` — "Phase 2: Session Management — full lifecycle REST + WebSocket signaling events — 57 tests passing"
+
+- Models: Session, SessionParticipant
+- REST API: Session CRUD, join by code, leave, end, recovery, heartbeat
+- WebSocket API: `/ws/session/{session_id}` real-time event stream
+- 57 passing tests
+
+### Phase 3 — WebRTC Signaling & CI/CD Pipeline ✅
+
+**Pull Request:** [#1 — Phase 3: WebRTC Signaling & CI/CD Pipeline](https://github.com/FalconFuryX77/AssistMe/pull/1) (Merged into `main`)
 
 #### What was built:
 
-**Database Models (`backend/models/`):**
-- `session.py` — Session: UUID PK, creator_id, status (`waiting`/`active`/`ended`), title, session_code (unique 6-char), timeout_minutes (default 30), timestamps, ended_at
-- `session_participant.py` — SessionParticipant: FK→sessions, FK→users, role (`helper`/`helpee`), status (`connected`/`disconnected`/`left`), joined_at, left_at, last_seen_at
-
-**Session API (`backend/api/routers/sessions.py` & `session_service.py`):**
-- `POST /sessions/` — Create session (generates unique session_code, creator becomes helper)
-- `POST /sessions/join` — Join session by code (participant becomes helpee, transitions session state to active, handles reconnection & rejoin)
-- `GET /sessions/` — List user's sessions (optional `?status=` filter)
-- `GET /sessions/{session_id}` — Get session details (participant-scoped)
-- `POST /sessions/{session_id}/leave` — Leave session (helper leaving ends session for everyone)
-- `POST /sessions/{session_id}/end` — Explicitly end session (creator only)
-- `POST /sessions/recover` — Reconnect to session after disconnect
-- `POST /sessions/{session_id}/heartbeat` — Keep-alive heartbeat (204 No Content)
-
-**Real-time WebSocket (`backend/api/routers/session_ws.py`):**
-- `/ws/session/{session_id}?token=<JWT>` — Real-time session event stream (broadcasts join, leave, disconnect, reconnect, session_ended)
-
-**Test Suite (24 new tests, 57 total passing):**
-- `test_sessions.py` — 22 tests covering session creation, joining, leaving, ending, recovery, timeouts, rejoin, heartbeat, and authorization limits
-- `test_session_ws.py` — 2 tests verifying WebSocket endpoint registration and session structure compatibility
+1. **GitHub Actions CI/CD Pipeline (`.github/workflows/ci.yml`)**:
+   - Automated workflow executing pytest test suites on every pull request and push to `main`.
+2. **WebRTC STUN/TURN Server Configuration**:
+   - Updated `backend/core/config.py` with STUN server defaults (`stun:stun.l.google.com:19302`) and optional TURN credentials.
+   - Endpoint `GET /sessions/{session_id}/ice-servers` returning RTCIceServer configurations (`api/routers/sessions.py` & `api/services/webrtc_service.py`).
+3. **Real-time WebSockets SDP Offer/Answer & ICE Candidate Exchange**:
+   - Enhanced `backend/api/routers/session_ws.py` to support `signal_offer`, `signal_answer`, and `signal_ice_candidate` message types.
+   - Direct target forwarding to specific participants (`target_user_id`) or broadcast to session room.
+4. **Pydantic WebRTC Schemas (`backend/api/schemas/webrtc.py`)**:
+   - `SDPOfferMessage`, `SDPAnswerMessage`, `ICECandidateMessage`, `ICEServerEntry`, `ICEServersResponse`.
+5. **Test Suite (64 passing tests)**:
+   - 7 new tests in `backend/tests/test_webrtc.py` covering STUN/TURN generation, permissions, and SDP/ICE schema validation.
 
 ---
 
-## What's Next: Phase 3 — WebRTC Signaling
+## What's Next: Phase 4 — Screen Sharing
 
-Per the roadmap, the next phase implements WebRTC Signaling:
-- STUN / TURN server configuration integration
-- ICE candidate exchange over WebSocket
-- SDP Offer / Answer exchange
-- Reconnection & multi-participant signaling preparation
+Per the roadmap, the next phase covers Screen Sharing infrastructure prep:
+- Android: `MediaProjection` API readiness / signaling framing
+- iOS: `ReplayKit` broadcast extension prep / frame streaming contracts
+- Edge-case handling contracts: Screen rotation, backgrounding, FLAG_SECURE detection, session interruption signals
 
-### Recommended approach:
-1. Extend `backend/api/routers/session_ws.py` to handle `signal_offer`, `signal_answer`, `signal_ice_candidate` message types.
-2. Route WebRTC signaling payloads between peer participants in active sessions.
-3. Add STUN/TURN configuration endpoint (e.g. `GET /sessions/{session_id}/ice-servers`).
-4. Add tests for SDP and ICE exchange via WebSocket/services.
+### Recommended Workflow for Next Contributor:
+1. Create a feature branch: `git checkout -b feature/phase-4-screen-sharing`
+2. Implement screen sharing session control schemas & signaling message types (`start_screen_share`, `stop_screen_share`, `screen_share_status`)
+3. Open PR via GitHub CLI: `gh pr create`
+4. GitHub Actions CI will automatically run tests and validate code
+5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
 
 ---
 
-## How to run tests
+## How to run tests locally
 
 ```bash
 # Run full test suite (from backend/)
@@ -95,5 +98,6 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- Maintain the golden rule: **no phase begins until the current phase passes all tests.**
-- All 57 unit & integration tests pass cleanly.
+- CI/CD is active. All PRs must pass automated tests in GitHub Actions.
+- Workflow: Feature branch → Pull Request (`gh pr create`) → CI Pass → Merge (`gh pr merge`).
+- All 64 unit & integration tests pass cleanly.
