@@ -1,8 +1,14 @@
+import hashlib
+import secrets
+
+
 class AuthService:
     @staticmethod
-    def register() -> dict[str, str]:
-        return {"message": "registration endpoint placeholder"}
+    def register(email: str, password: str) -> dict[str, str]:
+        token = hashlib.sha256(f"{email}:{password}:{secrets.token_hex(8)}".encode()).hexdigest()
+        return {"access_token": token, "token_type": "bearer"}
 
     @staticmethod
-    def login() -> dict[str, str]:
-        return {"message": "login endpoint placeholder"}
+    def login(email: str, password: str) -> dict[str, str]:
+        token = hashlib.sha256(f"{email}:{password}:{secrets.token_hex(8)}".encode()).hexdigest()
+        return {"access_token": token, "token_type": "bearer"}
