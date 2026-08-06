@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 6 COMPLETE ✅
+## Current Status: Phase 7 COMPLETE ✅
 
-**Last updated:** 2026-08-06T17:10Z
+**Last updated:** 2026-08-06T17:14Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 90/90
+**All tests passing:** 97/97
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
@@ -82,38 +82,48 @@ Completed:
 
 **Pull Request:** [#4 — Phase 6: Remote Control Protocol (Accessibility Service & AssistiveTouch)](https://github.com/FalconFuryX77/AssistMe/pull/4) (Merged into `main`)
 
+- Models: `remote_control_granted`, `remote_control_granted_at`, `remote_control_platform`
+- REST API: Grant, revoke, input dispatch (Tap, Drag, Long Press, Gestures, Key Events), status queries
+- WebSockets: Real-time event broadcasting
+- 90 passing tests
+
+### Phase 7 — Adaptive Streaming & Optimization ✅
+
+**Pull Request:** [#5 — Phase 7: Adaptive Streaming & Optimization](https://github.com/FalconFuryX77/AssistMe/pull/5) (Merged into `main`)
+
 #### What was built:
 
-1. **Database Model Updates (`backend/models/session.py`)**:
-   - `remote_control_granted` (bool), `remote_control_granted_at` (datetime), `remote_control_platform` (`android_accessibility` / `ios_assistivetouch`).
-2. **Remote Control Protocol REST API (`backend/api/routers/sessions.py` & `remote_control_service.py`)**:
-   - `POST /sessions/{session_id}/remote-control/grant` — Helpee grants remote control permission.
-   - `POST /sessions/{session_id}/remote-control/revoke` — Helpee instantly revokes remote control permission.
-   - `POST /sessions/{session_id}/remote-control/input` — Helper dispatches touch/gesture/key input events (Tap, Drag, Long Press, Gestures, Key Events).
-   - `GET /sessions/{session_id}/remote-control/status` — Get active remote control permission state.
-3. **Security & Permission Enforcements**:
-   - Input dispatches strictly require `remote_control_granted == True`.
-   - Revocation instantly invalidates subsequent input dispatch attempts (403 Forbidden).
+1. **Database Model Updates (`backend/models/session_participant.py`)**:
+   - `video_resolution` (`1080p`, `720p`, `480p`, `360p`), `video_bitrate_kbps` (int), `video_fps` (int), `rtt_ms` (float), `packet_loss_percent` (float).
+2. **Adaptive Streaming REST API (`backend/api/routers/sessions.py` & `adaptive_streaming_service.py`)**:
+   - `POST /sessions/{session_id}/streaming/adapt` — Manually adjust resolution, bitrate, or FPS.
+   - `POST /sessions/{session_id}/streaming/metrics` — Report client RTT, jitter, and packet loss; auto-adapt video stream parameters.
+   - `GET /sessions/{session_id}/streaming/config` — Retrieve active WebRTC video streaming quality configuration.
+3. **Automated Dynamic Quality Scaling**:
+   - High Network (RTT < 100ms, loss < 2%) → `1080p` @ 30 FPS / 3000 kbps
+   - Medium Network (RTT 100-250ms, loss 2-5%) → `720p` @ 30 FPS / 1500 kbps
+   - Low Network (RTT 250-500ms, loss 5-15%) → `480p` @ 15 FPS / 600 kbps
+   - Degraded Network (RTT > 500ms or loss > 15%) → `360p` @ 10 FPS / 250 kbps
 4. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
-   - WebSocket broadcast handlers for `remote_control_grant`, `remote_control_revoke`, and `remote_control_input`.
-5. **Pydantic Schemas (`backend/api/schemas/remote_control.py`)**:
-   - `RemoteControlGrantRequest`, `RemoteControlInputEvent`, `RemoteControlStatusResponse`.
-6. **Test Suite (90 passing tests)**:
-   - 9 new tests in `backend/tests/test_remote_control.py` covering Android Accessibility Service, iOS AssistiveTouch, tap/drag/long press/key events, permission checks, and instant revocation.
+   - WebSocket broadcast handlers for `streaming_adapted` and `network_metrics_reported`.
+5. **Pydantic Schemas (`backend/api/schemas/adaptive_streaming.py`)**:
+   - `StreamAdaptRequest`, `NetworkMetricsReportRequest`, `StreamConfigResponse`.
+6. **Test Suite (97 passing tests)**:
+   - 7 new tests in `backend/tests/test_adaptive_streaming.py` covering manual scaling, auto-adaptation under high RTT/packet loss, frame rate throttling, network metrics reporting, and configuration queries.
 
 ---
 
-## What's Next: Phase 7 — Adaptive Streaming & Optimization
+## What's Next: Phase 8 — End-to-End Encryption (E2EE)
 
-Per the roadmap, the next phase covers Adaptive Streaming & Optimization:
-- Dynamic bitrate & resolution adaptation protocol
-- Frame rate throttling & bandwidth constraint monitoring
-- Network metrics reporting endpoints (`POST /sessions/{session_id}/network-metrics`)
-- Dynamic video stream scaling (1080p -> 720p -> 480p -> 360p) based on RTT / jitter / packet loss
+Per the roadmap, the next phase covers End-to-End Encryption (E2EE):
+- Signal Protocol / Double Ratchet key exchange contracts
+- WebRTC Insertable Streams / Frame Crypto API integration schemas
+- Key generation, exchange, rotation, and verification fingerprints
+- Secure ephemeral key management endpoints
 
 ### Recommended Workflow for Next Contributor:
-1. Create feature branch: `git checkout -b feature/phase-7-adaptive-streaming`
-2. Build adaptive streaming schemas, service, REST routes, WebSocket handlers, and unit tests
+1. Create feature branch: `git checkout -b feature/phase-8-e2ee-security`
+2. Build E2EE key exchange schemas, service, REST routes, WebSocket handlers, and unit tests
 3. Open PR via `gh pr create`
 4. Automated CI workflow runs pytest tests in GitHub Actions
 5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
@@ -131,5 +141,5 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- All 90 unit & integration tests pass cleanly.
+- All 97 unit & integration tests pass cleanly.
 - CI/CD workflow is active on GitHub.
