@@ -721,6 +721,68 @@ Get remote control permission status.
 
 ---
 
+## Adaptive Streaming & Optimization (Phase 7)
+
+### `POST /sessions/{session_id}/streaming/adapt`
+
+Manually set video stream resolution, bitrate, or frame rate parameters.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "video_resolution": "1080p",
+  "video_bitrate_kbps": 3000,
+  "video_fps": 60
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "video_resolution": "1080p",
+  "video_bitrate_kbps": 3000,
+  "video_fps": 60,
+  "rtt_ms": 35.0,
+  "packet_loss_percent": 0.5,
+  "auto_adapted": false,
+  "participant_user_id": "uuid"
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/streaming/metrics`
+
+Report client network constraint metrics (RTT, jitter, packet loss) and trigger automated video quality adaptation.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "rtt_ms": 150.0,
+  "jitter_ms": 12.0,
+  "packet_loss_percent": 3.0,
+  "available_bandwidth_kbps": 2000
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/streaming/config`
+
+Get current WebRTC video streaming quality configuration for participant.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:

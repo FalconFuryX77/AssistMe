@@ -37,6 +37,11 @@ class ParticipantResponse(BaseModel):
     is_audio_muted: bool = False
     audio_route: str = "speaker"
     audio_quality: str = "high"
+    video_resolution: str = "720p"
+    video_bitrate_kbps: int = 1500
+    video_fps: int = 30
+    rtt_ms: float = 50.0
+    packet_loss_percent: float = 0.0
 
     model_config = {"from_attributes": True}
 
