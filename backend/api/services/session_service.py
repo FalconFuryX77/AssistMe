@@ -155,14 +155,15 @@ class SessionService:
         if session.status == "waiting":
             session.status = "active"
 
+        session_id = session.id
         await db.commit()
 
-        # Expire cached state and reload with updated participants
-        db.expire_all()
+        # Reload with updated participants
         result = await db.execute(
             select(Session)
-            .where(Session.id == session.id)
+            .where(Session.id == session_id)
             .options(selectinload(Session.participants))
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one()
 
@@ -223,12 +224,14 @@ class SessionService:
                     p.status = "left"
                     p.left_at = now
 
+        session_id_val = session.id
         await db.commit()
 
         result = await db.execute(
             select(Session)
-            .where(Session.id == session.id)
+            .where(Session.id == session_id_val)
             .options(selectinload(Session.participants))
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one()
 
@@ -277,12 +280,14 @@ class SessionService:
                 p.status = "left"
                 p.left_at = now
 
+        session_id_val = session.id
         await db.commit()
 
         result = await db.execute(
             select(Session)
-            .where(Session.id == session.id)
+            .where(Session.id == session_id_val)
             .options(selectinload(Session.participants))
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one()
 
@@ -362,12 +367,14 @@ class SessionService:
         participant.status = "connected"
         participant.last_seen_at = datetime.now(timezone.utc)
         participant.left_at = None
+        session_id_val = session.id
         await db.commit()
 
         result = await db.execute(
             select(Session)
-            .where(Session.id == session.id)
+            .where(Session.id == session_id_val)
             .options(selectinload(Session.participants))
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one()
 
