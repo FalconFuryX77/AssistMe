@@ -1118,6 +1118,67 @@ List all file transfers for a session.
 
 ---
 
+## Performance Optimization, Hardening & Security Auditing (Phase 14)
+
+### `POST /sessions/{session_id}/ice-restart`
+
+Trigger WebRTC connection recovery ICE restart and receive fresh credentials.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "reason": "connection_degraded_wifi_switch"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "ice_restart_triggered": true,
+  "ufrag": "ufrag_a1b2c3d4",
+  "pwd": "pwd_e5f6g7h8i9j0k1l2",
+  "timestamp": "2026-08-06T12:00:00Z"
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/security/zeroize`
+
+Securely scrub in-memory E2EE Double Ratchet keys, SAS fingerprints, and auth session state.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "zeroize_reason": "session_teardown_security_scrub"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "zeroized": true,
+  "keys_scrubbed_count": 4,
+  "timestamp": "2026-08-06T12:00:00Z"
+}
+```
+
+---
+
+## Rate Limiting & Security Hardening
+
+All authentication and signaling endpoints enforce sliding window rate limiting:
+- **Global Limit:** 100 requests per 60 seconds per IP address / user token.
+- Exceeding threshold returns `429 Too Many Requests` with a `Retry-After: 60` header.
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
