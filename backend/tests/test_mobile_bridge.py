@@ -1,0 +1,121 @@
+"""Comprehensive test suite for Phase 12 Mobile App Core Architecture & Security Foundation.
+
+Covers: mobile authentication token interceptors, secure storage token refresh contracts,
+mobile WebRTC STUN/TURN configuration fetch, mobile E2EE key exchange, and BLoC state transition API backend.
+"""
+
+import pytest
+from httpx import AsyncClient
+
+from tests.test_sessions import _create_session, _register
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_mobile_auth_token_interceptor_flow(client: AsyncClient) -> None:
+    """Mobile ApiClient token lifecycle: register, retrieve tokens, use Bearer header, refresh tokens."""
+    auth = await _register(client)
+    assert "access_token" in auth
+    assert "refresh_token" in auth
+
+    # Bearer header check
+    resp = await client.get("/users/me", headers=auth["headers"])
+    assert resp.status_code == 200
+    assert resp.json()["email"] == auth["user"]["email"]
+
+    # Token refresh check
+    refresh_resp = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": auth["refresh_token"]},
+    )
+    assert refresh_resp.status_code == 200
+    assert "access_token" in refresh_resp.json()
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_mobile_webrtc_engine_config(client: AsyncClient) -> None:
+    """Mobile WebRTCEngine initialization fetches STUN/TURN ICE server configuration."""
+    helper = await _register(client)
+    session = await _create_session(client, helper["headers"])
+
+    resp = await client.get(
+        f"/sessions/{session['id']}/ice-servers",
+        headers=helper["headers"],
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "ice_servers" in data
+    assert len(data["ice_servers"]) >= 1
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_mobile_e2ee_engine_key_exchange(client: AsyncClient) -> None:
+    """Mobile E2EEEngine key exchange and SAS safety number verification contract."""
+    helper = await _register(client)
+    helpee = await _register(client)
+
+    session = await _create_session(client, helper["headers"])
+    await client.post(
+        "/sessions/join",
+        json={"session_code": session["session_code"]},
+        headers=helpee["headers"],
+    )
+
+    # Key exchange
+    exchange_resp = await client.post(
+        f"/sessions/{session['id']}/e2ee/key-exchange",
+        json={
+            "identity_key": "mobile_identity_key_abc123",
+            "signed_prekey": "mobile_signed_prekey_def456",
+            "ephemeral_key": "mobile_ephemeral_key_789",
+        },
+        headers=helpee["headers"],
+    )
+    assert exchange_resp.status_code == 200
+    fingerprint = exchange_resp.json()["fingerprint"]
+
+    # Verify SAS fingerprint
+    verify_resp = await client.post(
+        f"/sessions/{session['id']}/e2ee/verify",
+        json={
+            "safety_number_fingerprint": fingerprint,
+            "is_verified_by_user": True,
+        },
+        headers=helper["headers"],
+    )
+    assert verify_resp.status_code == 200
+    assert verify_resp.json()["is_mitm_verified"] is True
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_mobile_session_bloc_state_transitions(client: AsyncClient) -> None:
+    """Mobile SessionBloc state transitions: Create -> Join -> Leave -> End."""
+    helper = await _register(client)
+    helpee = await _register(client)
+
+    # Initial -> Connecting -> Active (Create)
+    session = await _create_session(client, helper["headers"])
+    assert session["status"] == "waiting"
+
+    # Connecting -> Active (Join)
+    join_resp = await client.post(
+        "/sessions/join",
+        json={"session_code": session["session_code"]},
+        headers=helpee["headers"],
+    )
+    assert join_resp.status_code == 200
+    assert join_resp.json()["status"] == "active"
+
+    # Leave -> Active / Ended
+    leave_resp = await client.post(
+        f"/sessions/{session['id']}/leave",
+        headers=helpee["headers"],
+    )
+    assert leave_resp.status_code == 200
+
+    # End -> Ended
+    end_resp = await client.post(
+        f"/sessions/{session['id']}/end",
+        headers=helper["headers"],
+    )
+    assert end_resp.status_code == 200
+    assert end_resp.json()["status"] == "ended"
