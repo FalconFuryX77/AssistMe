@@ -47,6 +47,18 @@ class Session(Base):
     remote_control_platform: Mapped[str | None] = mapped_column(
         String(30), nullable=True  # "android_accessibility" or "ios_assistivetouch"
     )
+    e2ee_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    e2ee_key_exchange_complete: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    e2ee_fingerprint: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    e2ee_mitm_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

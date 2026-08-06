@@ -265,6 +265,23 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "e2ee_key_exchange",
+                "e2ee_key_rotate",
+                "e2ee_verification_status",
+            ):
+                # Forward Signal Double Ratchet / Insertable Streams key exchange & safety number fingerprint verification
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "identity_key": msg.get("identity_key"),
+                    "signed_prekey": msg.get("signed_prekey"),
+                    "ephemeral_key": msg.get("ephemeral_key"),
+                    "fingerprint": msg.get("fingerprint"),
+                    "is_mitm_verified": msg.get("is_mitm_verified"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
