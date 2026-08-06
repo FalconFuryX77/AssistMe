@@ -199,6 +199,24 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 else:
                     await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "screen_share_start",
+                "screen_share_stop",
+                "screen_share_orientation",
+                "screen_share_security_event",
+            ):
+                # Broadcast screen sharing state / security event to room participants
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "platform": msg.get("platform"),
+                    "orientation": msg.get("orientation"),
+                    "event_type": msg.get("event_type"),
+                    "detail": msg.get("detail"),
+                    "reason": msg.get("reason"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}

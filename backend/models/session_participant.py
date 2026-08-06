@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -62,6 +62,18 @@ class SessionParticipant(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
+    )
+    is_screen_sharing: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    screen_share_platform: Mapped[str | None] = mapped_column(
+        String(20), nullable=True  # "android" or "ios"
+    )
+    is_flag_secure_active: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    screen_orientation: Mapped[str] = mapped_column(
+        String(20), default="portrait", nullable=False  # "portrait" or "landscape"
     )
 
     # Relationships
