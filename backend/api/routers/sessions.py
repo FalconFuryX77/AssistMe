@@ -46,6 +46,12 @@ from api.schemas.e2ee import (
     E2EESecurityStatusResponse,
     E2EEVerificationRequest,
 )
+from api.schemas.hardening import (
+    ICERestartRequest,
+    ICERestartResponse,
+    KeyZeroizeRequest,
+    KeyZeroizeResponse,
+)
 from api.schemas.multiparty import (
     ActiveSpeakerSignalRequest,
     ActiveSpeakerStatusResponse,
@@ -70,6 +76,7 @@ from api.services.adaptive_streaming_service import AdaptiveStreamingService
 from api.services.audit_recording_service import AuditRecordingService
 from api.services.chat_file_service import ChatFileService
 from api.services.e2ee_service import E2EEService
+from api.services.hardening_service import HardeningService
 from api.services.multiparty_service import MultiPartyService
 from api.services.remote_control_service import RemoteControlService
 from api.services.screen_share_service import ScreenShareService
@@ -1149,5 +1156,42 @@ async def list_file_transfers(
     return await ChatFileService.list_file_transfers(
         session_id=session_id,
         user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Performance Optimization, Hardening & Security Auditing Routes (Phase 14)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/ice-restart", response_model=ICERestartResponse)
+async def trigger_ice_restart(
+    session_id: str,
+    payload: ICERestartRequest = ICERestartRequest(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Trigger WebRTC connection recovery ICE restart and generate fresh ufrag/pwd credentials."""
+    return await HardeningService.trigger_ice_restart(
+        session_id=session_id,
+        user_id=current_user.id,
+        reason=payload.reason,
+        db=db,
+    )
+
+
+@router.post("/{session_id}/security/zeroize", response_model=KeyZeroizeResponse)
+async def zeroize_session_keys(
+    session_id: str,
+    payload: KeyZeroizeRequest = KeyZeroizeRequest(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Securely scrub in-memory E2EE Double Ratchet keys, SAS fingerprints, and auth session state."""
+    return await HardeningService.zeroize_session_keys(
+        session_id=session_id,
+        user_id=current_user.id,
+        zeroize_reason=payload.zeroize_reason,
         db=db,
     )

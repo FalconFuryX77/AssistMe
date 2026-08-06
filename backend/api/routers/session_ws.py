@@ -334,6 +334,21 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "ice_restart_requested",
+                "security_zeroized",
+            ):
+                # Broadcast WebRTC ICE restart requests and zeroization security events
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "reason": msg.get("reason"),
+                    "ufrag": msg.get("ufrag"),
+                    "pwd": msg.get("pwd"),
+                    "zeroized": msg.get("zeroized"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
