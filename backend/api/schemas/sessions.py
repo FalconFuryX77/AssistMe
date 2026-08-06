@@ -58,6 +58,10 @@ class SessionResponse(BaseModel):
     remote_control_granted: bool = False
     remote_control_granted_at: datetime | None = None
     remote_control_platform: str | None = None
+    e2ee_enabled: bool = True
+    e2ee_key_exchange_complete: bool = False
+    e2ee_fingerprint: str | None = None
+    e2ee_mitm_verified: bool = False
     created_at: datetime
     updated_at: datetime
     ended_at: datetime | None = None

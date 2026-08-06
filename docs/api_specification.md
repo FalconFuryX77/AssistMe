@@ -783,6 +783,83 @@ Get current WebRTC video streaming quality configuration for participant.
 
 ---
 
+## End-to-End Encryption (Phase 8)
+
+### `POST /sessions/{session_id}/e2ee/keys/exchange`
+
+Exchange E2EE identity keys, signed prekeys, and ephemeral ratchet keys for WebRTC Insertable Streams.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "identity_key": "pub_identity_key_abc123",
+  "signed_prekey": "pub_signed_prekey_def456",
+  "ephemeral_key": "pub_ephemeral_key_ghi789",
+  "algorithm": "Signal_DoubleRatchet_AES256_GCM"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "e2ee_enabled": true,
+  "key_exchange_complete": true,
+  "fingerprint": "a1b2c3d4e5f6...",
+  "is_mitm_verified": false
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/e2ee/keys/rotate`
+
+Rotate Double Ratchet ephemeral keys for forward secrecy.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "new_ephemeral_key": "new_ephemeral_key_999",
+  "ratchet_counter": 1
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/e2ee/verify`
+
+Verify SAS (Short Authentication String) / Safety Number fingerprint to detect and block MITM attacks.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "safety_number_fingerprint": "a1b2c3d4e5f6...",
+  "is_verified_by_user": true
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/e2ee/status`
+
+Get active E2EE status, safety number fingerprint, and MITM verification state.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
