@@ -19,6 +19,11 @@ from api.schemas.screen_share import (
     ScreenShareStatusResponse,
     ScreenShareStopRequest,
 )
+from api.schemas.adaptive_streaming import (
+    NetworkMetricsReportRequest,
+    StreamAdaptRequest,
+    StreamConfigResponse,
+)
 from api.schemas.remote_control import (
     RemoteControlGrantRequest,
     RemoteControlInputEvent,
@@ -32,6 +37,7 @@ from api.schemas.voice import (
     AudioStatusResponse,
 )
 from api.schemas.webrtc import ICEServersResponse
+from api.services.adaptive_streaming_service import AdaptiveStreamingService
 from api.services.remote_control_service import RemoteControlService
 from api.services.screen_share_service import ScreenShareService
 from api.services.session_service import SessionService
@@ -75,6 +81,11 @@ def _enrich_session(session: Session) -> dict:
                 "is_audio_muted": p.is_audio_muted,
                 "audio_route": p.audio_route,
                 "audio_quality": p.audio_quality,
+                "video_resolution": p.video_resolution,
+                "video_bitrate_kbps": p.video_bitrate_kbps,
+                "video_fps": p.video_fps,
+                "rtt_ms": p.rtt_ms,
+                "packet_loss_percent": p.packet_loss_percent,
             }
             for p in session.participants
         ],
@@ -542,3 +553,86 @@ async def get_remote_control_status(
         user_id=current_user.id,
         db=db,
     )
+
+
+# ---------------------------------------------------------------------------
+# Adaptive Streaming & Optimization Routes (Phase 7)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/streaming/adapt", response_model=StreamConfigResponse)
+async def adapt_stream(
+    session_id: str,
+    payload: StreamAdaptRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Manually adjust video stream resolution, bitrate, or frame rate."""
+    participant = await AdaptiveStreamingService.adapt_stream(
+        session_id=session_id,
+        user_id=current_user.id,
+        video_resolution=payload.video_resolution,
+        video_bitrate_kbps=payload.video_bitrate_kbps,
+        video_fps=payload.video_fps,
+        db=db,
+    )
+    return {
+        "video_resolution": participant.video_resolution,
+        "video_bitrate_kbps": participant.video_bitrate_kbps,
+        "video_fps": participant.video_fps,
+        "rtt_ms": participant.rtt_ms,
+        "packet_loss_percent": participant.packet_loss_percent,
+        "auto_adapted": False,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/streaming/metrics", response_model=StreamConfigResponse)
+async def report_network_metrics(
+    session_id: str,
+    payload: NetworkMetricsReportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Report real-time client network metrics (RTT, jitter, packet loss) and auto-adapt video stream."""
+    participant, auto_adapted = await AdaptiveStreamingService.process_network_metrics(
+        session_id=session_id,
+        user_id=current_user.id,
+        rtt_ms=payload.rtt_ms,
+        jitter_ms=payload.jitter_ms,
+        packet_loss_percent=payload.packet_loss_percent,
+        available_bandwidth_kbps=payload.available_bandwidth_kbps,
+        db=db,
+    )
+    return {
+        "video_resolution": participant.video_resolution,
+        "video_bitrate_kbps": participant.video_bitrate_kbps,
+        "video_fps": participant.video_fps,
+        "rtt_ms": participant.rtt_ms,
+        "packet_loss_percent": participant.packet_loss_percent,
+        "auto_adapted": auto_adapted,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.get("/{session_id}/streaming/config", response_model=StreamConfigResponse)
+async def get_stream_config(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get active video streaming configuration for user."""
+    participant = await AdaptiveStreamingService.get_stream_config(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+    return {
+        "video_resolution": participant.video_resolution,
+        "video_bitrate_kbps": participant.video_bitrate_kbps,
+        "video_fps": participant.video_fps,
+        "rtt_ms": participant.rtt_ms,
+        "packet_loss_percent": participant.packet_loss_percent,
+        "auto_adapted": False,
+        "participant_user_id": participant.user_id,
+    }
