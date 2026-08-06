@@ -12,7 +12,15 @@ from api.schemas.sessions import (
     SessionResponse,
     ParticipantResponse,
 )
+from api.schemas.screen_share import (
+    ScreenShareOrientationRequest,
+    ScreenShareSecurityEventRequest,
+    ScreenShareStartRequest,
+    ScreenShareStatusResponse,
+    ScreenShareStopRequest,
+)
 from api.schemas.webrtc import ICEServersResponse
+from api.services.screen_share_service import ScreenShareService
 from api.services.session_service import SessionService
 from api.services.webrtc_service import WebRTCService
 from core.database import get_db
@@ -42,6 +50,10 @@ def _enrich_session(session: Session) -> dict:
                 "status": p.status,
                 "joined_at": p.joined_at,
                 "last_seen_at": p.last_seen_at,
+                "is_screen_sharing": p.is_screen_sharing,
+                "screen_share_platform": p.screen_share_platform,
+                "is_flag_secure_active": p.is_flag_secure_active,
+                "screen_orientation": p.screen_orientation,
             }
             for p in session.participants
         ],
@@ -181,6 +193,119 @@ async def heartbeat(
 ) -> None:
     """Send a keep-alive heartbeat for the session."""
     await SessionService.heartbeat(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Screen Sharing Routes
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/screen-share/start", response_model=ScreenShareStatusResponse)
+async def start_screen_share(
+    session_id: str,
+    payload: ScreenShareStartRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Start screen sharing stream."""
+    participant = await ScreenShareService.start_screen_share(
+        session_id=session_id,
+        user_id=current_user.id,
+        platform=payload.platform,
+        orientation=payload.orientation,
+        db=db,
+    )
+    return {
+        "is_screen_sharing": participant.is_screen_sharing,
+        "platform": participant.screen_share_platform,
+        "is_flag_secure_active": participant.is_flag_secure_active,
+        "screen_orientation": participant.screen_orientation,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/screen-share/stop", response_model=ScreenShareStatusResponse)
+async def stop_screen_share(
+    session_id: str,
+    payload: ScreenShareStopRequest = ScreenShareStopRequest(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Stop screen sharing stream."""
+    participant = await ScreenShareService.stop_screen_share(
+        session_id=session_id,
+        user_id=current_user.id,
+        reason=payload.reason,
+        db=db,
+    )
+    return {
+        "is_screen_sharing": participant.is_screen_sharing,
+        "platform": participant.screen_share_platform,
+        "is_flag_secure_active": participant.is_flag_secure_active,
+        "screen_orientation": participant.screen_orientation,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/screen-share/orientation", response_model=ScreenShareStatusResponse)
+async def update_screen_share_orientation(
+    session_id: str,
+    payload: ScreenShareOrientationRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Update screen share orientation (portrait/landscape)."""
+    participant = await ScreenShareService.update_orientation(
+        session_id=session_id,
+        user_id=current_user.id,
+        orientation=payload.orientation,
+        db=db,
+    )
+    return {
+        "is_screen_sharing": participant.is_screen_sharing,
+        "platform": participant.screen_share_platform,
+        "is_flag_secure_active": participant.is_flag_secure_active,
+        "screen_orientation": participant.screen_orientation,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/screen-share/security-event", response_model=ScreenShareStatusResponse)
+async def report_screen_share_security_event(
+    session_id: str,
+    payload: ScreenShareSecurityEventRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Report FLAG_SECURE, protected app, or backgrounding events."""
+    participant = await ScreenShareService.handle_security_event(
+        session_id=session_id,
+        user_id=current_user.id,
+        event_type=payload.event_type,
+        detail=payload.detail,
+        db=db,
+    )
+    return {
+        "is_screen_sharing": participant.is_screen_sharing,
+        "platform": participant.screen_share_platform,
+        "is_flag_secure_active": participant.is_flag_secure_active,
+        "screen_orientation": participant.screen_orientation,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.get("/{session_id}/screen-share/status", response_model=ScreenShareStatusResponse)
+async def get_screen_share_status(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get active screen share status for a session."""
+    return await ScreenShareService.get_status(
         session_id=session_id,
         user_id=current_user.id,
         db=db,

@@ -433,8 +433,102 @@ Send a heartbeat signal for a session.
 ### WebSocket Endpoint: `ws://localhost:8000/ws/session/{session_id}?token=<JWT>`
 
 Real-time session events stream.
-- Inbound: `{"type": "heartbeat"}`, `{"type": "leave"}`
-- Outbound: `user_joined`, `user_left`, `user_disconnected`, `user_reconnected`, `session_ended`, `heartbeat_ack`
+- Inbound: `heartbeat`, `leave`, `signal_offer`, `signal_answer`, `signal_ice_candidate`, `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, `screen_share_security_event`
+- Outbound: `user_joined`, `user_left`, `user_disconnected`, `user_reconnected`, `session_ended`, `heartbeat_ack`, `signal_offer`, `signal_answer`, `signal_ice_candidate`, `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, `screen_share_security_event`
+
+---
+
+## Screen Sharing (Phase 4)
+
+### `POST /sessions/{session_id}/screen-share/start`
+
+Start screen sharing stream (Android MediaProjection / iOS ReplayKit).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "platform": "android",
+  "orientation": "portrait",
+  "width": 1080,
+  "height": 1920,
+  "fps": 30
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "is_screen_sharing": true,
+  "platform": "android",
+  "is_flag_secure_active": false,
+  "screen_orientation": "portrait",
+  "participant_user_id": "uuid"
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/screen-share/stop`
+
+Stop screen sharing stream.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "reason": "user_stopped"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/screen-share/orientation`
+
+Update screen share orientation.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "orientation": "landscape"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/screen-share/security-event`
+
+Report FLAG_SECURE, protected app, or backgrounding events.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "event_type": "flag_secure_enabled",
+  "detail": "Sensitive window active"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/screen-share/status`
+
+Get current screen share status for a session.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
 
 ---
 
