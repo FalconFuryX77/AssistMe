@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 10 COMPLETE ✅
+## Current Status: Phase 11 COMPLETE ✅
 
-**Last updated:** 2026-08-06T17:25Z
+**Last updated:** 2026-08-06T17:28Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 118/118
+**All tests passing:** 125/125
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
@@ -118,35 +118,47 @@ Completed:
 
 **Pull Request:** [#8 — Phase 10: Multi-party Assistance Sessions](https://github.com/FalconFuryX77/AssistMe/pull/8) (Merged into `main`)
 
+- Models: `is_active_speaker`
+- REST API: Participant invites, creator-only RBAC role updates (`primary_helper`, `secondary_helper`, `observer`, `helpee`), active speaker signaling & layout routing, participant listing
+- WebSockets: Real-time event broadcasting
+- 118 passing tests
+
+### Phase 11 — In-App Chat & File Transfer ✅
+
+**Pull Request:** [#9 — Phase 11: In-App Chat & Chunked File Transfer](https://github.com/FalconFuryX77/AssistMe/pull/9) (Merged into `main`)
+
 #### What was built:
 
-1. **Database Model Updates (`backend/models/session_participant.py`)**:
-   - `is_active_speaker` (bool).
-2. **Multi-party Session REST API (`backend/api/routers/sessions.py` & `multiparty_service.py`)**:
-   - `POST /sessions/{session_id}/participants/invite` — Invite secondary helpers or observers.
-   - `PATCH /sessions/{session_id}/participants/{participant_id}/role` — Creator-only role updates (`primary_helper`, `secondary_helper`, `observer`, `helpee`).
-   - `POST /sessions/{session_id}/active-speaker` — Signal active speaker for multi-stream layout switching.
-   - `GET /sessions/{session_id}/participants` — Retrieve multi-party participant list with stream & role metadata.
+1. **Database Models (`backend/models/chat_message.py` & `models/file_transfer.py`)**:
+   - `ChatMessage` ORM model (`session_id`, `sender_id`, `content`, `is_encrypted`, `encrypted_payload`, `timestamp`).
+   - `FileTransfer` ORM model (`session_id`, `sender_id`, `filename`, `file_size_bytes`, `mime_type`, `checksum_sha256`, `status`, `total_chunks`, `received_chunks`, `download_url`, `created_at`).
+2. **In-App Chat & File Transfer REST API (`backend/api/routers/sessions.py` & `chat_file_service.py`)**:
+   - `POST /sessions/{session_id}/chat/messages` — Send text chat message or E2EE encrypted chat payload.
+   - `GET /sessions/{session_id}/chat/messages` — Retrieve in-app chat history.
+   - `POST /sessions/{session_id}/files/initiate` — Register chunked file transfer session (`filename`, `file_size_bytes`, `mime_type`, `checksum_sha256`, `total_chunks`).
+   - `POST /sessions/{session_id}/files/{file_transfer_id}/chunk` — Upload file chunk and track progress.
+   - `POST /sessions/{session_id}/files/{file_transfer_id}/complete` — Finalize file transfer and generate secure download URL.
+   - `GET /sessions/{session_id}/files/transfers` — List all file transfers for session.
 3. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
-   - WebSocket broadcast handlers for `participant_invited`, `participant_role_updated`, and `active_speaker_changed`.
-4. **Pydantic Schemas (`backend/api/schemas/multiparty.py`)**:
-   - `ParticipantInviteRequest`, `ParticipantRoleUpdateRequest`, `ActiveSpeakerSignalRequest`, `ActiveSpeakerStatusResponse`, `MultiPartyParticipantListResponse`.
-5. **Test Suite (118 passing tests)**:
-   - 7 new tests in `backend/tests/test_multiparty.py` covering secondary helper/observer invites, RBAC role updates, 403 permission guards, active speaker switching, and participant listing.
+   - WebSocket broadcast handlers for `chat_message_received`, `file_transfer_initiated`, `file_chunk_received`, and `file_transfer_completed`.
+4. **Pydantic Schemas (`backend/api/schemas/chat_file.py`)**:
+   - `ChatMessageSendRequest`, `ChatMessageResponse`, `ChatMessageListResponse`, `FileTransferInitiateRequest`, `FileChunkUploadRequest`, `FileTransferResponse`, `FileTransferListResponse`.
+5. **Test Suite (125 passing tests)**:
+   - 7 new tests in `backend/tests/test_chat_file.py` covering text messaging, E2EE chat payloads, chat history listing, chunked file initiation/chunk upload/completion, and file transfer listing.
 
 ---
 
-## What's Next: Phase 11 — In-App Chat & File Transfer
+## What's Next: Phase 12 — Mobile App Core Architecture & Security Foundation
 
-Per the roadmap, the next phase covers In-App Chat & File Transfer:
-- Text messaging signaling & encrypted chat message schemas (`POST /sessions/{session_id}/chat/message`)
-- File transfer initiation, chunked upload/download signaling, and file size constraint validation (`POST /sessions/{session_id}/files/transfer`)
-- WebSockets real-time chat & file transfer message forwarders
-- E2EE payload wrapping for sensitive in-session file attachments
+Per the roadmap, Phase 12 initiates the mobile client application development (Flutter / Native Android & iOS wrappers):
+- Mobile state management & clean architecture (BLoC / Riverpod state handlers)
+- Secure Storage integration (Keychain / EncryptedSharedPreferences for JWT token storage)
+- WebRTC PeerConnection engine & MediaProjection permission handlers
+- Accessibility Service & AssistiveTouch bridge initialization
 
 ### Recommended Workflow for Next Contributor:
-1. Create feature branch: `git checkout -b feature/phase-11-chat-file-transfer`
-2. Build chat & file transfer schemas, service, REST routes, WebSocket handlers, and unit tests
+1. Create feature branch: `git checkout -b feature/phase-12-mobile-core-security`
+2. Implement mobile architecture foundation or mobile backend API bridge modules
 3. Open PR via `gh pr create`
 4. Automated CI workflow runs pytest tests in GitHub Actions
 5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
@@ -164,5 +176,5 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- All 118 unit & integration tests pass cleanly.
+- All 125 unit & integration tests pass cleanly.
 - CI/CD workflow is active on GitHub.
