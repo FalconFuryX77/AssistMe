@@ -75,6 +75,18 @@ class SessionParticipant(Base):
     screen_orientation: Mapped[str] = mapped_column(
         String(20), default="portrait", nullable=False  # "portrait" or "landscape"
     )
+    is_in_audio_call: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    is_audio_muted: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    audio_route: Mapped[str] = mapped_column(
+        String(20), default="speaker", nullable=False  # "speaker", "earpiece", "bluetooth", "headset"
+    )
+    audio_quality: Mapped[str] = mapped_column(
+        String(20), default="high", nullable=False  # "high", "medium", "low"
+    )
 
     # Relationships
     session = relationship("Session", back_populates="participants")

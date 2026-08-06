@@ -217,6 +217,24 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "audio_call_start",
+                "audio_call_stop",
+                "audio_mute_toggle",
+                "audio_route_change",
+                "audio_degradation_report",
+            ):
+                # Broadcast voice communication events to room participants
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "is_muted": msg.get("is_muted"),
+                    "audio_route": msg.get("audio_route"),
+                    "quality_level": msg.get("quality_level"),
+                    "packet_loss": msg.get("packet_loss"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}

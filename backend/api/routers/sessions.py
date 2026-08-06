@@ -19,9 +19,17 @@ from api.schemas.screen_share import (
     ScreenShareStatusResponse,
     ScreenShareStopRequest,
 )
+from api.schemas.voice import (
+    AudioCallStartRequest,
+    AudioDegradationReportRequest,
+    AudioMuteToggleRequest,
+    AudioRouteChangeRequest,
+    AudioStatusResponse,
+)
 from api.schemas.webrtc import ICEServersResponse
 from api.services.screen_share_service import ScreenShareService
 from api.services.session_service import SessionService
+from api.services.voice_service import VoiceService
 from api.services.webrtc_service import WebRTCService
 from core.database import get_db
 from models.session import Session
@@ -54,6 +62,10 @@ def _enrich_session(session: Session) -> dict:
                 "screen_share_platform": p.screen_share_platform,
                 "is_flag_secure_active": p.is_flag_secure_active,
                 "screen_orientation": p.screen_orientation,
+                "is_in_audio_call": p.is_in_audio_call,
+                "is_audio_muted": p.is_audio_muted,
+                "audio_route": p.audio_route,
+                "audio_quality": p.audio_quality,
             }
             for p in session.participants
         ],
@@ -306,6 +318,140 @@ async def get_screen_share_status(
 ) -> dict:
     """Get active screen share status for a session."""
     return await ScreenShareService.get_status(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Voice Communication Routes (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/audio/start", response_model=AudioStatusResponse)
+async def start_audio_call(
+    session_id: str,
+    payload: AudioCallStartRequest = AudioCallStartRequest(),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Start audio call participation in session."""
+    participant = await VoiceService.start_audio_call(
+        session_id=session_id,
+        user_id=current_user.id,
+        is_muted=payload.is_muted,
+        audio_route=payload.audio_route,
+        db=db,
+    )
+    return {
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/audio/stop", response_model=AudioStatusResponse)
+async def stop_audio_call(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Stop audio call participation."""
+    participant = await VoiceService.stop_audio_call(
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
+    return {
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/audio/mute", response_model=AudioStatusResponse)
+async def toggle_audio_mute(
+    session_id: str,
+    payload: AudioMuteToggleRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Toggle audio mute state (mute/unmute)."""
+    participant = await VoiceService.toggle_mute(
+        session_id=session_id,
+        user_id=current_user.id,
+        is_muted=payload.is_muted,
+        db=db,
+    )
+    return {
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/audio/route", response_model=AudioStatusResponse)
+async def change_audio_route(
+    session_id: str,
+    payload: AudioRouteChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Change audio output route (speaker, earpiece, bluetooth, headset)."""
+    participant = await VoiceService.change_audio_route(
+        session_id=session_id,
+        user_id=current_user.id,
+        audio_route=payload.audio_route,
+        db=db,
+    )
+    return {
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.post("/{session_id}/audio/degradation", response_model=AudioStatusResponse)
+async def report_audio_degradation(
+    session_id: str,
+    payload: AudioDegradationReportRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Report network degradation and adapt audio bitrate/quality level."""
+    participant = await VoiceService.report_degradation(
+        session_id=session_id,
+        user_id=current_user.id,
+        quality_level=payload.quality_level,
+        packet_loss=payload.packet_loss,
+        db=db,
+    )
+    return {
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "participant_user_id": participant.user_id,
+    }
+
+
+@router.get("/{session_id}/audio/status", response_model=AudioStatusResponse)
+async def get_audio_status(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get active audio call status for current user in session."""
+    return await VoiceService.get_audio_status(
         session_id=session_id,
         user_id=current_user.id,
         db=db,
