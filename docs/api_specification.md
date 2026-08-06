@@ -633,6 +633,94 @@ Get active voice communication status for session participant.
 
 ---
 
+## Remote Control Protocol (Phase 6)
+
+### `POST /sessions/{session_id}/remote-control/grant`
+
+Grant remote control permission to the session helper.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "platform": "android_accessibility"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "remote_control_granted": true,
+  "remote_control_granted_at": "2026-08-06T12:00:00Z",
+  "remote_control_platform": "android_accessibility"
+}
+```
+
+---
+
+### `POST /sessions/{session_id}/remote-control/revoke`
+
+Instantly revoke remote control permission.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
+### `POST /sessions/{session_id}/remote-control/input`
+
+Dispatch remote gesture or hardware key injection event (Tap, Drag, Long Press, Gestures, Key Events).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body (Tap Example):**
+```json
+{
+  "event_type": "tap",
+  "x": 540.0,
+  "y": 960.0,
+  "normalized_x": 0.5,
+  "normalized_y": 0.5
+}
+```
+
+**Request Body (Drag Example):**
+```json
+{
+  "event_type": "drag",
+  "x": 100.0,
+  "y": 800.0,
+  "end_x": 100.0,
+  "end_y": 200.0,
+  "duration_ms": 400
+}
+```
+
+**Request Body (Key Event Example):**
+```json
+{
+  "event_type": "key_event",
+  "key_code": "back"
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+### `GET /sessions/{session_id}/remote-control/status`
+
+Get remote control permission status.
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Response:** `200 OK`
+
+---
+
 ## Authentication Headers
 
 All authenticated endpoints require:
