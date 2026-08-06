@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: Phase 5 COMPLETE ✅
+## Current Status: Phase 6 COMPLETE ✅
 
-**Last updated:** 2026-08-06T17:06Z
+**Last updated:** 2026-08-06T17:10Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 81/81
+**All tests passing:** 90/90
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
 
@@ -73,37 +73,47 @@ Completed:
 
 **Pull Request:** [#3 — Phase 5: Voice Communication & Audio Routing](https://github.com/FalconFuryX77/AssistMe/pull/3) (Merged into `main`)
 
+- Models: `is_in_audio_call`, `is_audio_muted`, `audio_route`, `audio_quality`
+- REST API: Start, stop, mute/unmute, audio routing (speaker, earpiece, bluetooth, headset), degradation reporting, status queries
+- WebSocket broadcasting for voice communication state changes
+- 81 passing tests
+
+### Phase 6 — Remote Control Protocol ✅
+
+**Pull Request:** [#4 — Phase 6: Remote Control Protocol (Accessibility Service & AssistiveTouch)](https://github.com/FalconFuryX77/AssistMe/pull/4) (Merged into `main`)
+
 #### What was built:
 
-1. **Database Model Updates (`backend/models/session_participant.py`)**:
-   - `is_in_audio_call` (bool), `is_audio_muted` (bool), `audio_route` (`speaker`, `earpiece`, `bluetooth`, `headset`), `audio_quality` (`high`, `medium`, `low`).
-2. **Voice Communication REST API (`backend/api/routers/sessions.py` & `voice_service.py`)**:
-   - `POST /sessions/{session_id}/audio/start` — Start audio call participation.
-   - `POST /sessions/{session_id}/audio/stop` — Stop audio call.
-   - `POST /sessions/{session_id}/audio/mute` — Mute / unmute microphone.
-   - `POST /sessions/{session_id}/audio/route` — Change audio output route (speaker, earpiece, bluetooth, headset).
-   - `POST /sessions/{session_id}/audio/degradation` — Report network degradation & trigger quality level adaptation.
-   - `GET /sessions/{session_id}/audio/status` — Query active audio call status.
-3. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
-   - WebSocket broadcast handlers for `audio_call_start`, `audio_call_stop`, `audio_mute_toggle`, `audio_route_change`, and `audio_degradation_report`.
-4. **Pydantic Schemas (`backend/api/schemas/voice.py`)**:
-   - `AudioCallStartRequest`, `AudioMuteToggleRequest`, `AudioRouteChangeRequest`, `AudioDegradationReportRequest`, `AudioStatusResponse`.
-5. **Test Suite (81 passing tests)**:
-   - 8 new tests in `backend/tests/test_voice.py` covering call start/stop, muting, Bluetooth/earpiece/headset routing, network degradation reporting, and audio status.
+1. **Database Model Updates (`backend/models/session.py`)**:
+   - `remote_control_granted` (bool), `remote_control_granted_at` (datetime), `remote_control_platform` (`android_accessibility` / `ios_assistivetouch`).
+2. **Remote Control Protocol REST API (`backend/api/routers/sessions.py` & `remote_control_service.py`)**:
+   - `POST /sessions/{session_id}/remote-control/grant` — Helpee grants remote control permission.
+   - `POST /sessions/{session_id}/remote-control/revoke` — Helpee instantly revokes remote control permission.
+   - `POST /sessions/{session_id}/remote-control/input` — Helper dispatches touch/gesture/key input events (Tap, Drag, Long Press, Gestures, Key Events).
+   - `GET /sessions/{session_id}/remote-control/status` — Get active remote control permission state.
+3. **Security & Permission Enforcements**:
+   - Input dispatches strictly require `remote_control_granted == True`.
+   - Revocation instantly invalidates subsequent input dispatch attempts (403 Forbidden).
+4. **Real-time WebSockets Broadcasting (`backend/api/routers/session_ws.py`)**:
+   - WebSocket broadcast handlers for `remote_control_grant`, `remote_control_revoke`, and `remote_control_input`.
+5. **Pydantic Schemas (`backend/api/schemas/remote_control.py`)**:
+   - `RemoteControlGrantRequest`, `RemoteControlInputEvent`, `RemoteControlStatusResponse`.
+6. **Test Suite (90 passing tests)**:
+   - 9 new tests in `backend/tests/test_remote_control.py` covering Android Accessibility Service, iOS AssistiveTouch, tap/drag/long press/key events, permission checks, and instant revocation.
 
 ---
 
-## What's Next: Phase 6 — Remote Control Protocol
+## What's Next: Phase 7 — Adaptive Streaming & Optimization
 
-Per the roadmap, the next phase covers Remote Control Protocol:
-- Android Accessibility Service event schemas & dispatch
-- iOS AssistiveTouch / Custom Touch input event contracts
-- Touch events: Tap (`click`), Drag (`swipe`), Long Press, Gesture injection, Key event dispatch (`home`, `back`, `recents`)
-- Security & Permission checks: Explicit helpee approval requirement for remote input execution
+Per the roadmap, the next phase covers Adaptive Streaming & Optimization:
+- Dynamic bitrate & resolution adaptation protocol
+- Frame rate throttling & bandwidth constraint monitoring
+- Network metrics reporting endpoints (`POST /sessions/{session_id}/network-metrics`)
+- Dynamic video stream scaling (1080p -> 720p -> 480p -> 360p) based on RTT / jitter / packet loss
 
 ### Recommended Workflow for Next Contributor:
-1. Create feature branch: `git checkout -b feature/phase-6-remote-control`
-2. Build input event models, schemas, service, REST routes, WebSocket handlers, and unit tests
+1. Create feature branch: `git checkout -b feature/phase-7-adaptive-streaming`
+2. Build adaptive streaming schemas, service, REST routes, WebSocket handlers, and unit tests
 3. Open PR via `gh pr create`
 4. Automated CI workflow runs pytest tests in GitHub Actions
 5. Merge PR into `main`: `gh pr merge --merge --delete-branch`
@@ -121,5 +131,5 @@ python -m pytest tests/ -v
 
 ## Notes for the next contributor
 
-- All 81 unit & integration tests pass cleanly.
+- All 90 unit & integration tests pass cleanly.
 - CI/CD workflow is active on GitHub.
