@@ -102,6 +102,9 @@ class SessionParticipant(Base):
     packet_loss_percent: Mapped[float] = mapped_column(
         Float, default=0.0, nullable=False
     )
+    is_active_speaker: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
 
     # Relationships
     session = relationship("Session", back_populates="participants")

@@ -37,6 +37,13 @@ from api.schemas.e2ee import (
     E2EESecurityStatusResponse,
     E2EEVerificationRequest,
 )
+from api.schemas.multiparty import (
+    ActiveSpeakerSignalRequest,
+    ActiveSpeakerStatusResponse,
+    MultiPartyParticipantListResponse,
+    ParticipantInviteRequest,
+    ParticipantRoleUpdateRequest,
+)
 from api.schemas.remote_control import (
     RemoteControlGrantRequest,
     RemoteControlInputEvent,
@@ -53,6 +60,7 @@ from api.schemas.webrtc import ICEServersResponse
 from api.services.adaptive_streaming_service import AdaptiveStreamingService
 from api.services.audit_recording_service import AuditRecordingService
 from api.services.e2ee_service import E2EEService
+from api.services.multiparty_service import MultiPartyService
 from api.services.remote_control_service import RemoteControlService
 from api.services.screen_share_service import ScreenShareService
 from api.services.session_service import SessionService
@@ -105,6 +113,7 @@ def _enrich_session(session: Session) -> dict:
                 "video_fps": p.video_fps,
                 "rtt_ms": p.rtt_ms,
                 "packet_loss_percent": p.packet_loss_percent,
+                "is_active_speaker": p.is_active_speaker,
             }
             for p in session.participants
         ],
@@ -857,5 +866,120 @@ async def get_session_audit_trail(
     return await AuditRecordingService.get_audit_trail(
         session_id=session_id,
         user_id=current_user.id,
+        db=db,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Multi-party Assistance Sessions Routes (Phase 10)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{session_id}/participants/invite", response_model=ParticipantResponse)
+async def invite_participant(
+    session_id: str,
+    payload: ParticipantInviteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Invite secondary helper or observer to session."""
+    participant = await MultiPartyService.invite_participant(
+        session_id=session_id,
+        current_user_id=current_user.id,
+        email_or_user_id=payload.email_or_user_id,
+        role=payload.role,
+        db=db,
+    )
+    return {
+        "id": participant.id,
+        "user_id": participant.user_id,
+        "role": participant.role,
+        "status": participant.status,
+        "joined_at": participant.joined_at,
+        "last_seen_at": participant.last_seen_at,
+        "is_screen_sharing": participant.is_screen_sharing,
+        "screen_share_platform": participant.screen_share_platform,
+        "is_flag_secure_active": participant.is_flag_secure_active,
+        "screen_orientation": participant.screen_orientation,
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "video_resolution": participant.video_resolution,
+        "video_bitrate_kbps": participant.video_bitrate_kbps,
+        "video_fps": participant.video_fps,
+        "rtt_ms": participant.rtt_ms,
+        "packet_loss_percent": participant.packet_loss_percent,
+        "is_active_speaker": participant.is_active_speaker,
+    }
+
+
+@router.patch("/{session_id}/participants/{participant_id}/role", response_model=ParticipantResponse)
+async def update_participant_role(
+    session_id: str,
+    participant_id: str,
+    payload: ParticipantRoleUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Update participant role in multi-party session."""
+    participant = await MultiPartyService.update_participant_role(
+        session_id=session_id,
+        current_user_id=current_user.id,
+        target_participant_id=participant_id,
+        new_role=payload.role,
+        db=db,
+    )
+    return {
+        "id": participant.id,
+        "user_id": participant.user_id,
+        "role": participant.role,
+        "status": participant.status,
+        "joined_at": participant.joined_at,
+        "last_seen_at": participant.last_seen_at,
+        "is_screen_sharing": participant.is_screen_sharing,
+        "screen_share_platform": participant.screen_share_platform,
+        "is_flag_secure_active": participant.is_flag_secure_active,
+        "screen_orientation": participant.screen_orientation,
+        "is_in_audio_call": participant.is_in_audio_call,
+        "is_audio_muted": participant.is_audio_muted,
+        "audio_route": participant.audio_route,
+        "audio_quality": participant.audio_quality,
+        "video_resolution": participant.video_resolution,
+        "video_bitrate_kbps": participant.video_bitrate_kbps,
+        "video_fps": participant.video_fps,
+        "rtt_ms": participant.rtt_ms,
+        "packet_loss_percent": participant.packet_loss_percent,
+        "is_active_speaker": participant.is_active_speaker,
+    }
+
+
+@router.post("/{session_id}/active-speaker", response_model=ActiveSpeakerStatusResponse)
+async def set_active_speaker(
+    session_id: str,
+    payload: ActiveSpeakerSignalRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Signal active speaker for multi-stream video layout routing."""
+    return await MultiPartyService.set_active_speaker(
+        session_id=session_id,
+        current_user_id=current_user.id,
+        active_speaker_user_id=payload.active_speaker_user_id,
+        audio_level_db=payload.audio_level_db,
+        db=db,
+    )
+
+
+@router.get("/{session_id}/participants", response_model=MultiPartyParticipantListResponse)
+async def list_session_participants(
+    session_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Get all participants in multi-party session."""
+    return await MultiPartyService.get_participants(
+        session_id=session_id,
+        current_user_id=current_user.id,
         db=db,
     )
