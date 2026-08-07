@@ -1,0 +1,60 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assistme-coturn
+  labels:
+    app: assistme-coturn
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: assistme-coturn
+  template:
+    metadata:
+      labels:
+        app: assistme-coturn
+    spec:
+      containers:
+        - name: coturn
+          image: coturn/coturn:4.6.2-alpine
+          ports:
+            - containerPort: 3478
+              name: stun-udp
+              protocol: UDP
+            - containerPort: 3478
+              name: stun-tcp
+              protocol: TCP
+            - containerPort: 5349
+              name: turn-tls
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "2Gi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: coturn-service
+  labels:
+    app: assistme-coturn
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 3478
+      targetPort: 3478
+      name: stun-udp
+      protocol: UDP
+    - port: 3478
+      targetPort: 3478
+      name: stun-tcp
+      protocol: TCP
+    - port: 5349
+      targetPort: 5349
+      name: turn-tls
+      protocol: TCP
+  selector:
+    app: assistme-coturn
