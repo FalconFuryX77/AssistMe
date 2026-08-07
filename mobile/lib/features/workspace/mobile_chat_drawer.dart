@@ -84,10 +84,10 @@ class _MobileChatDrawerState extends State<MobileChatDrawer> {
         setState(() => _uploadProgress = 0.6);
 
         await widget.apiClient.post(
-          '/sessions/${widget.sessionId}/files/${data['id']}/chunks',
+          '/sessions/${widget.sessionId}/files/${data['id']}/chunk',
           body: {
             'chunk_index': 0,
-            'chunk_payload': 'bW9iaWxlX2ZpbGVfcGF5bG9hZA==',
+            'chunk_data_base64': 'bW9iaWxlX2ZpbGVfcGF5bG9hZA==',
           },
         );
 

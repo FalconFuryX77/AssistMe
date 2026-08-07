@@ -59,9 +59,9 @@ export const ChatFileDrawer: React.FC<ChatFileDrawerProps> = ({
       setUploadProgress(50);
 
       // 2. Upload first chunk
-      await apiClient.post(`/sessions/${sessionId}/files/${initResp.id}/chunks`, {
+      await apiClient.post(`/sessions/${sessionId}/files/${initResp.id}/chunk`, {
         chunk_index: 0,
-        chunk_payload: 'dGVzdF9jaHVua19kYXRh', // base64
+        chunk_data_base64: 'dGVzdF9jaHVua19kYXRh', // base64
       });
 
       setUploadProgress(85);
