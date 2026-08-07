@@ -62,7 +62,7 @@ async def test_mobile_e2ee_engine_key_exchange(client: AsyncClient) -> None:
 
     # Key exchange
     exchange_resp = await client.post(
-        f"/sessions/{session['id']}/e2ee/key-exchange",
+        f"/sessions/{session['id']}/e2ee/keys/exchange",
         json={
             "identity_key": "mobile_identity_key_abc123",
             "signed_prekey": "mobile_signed_prekey_def456",
