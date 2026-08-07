@@ -45,7 +45,7 @@ async def test_security_zeroization_success(client: AsyncClient) -> None:
 
     # Enable E2EE and verify
     exchange_resp = await client.post(
-        f"/sessions/{session['id']}/e2ee/key-exchange",
+        f"/sessions/{session['id']}/e2ee/keys/exchange",
         json={
             "identity_key": "ik_123",
             "signed_prekey": "spk_456",
@@ -109,11 +109,11 @@ async def test_full_platform_end_to_end_verification(client: AsyncClient) -> Non
 
     # 1. Auth & Contacts
     contact_resp = await client.post(
-        "/contacts",
-        json={"contact_user_id": helpee["user"]["id"]},
+        "/contacts/",
+        json={"contact_email": helpee["email"]},
         headers=helper["headers"],
     )
-    assert contact_resp.status_code == 200
+    assert contact_resp.status_code == 201
 
     # 2. Session Create & Join
     session = await _create_session(client, helper["headers"])
@@ -133,7 +133,7 @@ async def test_full_platform_end_to_end_verification(client: AsyncClient) -> Non
 
     # 4. E2EE Key Exchange
     key_resp = await client.post(
-        f"/sessions/{session['id']}/e2ee/key-exchange",
+        f"/sessions/{session['id']}/e2ee/keys/exchange",
         json={
             "identity_key": "ik_e2e_123",
             "signed_prekey": "spk_e2e_456",
@@ -162,22 +162,22 @@ async def test_full_platform_end_to_end_verification(client: AsyncClient) -> Non
     # 7. Remote Control Protocol
     rc_grant = await client.post(
         f"/sessions/{session['id']}/remote-control/grant",
-        json={"platform": "android"},
+        json={"platform": "android_accessibility"},
         headers=helpee["headers"],
     )
     assert rc_grant.status_code == 200
 
     rc_event = await client.post(
-        f"/sessions/{session['id']}/remote-control/dispatch",
-        json={"event_type": "tap", "x_percent": 0.5, "y_percent": 0.5},
+        f"/sessions/{session['id']}/remote-control/input",
+        json={"event_type": "tap", "x": 540.0, "y": 960.0},
         headers=helper["headers"],
     )
     assert rc_event.status_code == 200
 
     # 8. Adaptive Streaming
     adapt_resp = await client.post(
-        f"/sessions/{session['id']}/stream/adapt",
-        json={"target_resolution": "720p", "target_fps": 30},
+        f"/sessions/{session['id']}/streaming/adapt",
+        json={"video_resolution": "720p", "video_fps": 30},
         headers=helper["headers"],
     )
     assert adapt_resp.status_code == 200
@@ -198,7 +198,7 @@ async def test_full_platform_end_to_end_verification(client: AsyncClient) -> Non
     invite_resp = await client.post(
         f"/sessions/{session['id']}/participants/invite",
         json={
-            "email_or_user_id": secondary_helper["user"]["id"],
+            "email_or_user_id": secondary_helper["email"],
             "role": "secondary_helper",
         },
         headers=helper["headers"],
@@ -245,3 +245,4 @@ async def test_full_platform_end_to_end_verification(client: AsyncClient) -> Non
     )
     assert end_resp.status_code == 200
     assert end_resp.json()["status"] == "ended"
+

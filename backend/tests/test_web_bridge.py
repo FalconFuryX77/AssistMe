@@ -51,7 +51,7 @@ async def test_web_webrtc_insertable_streams_e2ee(client: AsyncClient) -> None:
     )
 
     exchange_resp = await client.post(
-        f"/sessions/{session['id']}/e2ee/key-exchange",
+        f"/sessions/{session['id']}/e2ee/keys/exchange",
         json={
             "identity_key": "web_browser_identity_key_xyz",
             "signed_prekey": "web_browser_signed_prekey_123",
@@ -81,15 +81,16 @@ async def test_web_canvas_stream_decoding_contract(client: AsyncClient) -> None:
     session = await _create_session(client, helper["headers"])
 
     resp = await client.post(
-        f"/sessions/{session['id']}/stream/adapt",
+        f"/sessions/{session['id']}/streaming/adapt",
         json={
-            "target_resolution": "1080p",
-            "target_fps": 60,
+            "video_resolution": "1080p",
+            "video_fps": 60,
+            "video_bitrate_kbps": 3500,
         },
         headers=helper["headers"],
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["target_resolution"] == "1080p"
-    assert data["target_fps"] == 60
-    assert data["target_bitrate_kbps"] == 3500
+    assert data["video_resolution"] == "1080p"
+    assert data["video_fps"] == 60
+    assert data["video_bitrate_kbps"] == 3500
