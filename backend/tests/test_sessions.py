@@ -17,19 +17,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _register(client: AsyncClient, suffix: str | None = None) -> dict:
-    """Register a fresh user and return data with headers."""
+    """Register a fresh user and return data with headers and user profile."""
     suffix = suffix or secrets.token_hex(4)
+    email = f"session_{suffix}@example.com"
     resp = await client.post(
         "/auth/register",
         json={
-            "email": f"session_{suffix}@example.com",
+            "email": email,
             "password": "SecureP1",
             "display_name": f"User {suffix}",
         },
     )
     data = resp.json()
     data["headers"] = {"Authorization": f"Bearer {data['access_token']}"}
-    data["email"] = f"session_{suffix}@example.com"
+    data["email"] = email
+    me_resp = await client.get("/users/me", headers=data["headers"])
+    if me_resp.status_code == 200:
+        data["user"] = me_resp.json()
     return data
 
 
