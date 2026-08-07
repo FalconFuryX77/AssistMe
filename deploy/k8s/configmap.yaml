@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: assistme-config
+  labels:
+    app: assistme
+data:
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"
+  STUN_SERVER_1: "stun:coturn-service:3478"
+  STUN_SERVER_2: "stun:stun.l.google.com:19302"
+  TURN_SERVER_URL: "turn:turn.assistme.net:3478"
+  TURN_SERVER_USERNAME: "assistme_turn_user"

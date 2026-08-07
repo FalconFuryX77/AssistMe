@@ -220,6 +220,26 @@ Completed:
 7. **Automated Native Driver Test Suite (`backend/tests/test_native_platform_drivers.py`)**:
    - 5 new tests validating Android Accessibility gesture dispatching, Android MediaProjection stream contracts, iOS ReplayKit broadcast contracts, iOS AssistiveTouch permissions, and `FLAG_SECURE` window masking (147/147 passing tests platform-wide).
 
+### Phase 18 — Production Infrastructure & Deployment (`deploy/`) ✅
+
+**Branch:** `feature/production-deployment-infra`
+**Status:** 100% Complete & Tested (152/152 passing tests)
+
+#### What was built:
+
+1. **Multi-Stage Production Dockerfile (`backend/Dockerfile`)**:
+   - Multi-stage build with `builder` compiling wheel caches and `runner` on `python:3.12-slim` with an unprivileged non-root user (`assistme`), security hardening, and Uvicorn HTTP server.
+2. **Multi-Container Docker Compose Stack (`deploy/docker-compose.yml` & `deploy/.env.example`)**:
+   - Orchestration across FastAPI backend, PostgreSQL 16 database with health check polling, Coturn STUN/TURN server, and Nginx reverse proxy.
+3. **Coturn STUN/TURN Server Configuration (`deploy/coturn/turnserver.conf`)**:
+   - Production STUN/TURN on ports `3478` and `5349` (TLS), `lt-cred-mech`, realm `assistme.net`, and dynamic relay UDP port allocation (`49152-65535`).
+4. **Nginx Reverse Proxy & WebSockets Gateway (`deploy/nginx/` & `deploy/nginx/conf.d/assistme.conf`)**:
+   - Connection upgrade headers for `/ws/` WebSockets signaling, extended proxy read and send timeouts (3600s), gzip compression, and SSL termination.
+5. **Kubernetes Production Manifests (`deploy/k8s/`)**:
+   - `configmap.yaml`, `backend-deployment.yaml` with liveness/readiness probes (`/health`) and resource limits, `coturn-deployment.yaml`, and `ingress.yaml` with WebSocket annotations.
+6. **Automated Infrastructure Test Suite (`backend/tests/test_deployment_infra.py`)**:
+   - 5 new tests validating Dockerfile syntax, docker-compose service wiring, Coturn configuration syntax, Nginx WebSockets proxy headers, and Kubernetes manifests (152/152 passing tests platform-wide).
+
 ---
 
 ## How to run tests locally
@@ -233,7 +253,8 @@ python -m pytest tests/ -v
 
 ## Final Project Status
 
-All core backend, WebRTC signaling, E2EE Signal Protocol, Web Application Frontend, Flutter Mobile UI, and Native Platform Driver phases (Phases 0 through 17) are 100% complete, fully tested (147/147 passing unit & integration tests), and validated! 🚀
+All core backend, WebRTC signaling, E2EE Signal Protocol, native drivers, hardening, Web Application Frontend, Flutter Mobile UI, and Production Infrastructure phases (Phases 0 through 18) are 100% complete, fully tested (152/152 passing unit & integration tests), and validated! 🚀
+
 
 
 
