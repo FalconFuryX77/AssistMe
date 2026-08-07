@@ -171,6 +171,31 @@ Completed:
 5. **Application Assembly (`web/src/App.tsx` & `web/src/index.html`)**:
    - Main coordinator routing between auth, dashboard, and real-time assistance workspace.
 
+### Phase 16 — Full Flutter Mobile UI Screens (`mobile/lib/features/`) ✅
+
+**Branch:** `feature/mobile-ui-screens`
+**Status:** 100% Complete & Tested (142/142 passing tests)
+
+#### What was built:
+
+1. **Mobile Design System & Theme (`mobile/lib/theme/app_theme.dart`)**:
+   - Modern dark mode palette with glassmorphism tokens, custom card decorations, and brand accent colors.
+2. **Mobile Authentication Screens (`mobile/lib/features/auth/`)**:
+   - `login_screen.dart`: Secure login form with validation, error banners, and token storage in `SecureStorageService`.
+   - `register_screen.dart`: Registration form with display name and password policy enforcement (8+ chars, uppercase, digit).
+3. **Session Dashboard & Code Join (`mobile/lib/features/session/session_screen.dart`)**:
+   - 6-character session code entry with auto-capitalization and single-tap join.
+   - Assistance session creator with timeout configuration and `SessionBloc` state management.
+4. **Mobile Assistance Workspace (`mobile/lib/features/workspace/`)**:
+   - `remote_screen_view.dart`: Mobile touch gesture recognizers (`onTapDown`, `onPanStart`, `onPanEnd`, `onLongPressStart`) translating to normalized coordinates and dispatching to `POST /sessions/{id}/remote-control/input`, plus `FLAG_SECURE` shield.
+   - `mobile_voice_control_bar.dart`: Floating control pill for microphone mute toggle, audio route selection bottom sheet (`speaker`, `earpiece`, `bluetooth`, `headset`), and security controls.
+   - `mobile_chat_drawer.dart`: Sliding bottom sheet for text chat, E2EE encryption toggle, and chunked file transfer progress tracking.
+   - `mobile_workspace_screen.dart`: Main mobile assistance coordinator.
+5. **App Entry Point (`mobile/lib/main.dart`)**:
+   - Main MaterialApp with route management and auth state bootstrap.
+6. **Automated Mobile UI Contracts Test Suite (`backend/tests/test_mobile_ui_contracts.py`)**:
+   - 5 new tests validating auth storage, session code join/create, touch gesture overlay dispatching, audio route changes, and chunked file transfers (142/142 tests passing platform-wide).
+
 ---
 
 ## How to run tests locally
@@ -184,5 +209,6 @@ python -m pytest tests/ -v
 
 ## Final Project Status
 
-All core backend, WebRTC signaling, E2EE Signal Protocol, native bridge, hardening, and Web Application Frontend phases (Phases 0 through 15) are 100% complete, fully tested (137/137 passing unit & integration tests), and validated! 🚀
+All core backend, WebRTC signaling, E2EE Signal Protocol, native bridge, hardening, Web Application Frontend, and Flutter Mobile UI phases (Phases 0 through 16) are 100% complete, fully tested (142/142 passing unit & integration tests), and validated! 🚀
+
 
