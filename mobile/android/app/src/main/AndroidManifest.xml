@@ -1,0 +1,35 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.assistme">
+
+    <!-- Permissions required for remote assistance and screen streaming -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <application
+        android:label="AssistMe"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+
+        <!-- Accessibility Service for Gesture Dispatch & Protected App Sensor -->
+        <service
+            android:name=".service.AssistMeAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- MediaProjection Screen Sharing Foreground Service -->
+        <service
+            android:name=".service.AssistMeMediaProjectionService"
+            android:foregroundServiceType="mediaProjection"
+            android:exported="false" />
+
+    </application>
+</manifest>
