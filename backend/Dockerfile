@@ -9,9 +9,9 @@ WORKDIR /app
 # Create unprivileged non-root user for security
 RUN groupadd -r assistme && useradd -r -g assistme -d /app -s /sbin/nologin assistme
 
-# Install pre-compiled binary Python wheels directly
+# Install pre-compiled binary Python wheels directly (with extended timeout & retries for slow connections)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --default-timeout=1000 --retries=10 --no-cache-dir -r requirements.txt
 
 # Copy application source code
 COPY . /app
