@@ -32,6 +32,18 @@ class Settings:
     TURN_SERVER_URL: str | None = os.getenv("TURN_SERVER_URL", None)
     TURN_SERVER_USERNAME: str | None = os.getenv("TURN_SERVER_USERNAME", None)
     TURN_SERVER_CREDENTIAL: str | None = os.getenv("TURN_SERVER_CREDENTIAL", None)
+    # --- Internet Deployment (Phase 19) ---
+    # Set via env vars when deploying for public internet access.
+    # When None, the service falls back to internal STUN_SERVERS / TURN_SERVER_URL.
+    ALLOWED_ORIGINS: list[str] = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",")]
+    PUBLIC_API_BASE_URL: str | None = os.getenv("PUBLIC_API_BASE_URL", None)
+    PUBLIC_WS_BASE_URL: str | None = os.getenv("PUBLIC_WS_BASE_URL", None)
+    PUBLIC_TURN_URL: str | None = os.getenv("PUBLIC_TURN_URL", None)
+    _public_stun_raw: str | None = os.getenv("PUBLIC_STUN_URLS", None)
+    PUBLIC_STUN_URLS: list[str] | None = (
+        [url.strip() for url in _public_stun_raw.split(",")] if _public_stun_raw else None
+    )
+
 
 
 settings = Settings()
