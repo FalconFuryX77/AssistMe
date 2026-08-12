@@ -13,11 +13,19 @@ class WebRTCService:
 
         Includes configured STUN servers and optional TURN server.
         """
-        servers = [
-            ICEServerEntry(urls=settings.STUN_SERVERS)
-        ]
+        # Use public-facing STUN URLs if configured, otherwise fallback to internal list
+        stun_urls = settings.PUBLIC_STUN_URLS if settings.PUBLIC_STUN_URLS else settings.STUN_SERVERS
+        servers = [ICEServerEntry(urls=stun_urls)]
 
-        if settings.TURN_SERVER_URL:
+        # Use public TURN URL if configured, otherwise fall back to internal TURN
+        if settings.PUBLIC_TURN_URL:
+            turn_entry = ICEServerEntry(
+                urls=settings.PUBLIC_TURN_URL,
+                username=settings.TURN_SERVER_USERNAME,
+                credential=settings.TURN_SERVER_CREDENTIAL,
+            )
+            servers.append(turn_entry)
+        elif settings.TURN_SERVER_URL:
             turn_entry = ICEServerEntry(
                 urls=settings.TURN_SERVER_URL,
                 username=settings.TURN_SERVER_USERNAME,
