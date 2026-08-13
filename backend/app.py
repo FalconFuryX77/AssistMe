@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers.auth.auth import router as auth_router
 from api.routers.contacts import router as contacts_router
@@ -10,6 +11,7 @@ from api.routers.health import router as health_router
 from api.routers.sessions import router as sessions_router
 from api.routers.session_ws import router as session_ws_router
 from api.routers.users import router as users_router
+from core.config import settings
 from core.database import create_tables
 
 # Ensure all models are imported so SQLAlchemy knows about them
@@ -25,9 +27,19 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="AssistMe API",
-    version="0.3.0",
+    version="0.4.0",
     description="Adaptive Context-Aware Secure Assistance Framework",
     lifespan=lifespan,
+)
+
+# --- CORS Middleware for Internet Deployment ---
+# Allows cross-origin requests from configured domains (or "*" for dev).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(health_router)

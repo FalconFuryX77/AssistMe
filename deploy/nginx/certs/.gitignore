@@ -1,0 +1,5 @@
+# Do NOT commit private keys or certificates to version control.
+# These are generated per deployment.
+*.pem
+*.key
+*.crt

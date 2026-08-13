@@ -61,7 +61,11 @@ def test_nginx_websockets_reverse_proxy_configuration() -> None:
 
     content = nginx_conf.read_text(encoding="utf-8")
     assert "proxy_set_header Upgrade $http_upgrade;" in content
-    assert "proxy_set_header Connection \"upgrade\";" in content
+    # Accept both hardcoded "upgrade" and map-variable $connection_upgrade
+    assert (
+        'proxy_set_header Connection "upgrade";' in content
+        or "proxy_set_header Connection $connection_upgrade;" in content
+    ), "WebSocket Connection upgrade header not found in Nginx config"
     assert "location /ws/" in content
     assert "proxy_read_timeout" in content
 
