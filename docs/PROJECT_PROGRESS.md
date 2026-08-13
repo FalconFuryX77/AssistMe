@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: ALL 18 PHASES + FULL REPO AUDIT COMPLETE ✅ 🎉
+## Current Status: ALL 19 PHASES + INTERNET CONNECTIVITY COMPLETE ✅ 🎉
 
-**Last updated:** 2026-08-07T22:24Z
+**Last updated:** 2026-08-13T06:22Z
 **Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 152/152 (100% PASS RATE ACROSS ENTIRE PLATFORM)
+**All tests passing:** 176/176 (100% PASS RATE ACROSS ENTIRE PLATFORM)
 **Full Audit Status:** Complete — Cleaned all API contracts, PostgreSQL production driver, model metadata registry, and Coturn port forwarding.
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
@@ -252,10 +252,34 @@ python -m pytest tests/ -v
 
 ---
 
+### Phase 19 — Internet Connectivity ✅
+
+**Commit:** `5396ba9` — "Phase 19: Internet Connectivity — CORS, Public TURN/STUN, HTTPS/TLS, env config"
+**Merge:** `267f278` — Merged to `main` via `--no-ff`
+**Tests:** 176/176 passing (24 new internet connectivity tests)
+
+Completed:
+1. **CORS Middleware** (`backend/app.py`):
+   - Added `CORSMiddleware` from `fastapi.middleware.cors` with configurable `ALLOWED_ORIGINS` (defaults to `*` for dev, restrict in production).
+2. **Public-Facing Configuration** (`backend/core/config.py`):
+   - Added `ALLOWED_ORIGINS`, `PUBLIC_API_BASE_URL`, `PUBLIC_WS_BASE_URL`, `PUBLIC_TURN_URL`, `PUBLIC_STUN_URLS` — all default to `None`, set explicitly for internet deployment.
+3. **Public ICE Server URLs** (`backend/api/services/webrtc_service.py`):
+   - Returns `PUBLIC_TURN_URL`/`PUBLIC_STUN_URLS` to clients when set, falls back to internal Docker hostnames for local dev.
+4. **Coturn External IP** (`deploy/coturn/turnserver.conf`):
+   - Added `external-ip=${EXTERNAL_IP}` (envsubst at container runtime), `relay-ip=0.0.0.0`, and `denied-peer-ip` ranges to block relay abuse.
+5. **HTTPS/TLS Nginx** (`deploy/nginx/conf.d/assistme.conf`):
+   - Full rewrite: `listen 443 ssl http2`, TLS 1.2/1.3 only, HSTS header, HTTP→HTTPS redirect, `wss://` WebSocket proxy via `$connection_upgrade` map.
+6. **Docker Compose Updates** (`deploy/docker-compose.yml`):
+   - Passes `PUBLIC_*`, `ALLOWED_ORIGINS`, `EXTERNAL_IP` to backend; coturn uses `envsubst` to inject `EXTERNAL_IP`; nginx mounts `certs/` volume.
+7. **Environment Template** (`deploy/.env.example`):
+   - Documented all new internet deployment variables with examples.
+8. **Self-Signed Dev Certificate**:
+   - Generated `fullchain.pem` + `privkey.pem` in `deploy/nginx/certs/` for local HTTPS testing.
+9. **Internet Connectivity Test Suite** (`backend/tests/test_internet_connectivity.py`):
+   - 24 new tests: CORS headers, preflight OPTIONS, ALLOWED_ORIGINS parsing, ICE public URLs (no Docker hostnames), Coturn `external-ip` directive, Nginx SSL/TLS block, Docker Compose env vars, dev cert presence.
+
+---
+
 ## Final Project Status
 
-All core backend, WebRTC signaling, E2EE Signal Protocol, native drivers, hardening, Web Application Frontend, Flutter Mobile UI, and Production Infrastructure phases (Phases 0 through 18) are 100% complete, fully tested (152/152 passing unit & integration tests), and validated! 🚀
-
-
-
-
+All core backend, WebRTC signaling, E2EE Signal Protocol, native drivers, hardening, Web Application Frontend, Flutter Mobile UI, Production Infrastructure, and Internet Connectivity phases (Phases 0 through 19) are 100% complete, fully tested (176/176 passing unit & integration tests), and validated! The platform is ready for deployment over the public internet. 🚀
