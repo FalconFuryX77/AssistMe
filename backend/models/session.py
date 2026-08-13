@@ -105,3 +105,12 @@ class Session(Base):
     file_transfers = relationship(
         "FileTransfer", back_populates="session", cascade="all, delete-orphan"
     )
+    context_snapshots = relationship(
+        "ContextSnapshot", back_populates="session", cascade="all, delete-orphan"
+    )
+    policy_decision = relationship(
+        "PolicyDecision", back_populates="session", cascade="all, delete-orphan", uselist=False
+    )
+    assistance_suggestions = relationship(
+        "AssistanceSuggestion", back_populates="session", cascade="all, delete-orphan"
+    )

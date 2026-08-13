@@ -349,6 +349,49 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type == "context_reported":
+                # Broadcast the helpee's updated device/session context snapshot
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "platform": msg.get("platform"),
+                    "os_version": msg.get("os_version"),
+                    "foreground_app": msg.get("foreground_app"),
+                    "foreground_app_category": msg.get("foreground_app_category"),
+                    "is_sensitive_app": msg.get("is_sensitive_app"),
+                    "accessibility_enabled": msg.get("accessibility_enabled"),
+                    "is_screen_sharing": msg.get("is_screen_sharing"),
+                    "is_flag_secure_active": msg.get("is_flag_secure_active"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
+            elif msg_type == "policy_updated":
+                # Broadcast adaptive policy decision changes (risk / mode)
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "risk_level": msg.get("risk_level"),
+                    "assistance_mode": msg.get("assistance_mode"),
+                    "negotiated_capabilities": msg.get("negotiated_capabilities"),
+                    "consent_verified": msg.get("consent_verified"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
+            elif msg_type in (
+                "task_recorded",
+                "suggestions_updated",
+                "preferred_mode_updated",
+            ):
+                # Broadcast intelligent-assistance learning / suggestion updates
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "action": msg.get("action"),
+                    "occurrence_count": msg.get("occurrence_count"),
+                    "preferred_mode": msg.get("preferred_mode"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}

@@ -39,3 +39,9 @@ class User(Base):
 
     # Relationships
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    task_patterns = relationship(
+        "AssistanceTaskPattern", back_populates="user", cascade="all, delete-orphan"
+    )
+    preferred_mode = relationship(
+        "PreferredAssistanceMode", back_populates="user", cascade="all, delete-orphan", uselist=False
+    )

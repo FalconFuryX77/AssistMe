@@ -433,8 +433,8 @@ Send a heartbeat signal for a session.
 ### WebSocket Endpoint: `ws://localhost:8000/ws/session/{session_id}?token=<JWT>`
 
 Real-time session events stream.
-- Inbound: `heartbeat`, `leave`, `signal_offer`, `signal_answer`, `signal_ice_candidate`, `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, `screen_share_security_event`
-- Outbound: `user_joined`, `user_left`, `user_disconnected`, `user_reconnected`, `session_ended`, `heartbeat_ack`, `signal_offer`, `signal_answer`, `signal_ice_candidate`, `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, `screen_share_security_event`
+- Inbound: `heartbeat`, `leave`, `signal_offer`, `signal_answer`, `signal_ice_candidate`, `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, `screen_share_security_event`, `context_reported`, `policy_updated`, `task_recorded`, `suggestions_updated`, `preferred_mode_updated`
+- Outbound: `user_joined`, `user_left`, `user_disconnected`, `user_reconnected`, `session_ended`, `heartbeat_ack`, `signal_offer`, `signal_answer`, `signal_ice_candidate`, `screen_share_start`, `screen_share_stop`, `screen_share_orientation`, `screen_share_security_event`, `context_reported`, `policy_updated`, `task_recorded`, `suggestions_updated`, `preferred_mode_updated`
 
 ---
 
@@ -1193,3 +1193,195 @@ Access tokens are JWT with the following claims:
 
 Access token lifetime: **30 minutes**
 Refresh token lifetime: **7 days**
+
+---
+
+## Context Engine (Phase 20)
+
+### `POST /sessions/{session_id}/context/report`
+
+Report the helpee's current device & session context (partial upsert).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body (all fields optional):**
+```json
+{
+  "platform": "android",
+  "os_version": "14",
+  "device_model": "Pixel 8",
+  "screen_width": 1080,
+  "screen_height": 1920,
+  "screen_density": 2.625,
+  "foreground_app": "com.android.settings",
+  "foreground_app_category": "system",
+  "is_sensitive_app": false,
+  "accessibility_enabled": true,
+  "accessibility_gesture_capable": true,
+  "screen_share_permission": true,
+  "microphone_permission": true,
+  "remote_control_permission": true,
+  "is_screen_sharing": true,
+  "is_flag_secure_active": false,
+  "is_in_audio_call": true,
+  "battery_percent": 85,
+  "is_charging": true,
+  "network_type": "wifi"
+}
+```
+
+**Response:** `200 OK` — full `ContextSnapshotResponse`
+
+### `GET /sessions/{session_id}/context/me`
+
+Get the current user's context snapshot. Returns `404` if none reported yet.
+
+### `GET /sessions/{session_id}/context/`
+
+List all context snapshots for a session (participants only).
+
+---
+
+## Adaptive Policy Engine (Phase 21)
+
+### `POST /sessions/{session_id}/policy/evaluate`
+
+Evaluate the adaptive policy from live context (risk → capabilities → mode).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "requested_capabilities": ["tap", "drawing", "pointer", "voice", "drag"]
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "risk_level": "low",
+  "risk_reasons": [],
+  "negotiated_capabilities": ["drawing", "pointer", "tap", "voice"],
+  "assistance_mode": "tap",
+  "consent_verified": false,
+  "consent_granted_at": null,
+  "evaluated_at": "2026-08-13T12:00:00Z"
+}
+```
+
+### `POST /sessions/{session_id}/policy/capabilities`
+
+Explicitly negotiate a capability set constrained by context risk.
+
+**Request Body:**
+```json
+{
+  "capabilities": ["tap", "pointer", "voice"]
+}
+```
+
+### `POST /sessions/{session_id}/policy/consent`
+
+Verify helpee consent before granting remote interaction capabilities.
+
+**Request Body:**
+```json
+{
+  "consent_token": "a1b2c3d4...",
+  "capabilities": ["tap", "pointer", "voice"]
+}
+```
+
+**Errors:**
+| Status | Detail |
+|--------|--------|
+| `403` | `"Invalid consent token — consent not granted by helpee"` |
+
+### `GET /sessions/{session_id}/policy/status`
+
+Get the current adaptive policy decision. Returns a conservative `voice`/`restricted` default before first evaluation.
+
+---
+
+## Intelligent Assistance (Phase 22)
+
+### `POST /sessions/{session_id}/assistance/tasks`
+
+Learn an assistance task occurrence (repeated-task learning).
+
+**Headers:** `Authorization: Bearer <access_token>`
+
+**Request Body:**
+```json
+{
+  "foreground_app": "com.android.settings",
+  "platform": "android",
+  "action": "remote_control"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "id": "uuid",
+  "context_signature": "a1b2c3...",
+  "foreground_app": "com.android.settings",
+  "platform": "android",
+  "action": "remote_control",
+  "occurrence_count": 1,
+  "last_occurred_at": "2026-08-13T12:00:00Z"
+}
+```
+
+### `GET /sessions/{session_id}/assistance/suggestions`
+
+Get context-aware assistance suggestions for the session.
+
+**Response:** `200 OK`
+```json
+{
+  "session_id": "uuid",
+  "total_suggestions": 1,
+  "suggestions": [
+    {
+      "id": "uuid",
+      "session_id": "uuid",
+      "suggestion_type": "repeated_task",
+      "title": "Remote control helps with this app",
+      "detail": "You've used remote_control 2 times with com.android.settings. Repeat it?",
+      "confidence": 0.5,
+      "created_at": "2026-08-13T12:00:00Z"
+    }
+  ]
+}
+```
+
+### `GET /users/me/assistance/task-patterns`
+
+List the current user's learned task patterns (most frequent first).
+
+### `GET /users/me/assistance/preferred-mode`
+
+Get the current user's preferred assistance mode (`null` if unset).
+
+### `PUT /users/me/assistance/preferred-mode`
+
+Set the current user's preferred assistance mode.
+
+**Request Body:**
+```json
+{
+  "mode": "tap"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "user_id": "uuid",
+  "mode": "tap",
+  "updated_at": "2026-08-13T12:00:00Z"
+}
+```
