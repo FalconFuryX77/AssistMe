@@ -56,9 +56,15 @@ async def test_get_ice_servers_non_participant(client: AsyncClient) -> None:
 @pytest.mark.asyncio(loop_scope="session")
 async def test_webrtc_service_turn_config(monkeypatch) -> None:
     """WebRTCService includes TURN server credentials when configured."""
-    monkeypatch.setattr(settings, "TURN_SERVER_URL", "turn:turn.example.com:3478")
-    monkeypatch.setattr(settings, "TURN_SERVER_USERNAME", "testuser")
-    monkeypatch.setattr(settings, "TURN_SERVER_CREDENTIAL", "testpass")
+    # Patch the settings object that the service module actually references
+    # (may differ from our module-level import after module reloads in other tests)
+    import api.services.webrtc_service as svc_mod
+    svc_settings = svc_mod.settings
+    monkeypatch.setattr(svc_settings, "TURN_SERVER_URL", "turn:turn.example.com:3478")
+    monkeypatch.setattr(svc_settings, "TURN_SERVER_USERNAME", "testuser")
+    monkeypatch.setattr(svc_settings, "TURN_SERVER_CREDENTIAL", "testpass")
+    # Ensure PUBLIC_TURN_URL is cleared so the legacy TURN_SERVER_URL path is used
+    monkeypatch.setattr(svc_settings, "PUBLIC_TURN_URL", None)
 
     ice_config = WebRTCService.get_ice_servers()
     assert len(ice_config.ice_servers) == 2

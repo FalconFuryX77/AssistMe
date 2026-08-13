@@ -11,11 +11,18 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://assistme:assistme_secret_pass@db:5432/assistmedb
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-a1b2c3d4e5f6}
+      # Internal Docker-network STUN/TURN (backend health / internal signaling)
       - STUN_SERVER_1=stun:coturn:3478
       - STUN_SERVER_2=stun:stun.l.google.com:19302
       - TURN_SERVER_URL=turn:coturn:3478
-      - TURN_SERVER_USERNAME=assistme_turn_user
-      - TURN_SERVER_CREDENTIAL=assistme_turn_secret
+      - TURN_SERVER_USERNAME=${TURN_USERNAME:-assistme_turn_user}
+      - TURN_SERVER_CREDENTIAL=${TURN_CREDENTIAL:-assistme_turn_secret}
+      # Public-facing URLs returned to mobile/web clients over the internet
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      - PUBLIC_WS_BASE_URL=${PUBLIC_WS_BASE_URL:-ws://localhost:8000/ws}
+      - PUBLIC_TURN_URL=${PUBLIC_TURN_URL:-turn:localhost:3478}
+      - PUBLIC_STUN_URLS=${PUBLIC_STUN_URLS:-stun:stun.l.google.com:19302}
     depends_on:
       db:
         condition: service_healthy
@@ -50,8 +57,18 @@ services:
     image: coturn/coturn:4.6.2-alpine
     container_name: assistme_coturn
     restart: unless-stopped
+    # Use envsubst to inject EXTERNAL_IP into turnserver.conf at runtime
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        apk add --no-cache gettext > /dev/null 2>&1
+        envsubst < /etc/coturn/turnserver.conf.template > /etc/coturn/turnserver.conf
+        exec turnserver -c /etc/coturn/turnserver.conf
+    environment:
+      - EXTERNAL_IP=${EXTERNAL_IP:-0.0.0.0}
     volumes:
-      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf.template:ro
     ports:
       - "3478:3478/tcp"
       - "3478:3478/udp"
@@ -72,6 +89,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
       - backend
     networks:
