@@ -169,11 +169,10 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
                 apiClient: widget.apiClient,
                 onSecurityTap: _showSecurityZeroizeSheet,
                 onLeaveSession: _handleLeaveSession,
-                onRequestHelp: widget.isHelpee
-                    ? () => _flowCoordinatorKey.currentState?.requestHelp()
-                    : null,
-                isRequestingHelp:
-                    _flowCoordinatorKey.currentState?.isRequestingHelp ?? false,
+                // One-tap calling replaced the in-session request dialog;
+                // help is requested from Home, never inside a live session.
+                onRequestHelp: null,
+                isRequestingHelp: false,
               ),
             ),
           ),

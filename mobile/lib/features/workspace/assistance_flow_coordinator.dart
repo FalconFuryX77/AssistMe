@@ -127,6 +127,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       if (mounted) setState(() => _mediaReady = true);
     } catch (e) {
       debugPrint('WebRTC init failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: AppTheme.accentRose,
+          content: Text('Media engine failed to start: $e'),
+        ));
+      }
     }
   }
 
@@ -170,6 +176,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _realtime?.send({'type': 'signal_answer', 'sdp': answer});
     } catch (e) {
       debugPrint('Answering offer failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: AppTheme.accentRose,
+          content: Text('Could not join the call: $e'),
+        ));
+      }
     }
   }
 
@@ -229,7 +241,17 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         if (widget.isHelpee) {
           final sdp = event.data['sdp'];
           if (sdp is Map) {
-            _engine.setRemoteDescription(Map<String, dynamic>.from(sdp));
+            _engine
+                .setRemoteDescription(Map<String, dynamic>.from(sdp))
+                .catchError((e) {
+              debugPrint('Applying answer failed: $e');
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  backgroundColor: AppTheme.accentRose,
+                  content: Text('Connection problem: $e'),
+                ));
+              }
+            });
           }
         }
         break;
