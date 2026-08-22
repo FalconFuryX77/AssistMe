@@ -3,6 +3,7 @@ import { WebAuthStore } from './core/security/web_auth_store';
 import { WebApiClient } from './core/network/web_api_client';
 import { CanvasRenderer } from './core/graphics/canvas_renderer';
 import { WebSessionManager } from './features/session/web_session_manager';
+import { getBrowserFingerprint } from './core/security/browser_device_identity';
 import { LoginView } from './features/auth/LoginView';
 import { RegisterView } from './features/auth/RegisterView';
 import { SessionDashboard } from './features/dashboard/SessionDashboard';
@@ -11,11 +12,30 @@ import { VoiceControlBar } from './features/workspace/VoiceControlBar';
 import { ChatFileDrawer, ChatMessageItem } from './features/workspace/ChatFileDrawer';
 import { MultiPartySpeakerGrid, ParticipantItem } from './features/workspace/MultiPartySpeakerGrid';
 import { SecurityZeroizeModal } from './features/workspace/SecurityZeroizeModal';
+import { AssistanceCoordinator } from './features/workspace/AssistanceCoordinator';
+import { TrustedDevicesView } from './features/devices/TrustedDevicesView';
 import { ToastContainer, ToastMessage } from './components/common/Toast';
 import './styles/theme.css';
 
-const API_BASE_URL = 'http://localhost:8000';
-const WS_BASE_URL = 'ws://localhost:8000';
+// Resolve the backend address from where the page itself was served.
+// Works from any device on the network: open http://<pc-ip>:5173 and the app
+// automatically talks to http://<pc-ip>:8000. Override with VITE_API_BASE_URL.
+const detectApiBase = (): string => {
+  const override = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (override) return override;
+  const host = window.location.hostname;
+  return `http://${host}:8000`;
+};
+
+const detectWsBase = (): string => {
+  const override = import.meta.env.VITE_WS_BASE_URL as string | undefined;
+  if (override) return override;
+  const host = window.location.hostname;
+  return `ws://${host}:8000`;
+};
+
+const API_BASE_URL = detectApiBase();
+const WS_BASE_URL = detectWsBase();
 
 export const App: React.FC = () => {
   const authStore = useMemo(() => new WebAuthStore(), []);
@@ -23,13 +43,16 @@ export const App: React.FC = () => {
   const canvasRenderer = useMemo(() => new CanvasRenderer(), []);
   const sessionManager = useMemo(() => new WebSessionManager(), []);
 
-  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'workspace'>('login');
+  const deviceFingerprint = useMemo(() => getBrowserFingerprint(), []);
+
+  const [view, setView] = useState<'login' | 'register' | 'dashboard' | 'workspace' | 'trusted-devices'>('login');
   const [activeSession, setActiveSession] = useState<any | null>(null);
   const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessageItem[]>([]);
   const [participants, setParticipants] = useState<ParticipantItem[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [isFlagSecure, setIsFlagSecure] = useState(false);
+  const [isHelpee, setIsHelpee] = useState(false);
 
   // Check existing token on launch
   useEffect(() => {
@@ -47,8 +70,9 @@ export const App: React.FC = () => {
     }, 4000);
   };
 
-  const handleEnterSession = async (session: any) => {
+  const handleEnterSession = async (session: any, isHelpeeRole = false) => {
     setActiveSession(session);
+    setIsHelpee(isHelpeeRole);
     setView('workspace');
 
     const token = authStore.getAccessToken();
@@ -103,12 +127,30 @@ export const App: React.FC = () => {
         {view === 'workspace' && activeSession && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
             <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+              Role: <strong style={{ color: 'var(--accent-secondary)' }}>{isHelpee ? 'Helpee' : 'Helper'}</strong>
+            </span>
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setIsHelpee((v) => !v)}
+              title="Toggle your role in this session"
+            >
+              Switch to {isHelpee ? 'Helper' : 'Helpee'}
+            </button>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
               Room Code: <strong style={{ color: 'var(--accent-secondary)' }}>{activeSession.session_code}</strong>
             </span>
+            <button className="btn btn-secondary btn-sm" onClick={() => setView('trusted-devices')}>
+              Trusted Devices
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={handleLeaveSession}>
               Dashboard
             </button>
           </div>
+        )}
+        {(view === 'dashboard' || view === 'trusted-devices') && (
+          <button className="btn btn-secondary btn-sm" onClick={() => setView('dashboard')}>
+            Dashboard
+          </button>
         )}
       </header>
 
@@ -137,6 +179,13 @@ export const App: React.FC = () => {
             apiClient={apiClient}
             onEnterSession={handleEnterSession}
             onLogout={handleLogout}
+          />
+        )}
+
+        {view === 'trusted-devices' && (
+          <TrustedDevicesView
+            apiClient={apiClient}
+            onBack={() => (activeSession ? setView('workspace') : setView('dashboard'))}
           />
         )}
 
@@ -194,6 +243,15 @@ export const App: React.FC = () => {
                 addToast('warning', 'Memory Scrubbed', 'E2EE Keys Zeroized');
                 setIsSecurityModalOpen(false);
               }}
+            />
+
+            {/* One-click help / escalation / drawing overlay flow */}
+            <AssistanceCoordinator
+              sessionId={activeSession.id}
+              apiClient={apiClient}
+              sessionManager={sessionManager}
+              isHelpee={isHelpee}
+              helperDeviceFingerprint={deviceFingerprint}
             />
           </div>
         )}
