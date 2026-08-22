@@ -10,6 +10,7 @@ import 'theme/app_theme.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final secureStorage = SecureStorageService();
+  await secureStorage.init();
 
   // Restore the saved server address (Settings) if present.
   final savedUrl = await secureStorage.getServerUrl();
