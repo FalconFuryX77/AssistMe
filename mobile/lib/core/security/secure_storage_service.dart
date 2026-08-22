@@ -1,14 +1,37 @@
-/// Secure Storage Service for Mobile (iOS Keychain & Android EncryptedSharedPreferences).
+/// Persistent storage for tokens, device identity, and settings.
 ///
-/// Handles encrypted persistence for JWT Access Tokens, Refresh Tokens, and E2EE Ephemeral Keys.
-class SecureStorageService {
-  final Map<String, String> _inMemoryStorage = {};
+/// Backed by SharedPreferences so identity survives app restarts (the
+/// fingerprint MUST stay stable — it IS the account). Swap to encrypted
+/// storage later without touching call sites: the async API is identical.
+library;
 
+import 'package:shared_preferences/shared_preferences.dart';
+
+class SecureStorageService {
   static const String keyAccessToken = 'jwt_access_token';
   static const String keyRefreshToken = 'jwt_refresh_token';
   static const String keyE2EEIdentityKey = 'e2ee_identity_key';
   static const String keyServerUrl = 'server_base_url';
   static const String keyDisplayName = 'device_display_name';
+
+  late final Object _prefs;
+  bool _ready = false;
+
+  Future<void> init() async {
+    final prefs = await _loadPrefs();
+    _prefs = prefs;
+    _ready = true;
+  }
+
+  Future<Object> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs;
+  }
+
+  SharedPreferences get prefs {
+    assert(_ready, 'Call init() before using SecureStorageService');
+    return _prefs as SharedPreferences;
+  }
 
   Future<String?> getServerUrl() => read(key: keyServerUrl);
 
@@ -20,21 +43,19 @@ class SecureStorageService {
   Future<String?> getDisplayName() => read(key: keyDisplayName);
 
   Future<void> write({required String key, required String value}) async {
-    // Platform secure storage write wrapper
-    _inMemoryStorage[key] = value;
+    await prefs.setString(key, value);
   }
 
   Future<String?> read({required String key}) async {
-    // Platform secure storage read wrapper
-    return _inMemoryStorage[key];
+    return prefs.getString(key);
   }
 
   Future<void> delete({required String key}) async {
-    _inMemoryStorage.remove(key);
+    await prefs.remove(key);
   }
 
   Future<void> clearAll() async {
-    _inMemoryStorage.clear();
+    await prefs.clear();
   }
 
   Future<void> saveTokens({required String accessToken, required String refreshToken}) async {
