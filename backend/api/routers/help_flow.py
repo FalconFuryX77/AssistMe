@@ -41,7 +41,11 @@ async def place_help_call(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Helpee taps a trusted person: form session + ring the helper."""
+    """Helpee taps a trusted person: form session + ring the helper.
+
+    Idempotent while ringing: if a request for this pair is already pending,
+    we return it instead of erroring — tapping again just keeps calling.
+    """
     # 1. Resolve the helper from MY trusted list (security gate).
     result = await db.execute(
         select(TrustedDevice).where(
@@ -66,16 +70,29 @@ async def place_help_call(
         db=db,
     )
 
-    # 3. Create the assistance request (reuses all existing security checks).
-    request = await AssistanceRequestService.request_help(
-        session_id=session.id,
-        helpee_user_id=current_user.id,
-        helper_user_id=helper_user_id,
-        helper_device_fingerprint=payload.helper_device_fingerprint,
-        db=db,
-    )
+    # 3. Reuse an already-pending request for this session if one exists.
+    from models.assistance_request import AssistanceRequest
 
-    # 4. Ring every live device of the helper.
+    result = await db.execute(
+        select(AssistanceRequest).where(
+            AssistanceRequest.session_id == session.id,
+            AssistanceRequest.status == "pending",
+        )
+    )
+    request = result.scalar_one_or_none()
+
+    if request is None:
+        # 3b. Create the assistance request (reuses all security checks).
+        request = await AssistanceRequestService.request_help(
+            session_id=session.id,
+            helpee_user_id=current_user.id,
+            helper_user_id=helper_user_id,
+            helper_device_fingerprint=payload.helper_device_fingerprint,
+            message=payload.message,
+            db=db,
+        )
+
+    # 4. Ring every live device of the helper (also covers re-rings).
     helper_online = await push_to_user(
         helper_user_id,
         {
@@ -94,6 +111,41 @@ async def place_help_call(
         "status": "ringing",
         "helper_online": helper_online,
     }
+
+
+@router.get("/pending")
+async def list_pending_calls(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Missed rings: pending requests addressed to ME (the helper).
+
+    Shown as soon as the app opens — a closed app never loses a request.
+    """
+    from models.assistance_request import AssistanceRequest
+
+    result = await db.execute(
+        select(AssistanceRequest).where(
+            AssistanceRequest.helper_user_id == current_user.id,
+            AssistanceRequest.status == "pending",
+        )
+    )
+    requests = result.scalars().all()
+
+    items = []
+    for req in requests:
+        res = await db.execute(select(User).where(User.id == req.helpee_user_id))
+        helpee = res.scalar_one_or_none()
+        items.append(
+            {
+                "request_id": req.id,
+                "session_id": req.session_id,
+                "from_name": (helpee.display_name if helpee else None) or "Someone",
+                "message": req.message,
+                "created_at": req.created_at.isoformat(),
+            }
+        )
+    return {"total": len(items), "items": items}
 
 
 # Re-exported so the respond route can notify the helpee without circulars.

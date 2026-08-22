@@ -38,6 +38,7 @@ class AssistanceRequestService:
         helper_user_id: str,
         helper_device_fingerprint: str,
         db: AsyncSession,
+        message: str | None = None,
     ) -> AssistanceRequest:
         """A helpee requests help from a helper on their trusted device.
 
@@ -79,6 +80,7 @@ class AssistanceRequestService:
             helpee_user_id=helpee_user_id,
             helper_user_id=helper_user_id,
             helper_device_fingerprint=helper_device_fingerprint,
+            message=message,
             status="pending",
             initial_capabilities=json.dumps(list(DEFAULT_GRANTED_CAPABILITIES)),
         )

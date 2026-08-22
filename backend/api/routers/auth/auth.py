@@ -1,6 +1,7 @@
 """Authentication API routes."""
 
 from fastapi import APIRouter, Depends, status
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_current_user
@@ -53,6 +54,38 @@ async def device_bootstrap(
     return await AuthService.device_bootstrap(
         device_fingerprint=payload.device_fingerprint,
         display_name=payload.display_name,
+        db=db,
+    )
+
+
+class ReclaimRequest(BaseModel):
+    """Reclaim an identity after reinstall/phone loss using the recovery code."""
+
+    device_fingerprint: str
+    recovery_code: str
+
+    @field_validator("recovery_code")
+    @classmethod
+    def code_shape(cls, v: str) -> str:
+        v = v.strip().replace("-", "").replace(" ", "").lower()
+        if len(v) < 8:
+            raise ValueError("Recovery code looks too short")
+        return v
+
+
+@router.post("/device/reclaim", response_model=DeviceBootstrapResponse)
+async def device_reclaim(
+    payload: ReclaimRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Bind this install to the account matching the recovery code.
+
+    This is the reinstall path: new fingerprint + old recovery code = same
+    identity, same trusted people.
+    """
+    return await AuthService.device_reclaim(
+        device_fingerprint=payload.device_fingerprint,
+        recovery_code=payload.recovery_code,
         db=db,
     )
 
