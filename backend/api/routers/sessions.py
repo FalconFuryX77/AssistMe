@@ -201,7 +201,11 @@ async def get_session(
     return _enrich_session(session)
 
 
-@router.get("/{session_id}/ice-servers", response_model=ICEServersResponse)
+@router.get(
+    "/{session_id}/ice-servers",
+    response_model=ICEServersResponse,
+    response_model_exclude_none=True,
+)
 async def get_ice_servers(
     session_id: str,
     current_user: User = Depends(get_current_user),
