@@ -225,11 +225,94 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
               ),
+              const SizedBox(height: 20),
+              TextButton(
+                onPressed: _busy ? null : _reclaimWithCode,
+                child: const Text('Reinstalling? I have a recovery code'),
+              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  /// Reinstall path: enter the recovery code from the old install to
+  /// reclaim that identity — trusted people come straight back.
+  Future<void> _reclaimWithCode() async {
+    final controller = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Enter recovery code'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Type the code you saved when you first set up the app. This '
+              'brings back your name and all your trusted people.',
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              style: const TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 18,
+                letterSpacing: 2,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: const InputDecoration(labelText: 'Recovery code'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Restore'),
+          ),
+        ],
+      ),
+    );
+    if (code == null || code.isEmpty || !mounted) return;
+
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+      final resp = await widget.apiClient.reclaimIdentity(
+        deviceFingerprint: fingerprint,
+        recoveryCode: code,
+      );
+      if (resp.statusCode != 200) {
+        final detail = jsonDecode(resp.body)['detail'] ?? 'Could not restore';
+        setState(() {
+          _busy = false;
+          _error = detail.toString();
+        });
+        return;
+      }
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      await widget.secureStorage.saveTokens(
+        accessToken: data['access_token'] as String,
+        refreshToken: data['refresh_token'] as String,
+      );
+      final name = (data['display_name'] as String?) ?? '';
+      if (name.isNotEmpty) await widget.secureStorage.saveDisplayName(name);
+      if (mounted) Navigator.of(context).pushReplacementNamed('/home');
+    } catch (e) {
+      setState(() {
+        _busy = false;
+        _error = 'Network error: $e';
+      });
+    }
   }
 
   /// Same server-address dialog pattern as before: quick, saved locally.

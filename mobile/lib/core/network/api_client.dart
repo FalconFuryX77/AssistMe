@@ -190,6 +190,26 @@ class ApiClient {
     );
   }
 
+  /// Missed rings addressed to me (helper) — shown on app open.
+  Future<http.Response> listPendingCalls() {
+    return get('/help/pending');
+  }
+
+  /// Reclaim an identity with a recovery code after reinstall/phone loss.
+  Future<http.Response> reclaimIdentity({
+    required String deviceFingerprint,
+    required String recoveryCode,
+  }) {
+    return post(
+      '/auth/device/reclaim',
+      body: {
+        'device_fingerprint': deviceFingerprint,
+        'recovery_code': recoveryCode,
+      },
+      requireAuth: false,
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Assistance request / escalation endpoints
   // ---------------------------------------------------------------------------

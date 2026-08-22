@@ -64,6 +64,28 @@ class _HomeScreenState extends State<HomeScreen> {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
     await _loadLists();
     await _connectChannel();
+    await _checkMissedCalls();
+  }
+
+  /// A closed app must never lose a request: fetch pending rings on open.
+  Future<void> _checkMissedCalls() async {
+    if (_incomingCall != null || _ringingRequestId != null) return;
+    try {
+      final resp = await widget.apiClient.listPendingCalls();
+      if (resp.statusCode != 200) return;
+      final data = jsonDecode(resp.body);
+      final items = List<Map<String, dynamic>>.from(data['items'] ?? []);
+      if (items.isEmpty) return;
+      final first = items.first;
+      setState(() {
+        _incomingCall = {
+          'request_id': first['request_id'],
+          'session_id': first['session_id'],
+          'from_name': first['from_name'],
+          'message': first['message'],
+        };
+      });
+    } catch (_) {/* offline — try again next bootstrap */}
   }
 
   Future<void> _loadLists() async {
@@ -278,13 +300,15 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ));
       }
-    } catch (e) {
+      } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Network error: $e')),
         );
       }
     }
+    // Surface the next missed ring, if any.
+    await _checkMissedCalls();
   }
 
   // -------------------------------------------------------------------------

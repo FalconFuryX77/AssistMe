@@ -40,6 +40,8 @@ class AssistanceRequest(Base):
     helper_device_fingerprint: Mapped[str | None] = mapped_column(
         String(128), nullable=True
     )
+    # Optional note from the helpee ("what do you need help with?").
+    message: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # pending -> accepted -> denied
     status: Mapped[str] = mapped_column(
         String(20), default="pending", nullable=False
