@@ -102,9 +102,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final resp = await widget.apiClient.getIceServers(widget.sessionId);
       if (resp.statusCode == 200) {
         final servers = jsonDecode(resp.body)['ice_servers'] as List;
-        iceServers = servers
-            .map<Map<String, dynamic>>((s) => Map<String, dynamic>.from(s as Map))
-            .toList();
+        iceServers = servers.map<Map<String, dynamic>>((s) {
+          final m = Map<String, dynamic>.from(s as Map);
+          // Android's IceServer builder throws on explicit null
+          // username/credential keys sent for plain STUN entries.
+          m.removeWhere((k, v) => v == null);
+          return m;
+        }).toList();
       }
     } catch (_) {
       // fall back to default STUN-only config
