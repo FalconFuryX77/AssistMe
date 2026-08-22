@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import '../security/secure_storage_service.dart';
 
 class ApiClient {
-  final String baseUrl;
+  String baseUrl;
   final SecureStorageService secureStorage;
   final http.Client httpClient;
 
@@ -61,5 +61,135 @@ class ApiClient {
       headers: headers,
       body: body != null ? jsonEncode(body) : null,
     );
+  }
+
+  Future<http.Response> delete(
+    String endpoint, {
+    Map<String, dynamic>? query,
+    bool requireAuth = true,
+  }) async {
+    final headers = await _getHeaders(requireAuth: requireAuth);
+    final uri = Uri.parse('$baseUrl$endpoint').replace(queryParameters: query);
+    return await httpClient.delete(uri, headers: headers);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Trusted device endpoints
+  // ---------------------------------------------------------------------------
+
+  Future<http.Response> initiatePairing({
+    required String deviceFingerprint,
+    String? friendlyName,
+    String? devicePlatform,
+  }) {
+    return post('/devices/pairing/initiate', body: {
+      'device_fingerprint': deviceFingerprint,
+      'friendly_name': friendlyName,
+      'device_platform': devicePlatform,
+    });
+  }
+
+  Future<http.Response> confirmPairing({
+    required String pairingCode,
+    required String password,
+  }) {
+    return post('/devices/pairing/confirm', body: {
+      'pairing_code': pairingCode,
+      'password': password,
+    });
+  }
+
+  Future<http.Response> listTrustedDevices() {
+    return get('/devices/');
+  }
+
+  Future<http.Response> revokeDevice(String deviceId, String password) {
+    return delete('/devices/$deviceId', query: {'password': password});
+  }
+
+  Future<http.Response> checkDeviceIdentity(String deviceFingerprint) {
+    return post('/devices/identity', body: {'device_fingerprint': deviceFingerprint});
+  }
+
+  Future<http.Response> generateSetupCode() {
+    return post('/devices/pairing/setup-code', body: {});
+  }
+
+  Future<http.Response> claimSetupCode({
+    required String setupCode,
+    required String deviceFingerprint,
+    String? friendlyName,
+    String? devicePlatform,
+  }) {
+    return post('/devices/pairing/claim', body: {
+      'setup_code': setupCode,
+      'device_fingerprint': deviceFingerprint,
+      'friendly_name': friendlyName,
+      'device_platform': devicePlatform,
+    });
+  }
+
+  Future<http.Response> listPendingPairings() {
+    return get('/devices/pairing/pending');
+  }
+
+  Future<http.Response> approvePairing(String pairingId) {
+    return post('/devices/pairing/approve', body: {'pairing_id': pairingId});
+  }
+
+  Future<http.Response> getIceServers(String sessionId) {
+    return get('/sessions/$sessionId/ice-servers');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Assistance request / escalation endpoints
+  // ---------------------------------------------------------------------------
+
+  Future<http.Response> requestHelp({
+    required String sessionId,
+    required String helperUserId,
+    required String helperDeviceFingerprint,
+  }) {
+    return post('/sessions/$sessionId/assistance/request', body: {
+      'helper_user_id': helperUserId,
+      'helper_device_fingerprint': helperDeviceFingerprint,
+    });
+  }
+
+  Future<http.Response> respondToHelpRequest({
+    required String sessionId,
+    required String requestId,
+    required bool accept,
+    String? helperDeviceFingerprint,
+  }) {
+    return post('/sessions/$sessionId/assistance/request/$requestId/respond', body: {
+      'accept': accept,
+      'helper_device_fingerprint': helperDeviceFingerprint,
+    });
+  }
+
+  Future<http.Response> requestEscalation({
+    required String sessionId,
+    required List<String> targetCapabilities,
+  }) {
+    return post('/sessions/$sessionId/assistance/escalation', body: {
+      'target_capabilities': targetCapabilities,
+    });
+  }
+
+  Future<http.Response> getEscalation(String sessionId, String escalationId) {
+    return get('/sessions/$sessionId/assistance/escalation/$escalationId');
+  }
+
+  Future<http.Response> respondToEscalation({
+    required String sessionId,
+    required String escalationId,
+    required bool accept,
+    required bool acceptDisclaimer,
+  }) {
+    return post('/sessions/$sessionId/assistance/escalation/$escalationId/respond', body: {
+      'accept': accept,
+      'accept_disclaimer': acceptDisclaimer,
+    });
   }
 }

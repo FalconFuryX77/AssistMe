@@ -5,12 +5,14 @@ import '../../theme/app_theme.dart';
 import 'remote_screen_view.dart';
 import 'mobile_voice_control_bar.dart';
 import 'mobile_chat_drawer.dart';
+import 'assistance_flow_coordinator.dart';
 
 class MobileWorkspaceScreen extends StatefulWidget {
   final String sessionId;
   final String sessionCode;
   final ApiClient apiClient;
   final SecureStorageService secureStorage;
+  final bool isHelpee;
 
   const MobileWorkspaceScreen({
     Key? key,
@@ -18,6 +20,7 @@ class MobileWorkspaceScreen extends StatefulWidget {
     required this.sessionCode,
     required this.apiClient,
     required this.secureStorage,
+    this.isHelpee = true,
   }) : super(key: key);
 
   @override
@@ -26,6 +29,11 @@ class MobileWorkspaceScreen extends StatefulWidget {
 
 class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
   bool _isChatOpen = false;
+  final _flowCoordinatorKey = GlobalKey<AssistanceFlowCoordinatorState>();
+
+  // Live remote media stream, published by the flow coordinator's WebRTC
+  // engine and consumed by the remote viewport.
+  final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(null);
 
   void _showSecurityZeroizeSheet() {
     showModalBottomSheet(
@@ -134,6 +142,19 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
             child: RemoteScreenView(
               sessionId: widget.sessionId,
               apiClient: widget.apiClient,
+              remoteStreamNotifier: _remoteStreamNotifier,
+            ),
+          ),
+
+          // Assistance flow coordinator (realtime + popups + overlay)
+          Positioned.fill(
+            child: AssistanceFlowCoordinator(
+              key: _flowCoordinatorKey,
+              sessionId: widget.sessionId,
+              apiClient: widget.apiClient,
+              secureStorage: widget.secureStorage,
+              isHelpee: widget.isHelpee,
+              remoteStreamSink: _remoteStreamNotifier,
             ),
           ),
 
@@ -148,6 +169,11 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
                 apiClient: widget.apiClient,
                 onSecurityTap: _showSecurityZeroizeSheet,
                 onLeaveSession: _handleLeaveSession,
+                onRequestHelp: widget.isHelpee
+                    ? () => _flowCoordinatorKey.currentState?.requestHelp()
+                    : null,
+                isRequestingHelp:
+                    _flowCoordinatorKey.currentState?.isRequestingHelp ?? false,
               ),
             ),
           ),

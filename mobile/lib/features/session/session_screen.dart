@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
+import '../devices/trusted_devices_screen.dart';
 import '../workspace/mobile_workspace_screen.dart';
 import 'bloc/session_bloc.dart';
 
@@ -128,6 +129,20 @@ class _SessionScreenState extends State<SessionScreen> {
       appBar: AppBar(
         title: const Text('Assistance Sessions'),
         actions: [
+          IconButton(
+            tooltip: 'Trusted Devices',
+            icon: const Icon(Icons.verified_user_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TrustedDevicesScreen(
+                    apiClient: widget.apiClient,
+                    secureStorage: widget.secureStorage,
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {
