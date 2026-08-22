@@ -61,10 +61,10 @@ async def device_channel(websocket: WebSocket) -> None:
         return
 
     try:
-        user_id = decode_access_token(token)
+        payload = decode_access_token(token)
     except Exception:
-        await websocket.close(code=4001, reason="Authentication failed")
-        return
+        payload = None
+    user_id = (payload or {}).get("sub") if isinstance(payload, dict) else None
     if not user_id:
         await websocket.close(code=4001, reason="Authentication failed")
         return
