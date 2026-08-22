@@ -7,6 +7,8 @@ class MobileVoiceControlBar extends StatefulWidget {
   final ApiClient apiClient;
   final VoidCallback onSecurityTap;
   final VoidCallback onLeaveSession;
+  final VoidCallback? onRequestHelp;
+  final bool isRequestingHelp;
 
   const MobileVoiceControlBar({
     Key? key,
@@ -14,6 +16,8 @@ class MobileVoiceControlBar extends StatefulWidget {
     required this.apiClient,
     required this.onSecurityTap,
     required this.onLeaveSession,
+    this.onRequestHelp,
+    this.isRequestingHelp = false,
   }) : super(key: key);
 
   @override
@@ -126,6 +130,20 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
             onPressed: _toggleMute,
           ),
           const SizedBox(width: 8),
+
+          // Request Help Button
+          if (widget.onRequestHelp != null) ...[
+            IconButton(
+              icon: widget.isRequestingHelp
+                  ? const Icon(Icons.hourglass_top)
+                  : const Icon(Icons.support_agent),
+              color: widget.isRequestingHelp
+                  ? AppTheme.accentAmber
+                  : AppTheme.accentPrimary,
+              onPressed: widget.isRequestingHelp ? null : widget.onRequestHelp,
+            ),
+            const SizedBox(width: 8),
+          ],
 
           // Route Button
           IconButton(

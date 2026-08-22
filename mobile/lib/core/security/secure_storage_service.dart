@@ -7,6 +7,11 @@ class SecureStorageService {
   static const String keyAccessToken = 'jwt_access_token';
   static const String keyRefreshToken = 'jwt_refresh_token';
   static const String keyE2EEIdentityKey = 'e2ee_identity_key';
+  static const String keyServerUrl = 'server_base_url';
+
+  Future<String?> getServerUrl() => read(key: keyServerUrl);
+
+  Future<void> saveServerUrl(String url) => write(key: keyServerUrl, value: url);
 
   Future<void> write({required String key, required String value}) async {
     // Platform secure storage write wrapper

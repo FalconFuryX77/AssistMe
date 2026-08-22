@@ -1,15 +1,25 @@
 import 'package:flutter/material.dart';
+import 'core/config/app_config.dart';
 import 'core/network/api_client.dart';
 import 'core/security/secure_storage_service.dart';
 import 'features/auth/login_screen.dart';
+import 'features/devices/trusted_devices_screen.dart';
 import 'features/session/session_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final secureStorage = SecureStorageService();
+
+  // Load the saved server address (Settings) if present; fall back to the
+  // compile-time default otherwise.
+  final savedUrl = await secureStorage.getServerUrl();
+  if (savedUrl != null && savedUrl.isNotEmpty) {
+    AppConfig.baseUrl = savedUrl;
+  }
+
   final apiClient = ApiClient(
-    baseUrl: 'http://localhost:8000',
+    baseUrl: AppConfig.baseUrl,
     secureStorage: secureStorage,
   );
 
@@ -47,6 +57,10 @@ class AssistMeMobileApp extends StatelessWidget {
               secureStorage: secureStorage,
             ),
         '/sessions': (_) => SessionScreen(
+              apiClient: apiClient,
+              secureStorage: secureStorage,
+            ),
+        '/trusted-devices': (_) => TrustedDevicesScreen(
               apiClient: apiClient,
               secureStorage: secureStorage,
             ),
