@@ -14,3 +14,8 @@ from models.intelligent_assistance import (
     AssistanceTaskPattern,  # noqa: F401
     PreferredAssistanceMode,  # noqa: F401
 )
+from models.trusted_device import DevicePairing, TrustedDevice  # noqa: F401
+from models.assistance_request import (  # noqa: F401
+    AssistanceEscalation,
+    AssistanceRequest,
+)
