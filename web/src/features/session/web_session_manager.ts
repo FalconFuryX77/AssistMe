@@ -2,10 +2,13 @@
  * Web Assistance Session Lifecycle Manager & WebSockets Signaling Router.
  */
 
+export type SessionEvent = { type: string; [key: string]: unknown };
+
 export class WebSessionManager {
   private ws: WebSocket | null = null;
   private sessionId: string | null = null;
   private isConnected = false;
+  private listeners: Array<(event: SessionEvent) => void> = [];
 
   public async connectToSession(sessionId: string, token: string, wsUrl: string): Promise<void> {
     this.sessionId = sessionId;
@@ -16,9 +19,22 @@ export class WebSessionManager {
       this.isConnected = true;
     };
 
+    this.ws.onmessage = (msg) => {
+      try {
+        const event = JSON.parse(msg.data) as SessionEvent;
+        this.listeners.forEach((fn) => fn(event));
+      } catch {
+        // Ignore malformed frames
+      }
+    };
+
     this.ws.onclose = () => {
       this.isConnected = false;
     };
+  }
+
+  public onEvent(listener: (event: SessionEvent) => void): void {
+    this.listeners.push(listener);
   }
 
   public sendSignal(type: string, payload: Record<string, unknown>): void {
@@ -33,5 +49,6 @@ export class WebSessionManager {
       this.ws = null;
     }
     this.isConnected = false;
+    this.listeners = [];
   }
 }
