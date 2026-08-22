@@ -392,6 +392,26 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in (
+                "assistance_requested",
+                "assistance_request_responded",
+                "escalation_requested",
+                "escalation_responded",
+            ):
+                # Broadcast the one-click help / escalation flow events
+                payload = {
+                    "type": msg_type,
+                    "sender_user_id": user.id,
+                    "request_id": msg.get("request_id"),
+                    "escalation_id": msg.get("escalation_id"),
+                    "helper_user_id": msg.get("helper_user_id"),
+                    "helpee_user_id": msg.get("helpee_user_id"),
+                    "status": msg.get("status"),
+                    "target_capabilities": msg.get("target_capabilities"),
+                    "disclaimer_text": msg.get("disclaimer_text"),
+                }
+                await _broadcast(session_id, payload, exclude_user=user.id)
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
