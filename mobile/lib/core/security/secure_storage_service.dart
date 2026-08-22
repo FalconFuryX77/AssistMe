@@ -8,10 +8,16 @@ class SecureStorageService {
   static const String keyRefreshToken = 'jwt_refresh_token';
   static const String keyE2EEIdentityKey = 'e2ee_identity_key';
   static const String keyServerUrl = 'server_base_url';
+  static const String keyDisplayName = 'device_display_name';
 
   Future<String?> getServerUrl() => read(key: keyServerUrl);
 
   Future<void> saveServerUrl(String url) => write(key: keyServerUrl, value: url);
+
+  Future<void> saveDisplayName(String name) =>
+      write(key: keyDisplayName, value: name);
+
+  Future<String?> getDisplayName() => read(key: keyDisplayName);
 
   Future<void> write({required String key, required String value}) async {
     // Platform secure storage write wrapper

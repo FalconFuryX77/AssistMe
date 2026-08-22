@@ -7,6 +7,8 @@ from api.dependencies import get_current_user
 from api.schemas.auth import (
     AccessTokenResponse,
     AuthResponse,
+    DeviceBootstrapRequest,
+    DeviceBootstrapResponse,
     LoginRequest,
     MessageResponse,
     RefreshTokenRequest,
@@ -32,6 +34,24 @@ async def register(
     return await AuthService.register(
         email=payload.email,
         password=payload.password,
+        display_name=payload.display_name,
+        db=db,
+    )
+
+
+@router.post(
+    "/device",
+    response_model=DeviceBootstrapResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def device_bootstrap(
+    payload: DeviceBootstrapRequest,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Device-first identity: no email/password. First call creates the
+    invisible account + one-time recovery code; later calls log back in."""
+    return await AuthService.device_bootstrap(
+        device_fingerprint=payload.device_fingerprint,
         display_name=payload.display_name,
         db=db,
     )

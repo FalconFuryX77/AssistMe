@@ -84,6 +84,49 @@ class SessionService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    async def get_or_create_pair_session(
+        helpee_id: str,
+        helper_id: str,
+        db: AsyncSession,
+    ) -> Session:
+        """Find an active session containing both users, else form one.
+
+        Used by the one-tap help flow: the helpee taps a trusted person and a
+        session materialises behind the scenes — no codes, no rooms.
+        """
+        # 1. Reuse an existing live pair session if one exists.
+        result = await db.execute(
+            select(Session)
+            .where(Session.status.in_(["waiting", "active"]))
+            .options(selectinload(Session.participants))
+        )
+        for session in result.scalars().all():
+            user_ids = {p.user_id for p in session.participants}
+            if helpee_id in user_ids and helper_id in user_ids:
+                return session
+
+        # 2. Otherwise create one (creator = helper per the role model) and
+        #    silently attach the helpee.
+        session = await SessionService.create_session(
+            creator_id=helper_id,
+            title="Help call",
+            timeout_minutes=60,
+            db=db,
+        )
+        participant = SessionParticipant(
+            session_id=session.id,
+            user_id=helpee_id,
+            role="helpee",
+            status="connected",
+        )
+        db.add(participant)
+        if session.status == "waiting":
+            session.status = "active"
+        await db.commit()
+        await db.refresh(session)
+        return session
+
+    @staticmethod
     async def join_session(
         session_code: str,
         user_id: str,

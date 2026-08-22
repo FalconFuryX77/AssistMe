@@ -142,6 +142,55 @@ class ApiClient {
   }
 
   // ---------------------------------------------------------------------------
+  // Device-first identity + one-tap help flow
+  // ---------------------------------------------------------------------------
+
+  /// Device-first bootstrap: no email/password. Returns tokens + (on first
+  /// launch only) the one-time recovery code.
+  Future<http.Response> deviceBootstrap({
+    required String deviceFingerprint,
+    String? displayName,
+    bool requireAuth = false,
+  }) {
+    return post(
+      '/auth/device',
+      body: {
+        'device_fingerprint': deviceFingerprint,
+        if (displayName != null) 'display_name': displayName,
+      },
+      requireAuth: requireAuth,
+    );
+  }
+
+  /// One-tap help call: rings a trusted helper, session forms silently.
+  Future<http.Response> placeHelpCall({
+    required String helperDeviceFingerprint,
+    String? message,
+  }) {
+    return post('/help/call', body: {
+      'helper_device_fingerprint': helperDeviceFingerprint,
+      'message': message,
+    });
+  }
+
+  /// The helper's address book — people this user has been trusted to help.
+  Future<http.Response> listHelping() {
+    return get('/devices/helping');
+  }
+
+  /// Respond to an assistance request (accept/deny) from the ring popup.
+  Future<http.Response> respondToRequestSimple({
+    required String sessionId,
+    required String requestId,
+    required bool accept,
+  }) {
+    return post(
+      '/sessions/$sessionId/assistance/request/$requestId/respond',
+      body: {'accept': accept},
+    );
+  }
+
+  // ---------------------------------------------------------------------------
   // Assistance request / escalation endpoints
   // ---------------------------------------------------------------------------
 

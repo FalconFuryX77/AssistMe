@@ -119,6 +119,7 @@ async def claim_setup_code(
         device_fingerprint=payload.device_fingerprint,
         friendly_name=payload.friendly_name,
         device_platform=payload.device_platform,
+        claimer_user_id=current_user.id,
         db=db,
     )
     return {
@@ -164,6 +165,16 @@ async def approve_pairing(
         "friendly_name": device.friendly_name,
         "status": device.status,
     }
+
+
+@router.get("/helping")
+async def list_helping(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """The helper's address book: people this user can help (mutual trust)."""
+    entries = await TrustedDeviceService.list_helping(current_user.id, db)
+    return {"total": len(entries), "entries": entries}
 
 
 @router.get("/", response_model=TrustedDeviceListResponse)
