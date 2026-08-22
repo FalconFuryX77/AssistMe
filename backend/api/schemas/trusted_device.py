@@ -11,6 +11,8 @@ class TrustedDeviceResponse(BaseModel):
     id: str
     owner_user_id: str
     device_fingerprint: str
+    # The user account bound to this device during pairing (the helper).
+    helper_user_id: str | None = None
     friendly_name: str | None = None
     device_platform: str | None = None
     status: str

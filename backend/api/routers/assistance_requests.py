@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_current_user
+from api.routers.device_ws import push_to_user
 from api.schemas.assistance_request import (
     AssistanceRequestCreate,
     AssistanceRequestRespond,
@@ -56,6 +57,17 @@ async def respond_to_request(
         accept=payload.accept,
         helper_device_fingerprint=payload.helper_device_fingerprint,
         db=db,
+    )
+
+    # Ring the helpee's device channel with the outcome (works app-wide).
+    await push_to_user(
+        request.helpee_user_id,
+        {
+            "type": "call_accepted" if payload.accept else "call_denied",
+            "request_id": request.id,
+            "session_id": request.session_id,
+            "helper_name": current_user.display_name or "Your helper",
+        },
     )
     return _request_to_dict(request)
 

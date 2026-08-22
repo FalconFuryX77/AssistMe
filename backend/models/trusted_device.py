@@ -33,6 +33,10 @@ class TrustedDevice(Base):
     device_fingerprint: Mapped[str] = mapped_column(
         String(128), nullable=False, index=True
     )
+    # The user account that claimed this device during pairing (the helper).
+    helper_user_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     friendly_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     device_platform: Mapped[str | None] = mapped_column(
         String(30), nullable=True  # "android", "ios", "web", "unknown"
@@ -76,6 +80,8 @@ class DevicePairing(Base):
     friendly_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     device_platform: Mapped[str | None] = mapped_column(String(30), nullable=True)
     pairing_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The user who claimed the setup code (the helper), bound at claim time.
+    claimed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     # pending -> confirmed -> expired
     status: Mapped[str] = mapped_column(
         String(20), default="pending", nullable=False

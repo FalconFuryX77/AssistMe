@@ -174,6 +174,7 @@ class TrustedDeviceService:
         device_fingerprint: str,
         friendly_name: str | None,
         device_platform: str | None,
+        claimer_user_id: str,
         db: AsyncSession,
     ) -> DevicePairing:
         """Bind the helper's device to a pairing using the code read aloud.
@@ -223,6 +224,10 @@ class TrustedDeviceService:
         pairing.device_fingerprint = device_fingerprint
         pairing.friendly_name = friendly_name
         pairing.device_platform = device_platform
+        # Remember WHO claimed it — this makes trust mutual: the owner's list
+        # gains a contact card, and the helper's "people I help" list gains
+        # the owner.
+        pairing.claimed_by_user_id = claimer_user_id
         pairing.status = "pending"
         await db.commit()
         await db.refresh(pairing)
@@ -281,6 +286,7 @@ class TrustedDeviceService:
         device = TrustedDevice(
             owner_user_id=owner_user_id,
             device_fingerprint=pairing.device_fingerprint,
+            helper_user_id=pairing.claimed_by_user_id,
             friendly_name=pairing.friendly_name,
             device_platform=pairing.device_platform,
             status="accepted",
@@ -290,6 +296,38 @@ class TrustedDeviceService:
         await db.commit()
         await db.refresh(device)
         return device
+
+    @staticmethod
+    async def list_helping(helper_user_id: str, db: AsyncSession) -> list[dict]:
+        """The helper's address book: people this user has been trusted to help.
+
+        Derived from accepted trust rows where THIS user claimed the device —
+        the mutual side of the owner's trusted list.
+        """
+        result = await db.execute(
+            select(TrustedDevice)
+            .where(
+                TrustedDevice.helper_user_id == helper_user_id,
+                TrustedDevice.status == "accepted",
+            )
+            .order_by(TrustedDevice.created_at.desc())
+        )
+        rows = result.scalars().all()
+
+        entries: list[dict] = []
+        for row in rows:
+            res = await db.execute(select(User).where(User.id == row.owner_user_id))
+            owner = res.scalar_one_or_none()
+            entries.append(
+                {
+                    "device_id": row.id,
+                    "owner_user_id": row.owner_user_id,
+                    "owner_display_name": (owner.display_name if owner else None),
+                    "friendly_name": row.friendly_name,
+                    "since": row.created_at,
+                }
+            )
+        return entries
 
     # ------------------------------------------------------------------
     # List / manage (password protected)
