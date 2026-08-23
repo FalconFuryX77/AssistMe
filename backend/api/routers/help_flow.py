@@ -105,12 +105,48 @@ async def place_help_call(
         },
     )
 
+    # 5. Helper app closed? Wake the phone with an FCM notification.
+    if not helper_online:
+        await _send_fcm_ring(
+            helper_user_id,
+            from_name=current_user.display_name or "Someone you help",
+            message=payload.message,
+            request_id=request.id,
+            session_id=session.id,
+            db=db,
+        )
+
     return {
         "request_id": request.id,
         "session_id": session.id,
         "status": "ringing",
         "helper_online": helper_online,
     }
+
+
+@router.post("/push-token")
+async def register_push_token(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Store this device's FCM token for closed-app ring notifications."""
+    from models.device_account import DeviceAccount
+
+    token = (payload or {}).get("token")
+    if not token:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                            detail="Missing push token")
+    result = await db.execute(
+        select(DeviceAccount).where(DeviceAccount.user_id == current_user.id)
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No device account for user")
+    account.fcm_token = token
+    await db.commit()
+    return {"status": "registered"}
 
 
 @router.get("/pending")
@@ -150,3 +186,59 @@ async def list_pending_calls(
 
 # Re-exported so the respond route can notify the helpee without circulars.
 __all__ = ["router", "place_help_call", "is_user_online"]
+
+
+async def _send_fcm_ring(
+    helper_user_id: str,
+    from_name: str,
+    message: str | None,
+    request_id: str,
+    session_id: str,
+    db: AsyncSession,
+) -> None:
+    """Best-effort FCM wake-up. Silently skips if credentials are absent."""
+    import logging
+    import os
+
+    from models.device_account import DeviceAccount
+
+    logger = logging.getLogger("uvicorn.error")
+
+    creds_path = os.getenv(
+        "FIREBASE_SERVICE_ACCOUNT",
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                     "firebase-service-account.json"),
+    )
+    if not os.path.exists(creds_path):
+        logger.warning("FCM skipped: %s not found (helper offline, push unavailable)",
+                       creds_path)
+        return
+
+    result = await db.execute(
+        select(DeviceAccount).where(DeviceAccount.user_id == helper_user_id)
+    )
+    account = result.scalar_one_or_none()
+    if account is None or not account.fcm_token:
+        return
+
+    try:
+        import firebase_admin
+        from firebase_admin import credentials, messaging
+
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(credentials.Certificate(creds_path))
+
+        title = f"{from_name} needs your help"
+        body = (message or "Tap to respond")[:180]
+        messaging.send(messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            token=account.fcm_token,
+            data={
+                "type": "incoming_call",
+                "request_id": request_id,
+                "session_id": session_id,
+            },
+            android=messaging.AndroidConfig(priority="high"),
+        ))
+    except Exception as exc:
+        logger.warning("FCM send failed: %s", exc)

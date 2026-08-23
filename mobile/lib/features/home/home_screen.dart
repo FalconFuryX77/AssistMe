@@ -8,6 +8,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/network/api_client.dart';
@@ -64,7 +65,23 @@ class _HomeScreenState extends State<HomeScreen> {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
     await _loadLists();
     await _connectChannel();
+    await _registerPushToken();
     await _checkMissedCalls();
+  }
+
+  /// Give the backend this device's FCM token so rings reach us even when
+  /// the app is closed.
+  Future<void> _registerPushToken() async {
+    try {
+      final messaging = FirebaseMessaging.instance;
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await widget.apiClient.registerPushToken(token);
+      }
+      messaging.onTokenRefresh.listen((t) {
+        widget.apiClient.registerPushToken(t);
+      });
+    } catch (_) {/* push not available on this build */}
   }
 
   /// A closed app must never lose a request: fetch pending rings on open.

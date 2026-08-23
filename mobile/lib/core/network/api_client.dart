@@ -210,6 +210,11 @@ class ApiClient {
     );
   }
 
+  /// Register this device's FCM token for closed-app rings.
+  Future<http.Response> registerPushToken(String token) {
+    return post('/help/push-token', body: {'token': token});
+  }
+
   // ---------------------------------------------------------------------------
   // Assistance request / escalation endpoints
   // ---------------------------------------------------------------------------
