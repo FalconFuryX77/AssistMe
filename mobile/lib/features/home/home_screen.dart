@@ -10,6 +10,7 @@ import 'dart:convert';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/realtime/device_channel_service.dart';
@@ -63,6 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _bootstrap() async {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
+    await Permission.microphone.request();
     await _loadLists();
     await _connectChannel();
     await _registerPushToken();

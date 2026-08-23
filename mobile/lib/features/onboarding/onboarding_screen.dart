@@ -9,6 +9,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
@@ -74,6 +75,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (recoveryCode == null || recoveryCode.isEmpty) {
         // Re-install over same fingerprint or re-onboard: go straight home.
         Navigator.of(context).pushReplacementNamed('/home');
+        await Permission.microphone.request();
         return;
       }
 
@@ -136,6 +138,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       );
 
       if (mounted) Navigator.of(context).pushReplacementNamed('/home');
+      // Ask for mic now so voice never fails silently later.
+      await Permission.microphone.request();
     } catch (e) {
       setState(() {
         _busy = false;
