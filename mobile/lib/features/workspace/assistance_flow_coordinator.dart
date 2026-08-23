@@ -152,8 +152,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   /// Helpee: capture screen + mic, then offer to the room.
   Future<void> startScreenShare() async {
-    if (_screenShareStarted || !_mediaReady) return;
+    if (_screenShareStarted || !_mediaReady) {
+      if (!_mediaReady && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Still connecting... try again in a second'),
+        ));
+      }
+      return;
+    }
     try {
+      // Will pop system dialogs: microphone + screen capture
       await _engine.startScreenCapture();
       final offer = await _engine.createOffer();
       _realtime?.send({'type': 'signal_offer', 'sdp': offer});
@@ -163,7 +171,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       debugPrint('Screen share failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start sharing: $e')),
+          SnackBar(content: Text('Could not start sharing: $e'), backgroundColor: AppTheme.accentRose),
         );
       }
     }
@@ -586,6 +594,22 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
+        // Helpee manual start button when auto-start missed
+        if (widget.isHelpee && _mediaReady && !_screenShareStarted)
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Center(
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.screen_share),
+                label: const Text('Start Sharing', style: TextStyle(fontSize: 16)),
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentEmerald, padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14)),
+                onPressed: startScreenShare,
+              ),
+            ),
+          ),
+
         // Drawing overlay (renders helper strokes on top of the viewport)
         if (_strokes.isNotEmpty)
           Positioned.fill(child: DrawingOverlay(strokes: _strokes)),

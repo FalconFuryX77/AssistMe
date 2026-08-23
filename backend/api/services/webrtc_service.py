@@ -1,18 +1,49 @@
 """WebRTC signaling and ICE configuration business logic."""
 
+import time
 from core.config import settings
 from api.schemas.webrtc import ICEServerEntry, ICEServersResponse
+
+_metered_cache: list | None = None
+_metered_cache_expiry: float = 0.0
 
 
 class WebRTCService:
     """Manages WebRTC signaling configuration and helper methods."""
 
     @staticmethod
+    def _fetch_metered() -> list | None:
+        """Fetch short-lived TURN creds from Metered REST API (cached)."""
+        global _metered_cache, _metered_cache_expiry
+        if not settings.METERED_API_KEY:
+            return None
+        if _metered_cache is not None and time.time() < _metered_cache_expiry:
+            return _metered_cache
+        try:
+            import urllib.request, json  # stdlib, no extra deps
+            domain = settings.METERED_DOMAIN or "assistme.metered.live"
+            url = f"https://{domain}/api/v1/turn/credentials?apiKey={settings.METERED_API_KEY}"
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+                if isinstance(data, list) and data:
+                    _metered_cache = data
+                    _metered_cache_expiry = time.time() + 600  # 10 min
+                    return data
+        except Exception:
+            return _metered_cache  # stale cache better than nothing
+        return None
+
+    @staticmethod
     def get_ice_servers() -> ICEServersResponse:
         """Construct RTCIceServer configuration for WebRTC clients.
 
-        Includes configured STUN servers and optional TURN server.
+        Priority: Metered dynamic creds → static TURN env → STUN-only.
         """
+        metered = WebRTCService._fetch_metered()
+        if metered is not None:
+            servers = [ICEServerEntry(**entry) for entry in metered]
+            return ICEServersResponse(ice_servers=servers)
+
         # Use public-facing STUN URLs if configured, otherwise fallback to internal list
         stun_urls = settings.PUBLIC_STUN_URLS if settings.PUBLIC_STUN_URLS else settings.STUN_SERVERS
         servers = [ICEServerEntry(urls=stun_urls)]

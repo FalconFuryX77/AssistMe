@@ -12,6 +12,7 @@
 library;
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 enum WebRTCEngineState {
   uninitialized,
@@ -214,9 +215,10 @@ class WebRTCEngine {
   }
 
   Future<void> _ensurePermissions() async {
-    // flutter_webrtc's native getUserMedia/getDisplayMedia pipelines trigger
-    // the Android runtime permission dialogs (RECORD_AUDIO, MediaProjection
-    // consent) themselves; failures surface as exceptions from those calls.
+    final mic = await Permission.microphone.request();
+    if (mic.isDenied || mic.isPermanentlyDenied) {
+      throw StateError('Microphone permission needed - please allow it in settings');
+    }
   }
 
   Future<void> dispose() async {
