@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/network/api_client.dart';
 import '../../core/realtime/realtime_service.dart';
@@ -94,10 +95,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
     await _initMediaEngine();
 
-    // Accepted-ring entry: helpee begins capture + offer automatically.
-    if (widget.autoStartScreenShare && widget.isHelpee) {
-      await startScreenShare();
-    }
+    // Screen share is started by an explicit tap on "Start Sharing"
+    // (no auto-start) so the mic + MediaProjection consent dialogs appear
+    // while the UI is fully settled, not mid-mount.
   }
 
   // ------------------------------------------------------------------
@@ -105,6 +105,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   // ------------------------------------------------------------------
 
   Future<void> _initMediaEngine() async {
+    // Ask for mic up front so the later call never fails silently.
+    await Permission.microphone.request();
+
     List<Map<String, dynamic>> iceServers = const [
       {'urls': 'stun:stun.l.google.com:19302'},
     ];
