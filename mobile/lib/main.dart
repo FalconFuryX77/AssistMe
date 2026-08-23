@@ -1,3 +1,5 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'core/config/app_config.dart';
 import 'core/network/api_client.dart';
@@ -16,6 +18,15 @@ void main() async {
   final savedUrl = await secureStorage.getServerUrl();
   if (savedUrl != null && savedUrl.isNotEmpty) {
     AppConfig.baseUrl = savedUrl;
+  }
+
+  // Firebase/FCM — closed-app ring notifications.
+  try {
+    await Firebase.initializeApp();
+    await FirebaseMessaging.instance.requestPermission(provisional: false);
+  } catch (_) {
+    // Push unavailable (no google-services on this flavor) — app still works
+    // over the live WebSocket channel.
   }
 
   final apiClient = ApiClient(

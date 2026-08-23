@@ -35,6 +35,8 @@ class DeviceAccount(Base):
     fingerprint: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     # SHA-256 of the one-time recovery code shown to the user at onboarding.
     recovery_code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # FCM registration token for closed-app ring notifications.
+    fcm_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
