@@ -32,6 +32,9 @@ class Settings:
     TURN_SERVER_URL: str | None = os.getenv("TURN_SERVER_URL", None)
     TURN_SERVER_USERNAME: str | None = os.getenv("TURN_SERVER_USERNAME", None)
     TURN_SERVER_CREDENTIAL: str | None = os.getenv("TURN_SERVER_CREDENTIAL", None)
+    # Metered.ca dynamic TURN (REST API, short-lived creds)
+    METERED_API_KEY: str | None = os.getenv("METERED_API_KEY", None)
+    METERED_DOMAIN: str | None = os.getenv("METERED_DOMAIN", "assistme.metered.live")
     # --- Internet Deployment (Phase 19) ---
     # Set via env vars when deploying for public internet access.
     # When None, the service falls back to internal STUN_SERVERS / TURN_SERVER_URL.

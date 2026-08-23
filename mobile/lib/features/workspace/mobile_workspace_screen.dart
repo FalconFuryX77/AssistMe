@@ -37,87 +37,20 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
   // engine and consumed by the remote viewport.
   final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(null);
 
-  void _showSecurityZeroizeSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.bgSecondary,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text(
-                  'Signal Protocol E2EE & Hardening',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black45,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppTheme.borderGlass),
-                  ),
-                  child: const Text(
-                    'SAS Fingerprint: e2ee_sas_verified_sha256',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontFamily: 'monospace',
-                      color: AppTheme.accentEmerald,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('WebRTC Connection Recovery (ICE Restart)'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentSecondary),
-                  onPressed: () async {
-                    Navigator.pop(ctx);
-                    await widget.apiClient.post(
-                      '/sessions/${widget.sessionId}/ice-restart',
-                      body: {'reason': 'mobile_reconnect'},
-                    );
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('ICE Restart Triggered')),
-                      );
-                    }
-                  },
-                ),
-                const SizedBox(height: 10),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.cleaning_services),
-                  label: const Text('Zeroize & Scrub Cryptographic Memory'),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRose),
-                  onPressed: () async {
-                    Navigator.pop(ctx);
-                    await widget.apiClient.post(
-                      '/sessions/${widget.sessionId}/security/zeroize',
-                    );
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('E2EE Keys Zeroized & Scrubbed')),
-                      );
-                    }
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   void _handleLeaveSession() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Leave help session?'),
+        content: const Text('The call will end for both of you.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Stay')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Leave')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
     try {
       await widget.apiClient.post('/sessions/${widget.sessionId}/leave');
     } catch (_) {}
@@ -161,7 +94,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
             ),
           ),
 
-          // Floating Voice & Media Control Pill
+          // Floating Voice Control - just mic + leave
           Positioned(
             bottom: 24,
             left: 0,
@@ -170,12 +103,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
               child: MobileVoiceControlBar(
                 sessionId: widget.sessionId,
                 apiClient: widget.apiClient,
-                onSecurityTap: _showSecurityZeroizeSheet,
                 onLeaveSession: _handleLeaveSession,
-                // One-tap calling replaced the in-session request dialog;
-                // help is requested from Home, never inside a live session.
-                onRequestHelp: null,
-                isRequestingHelp: false,
               ),
             ),
           ),
