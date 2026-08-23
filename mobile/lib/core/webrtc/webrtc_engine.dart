@@ -215,8 +215,9 @@ class WebRTCEngine {
   }
 
   Future<void> _ensurePermissions() async {
-    final mic = await Permission.microphone.request();
-    if (mic.isDenied || mic.isPermanentlyDenied) {
+    final statuses = await [Permission.microphone, Permission.notification].request();
+    final mic = statuses[Permission.microphone];
+    if (mic != null && (mic.isDenied || mic.isPermanentlyDenied)) {
       throw StateError('Microphone permission needed - please allow it in settings');
     }
   }

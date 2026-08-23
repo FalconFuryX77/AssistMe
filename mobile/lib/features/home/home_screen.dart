@@ -64,7 +64,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _bootstrap() async {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
-    await Permission.microphone.request();
+    await [Permission.microphone, Permission.notification].request();
     await _loadLists();
     await _connectChannel();
     await _registerPushToken();
