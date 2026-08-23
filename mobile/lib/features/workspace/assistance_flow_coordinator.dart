@@ -29,6 +29,10 @@ class AssistanceFlowCoordinator extends StatefulWidget {
   final SecureStorageService secureStorage;
   final bool isHelpee;
 
+  /// When launched straight from an accepted ring, the helpee starts sharing
+  /// as soon as the media engine is ready — zero extra taps.
+  final bool autoStartScreenShare;
+
   /// Sink the coordinator publishes the remote WebRTC stream into so sibling
   /// widgets (e.g. the remote viewport) can render it without rebuilding.
   final ValueNotifier<dynamic>? remoteStreamSink;
@@ -39,6 +43,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
     required this.apiClient,
     required this.secureStorage,
     required this.isHelpee,
+    this.autoStartScreenShare = false,
     this.remoteStreamSink,
   }) : super(key: key);
 
@@ -88,6 +93,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
 
     await _initMediaEngine();
+
+    // Accepted-ring entry: helpee begins capture + offer automatically.
+    if (widget.autoStartScreenShare && widget.isHelpee) {
+      await startScreenShare();
+    }
   }
 
   // ------------------------------------------------------------------

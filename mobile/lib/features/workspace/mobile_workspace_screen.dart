@@ -13,6 +13,7 @@ class MobileWorkspaceScreen extends StatefulWidget {
   final ApiClient apiClient;
   final SecureStorageService secureStorage;
   final bool isHelpee;
+  final bool autoStartScreenShare;
 
   const MobileWorkspaceScreen({
     Key? key,
@@ -21,6 +22,7 @@ class MobileWorkspaceScreen extends StatefulWidget {
     required this.apiClient,
     required this.secureStorage,
     this.isHelpee = true,
+    this.autoStartScreenShare = false,
   }) : super(key: key);
 
   @override
@@ -154,6 +156,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
               apiClient: widget.apiClient,
               secureStorage: widget.secureStorage,
               isHelpee: widget.isHelpee,
+              autoStartScreenShare: widget.autoStartScreenShare,
               remoteStreamSink: _remoteStreamNotifier,
             ),
           ),

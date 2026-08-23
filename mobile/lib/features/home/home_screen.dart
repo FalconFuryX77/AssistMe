@@ -154,6 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 apiClient: widget.apiClient,
                 secureStorage: widget.secureStorage,
                 isHelpee: true,
+                autoStartScreenShare: true,
               ),
             ));
           }
