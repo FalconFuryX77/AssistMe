@@ -29,23 +29,71 @@ class ApiClient {
     return headers;
   }
 
-  Future<http.Response> get(String endpoint, {bool requireAuth = true}) async {
-    final headers = await _getHeaders(requireAuth: requireAuth);
-    final uri = Uri.parse('$baseUrl$endpoint');
-    return await httpClient.get(uri, headers: headers);
+  bool _refreshing = false;
+
+  /// Exchange the stored refresh token for a fresh access token.
+  Future<bool> _tryRefresh() async {
+    if (_refreshing) return false;
+    _refreshing = true;
+    try {
+      final refreshToken = await secureStorage.getRefreshToken();
+      if (refreshToken == null || refreshToken.isEmpty) return false;
+      final resp = await httpClient.post(
+        Uri.parse('$baseUrl/auth/refresh'),
+        headers: const {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({'refresh_token': refreshToken}),
+      );
+      if (resp.statusCode != 200) return false;
+      final data = jsonDecode(resp.body);
+      final access = data['access_token'];
+      if (access is! String || access.isEmpty) return false;
+      await secureStorage.write(key: SecureStorageService.keyAccessToken, value: access);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  /// Send with auth; on 401 refresh once and retry transparently.
+  Future<http.Response> _send(
+    Future<http.Response> Function(Map<String, String> headers) run, {
+    bool requireAuth = true,
+  }) async {
+    var headers = await _getHeaders(requireAuth: requireAuth);
+    var resp = await run(headers);
+    if (resp.statusCode == 401 && requireAuth) {
+      if (await _tryRefresh()) {
+        headers = await _getHeaders(requireAuth: requireAuth);
+        resp = await run(headers);
+      }
+    }
+    return resp;
+  }
+
+  Future<http.Response> get(String endpoint, {bool requireAuth = true}) {
+    return _send(
+      (headers) => httpClient.get(Uri.parse('$baseUrl$endpoint'), headers: headers),
+      requireAuth: requireAuth,
+    );
   }
 
   Future<http.Response> post(
     String endpoint, {
     Map<String, dynamic>? body,
     bool requireAuth = true,
-  }) async {
-    final headers = await _getHeaders(requireAuth: requireAuth);
-    final uri = Uri.parse('$baseUrl$endpoint');
-    return await httpClient.post(
-      uri,
-      headers: headers,
-      body: body != null ? jsonEncode(body) : null,
+  }) {
+    return _send(
+      (headers) => httpClient.post(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      ),
+      requireAuth: requireAuth,
     );
   }
 
@@ -53,13 +101,14 @@ class ApiClient {
     String endpoint, {
     Map<String, dynamic>? body,
     bool requireAuth = true,
-  }) async {
-    final headers = await _getHeaders(requireAuth: requireAuth);
-    final uri = Uri.parse('$baseUrl$endpoint');
-    return await httpClient.patch(
-      uri,
-      headers: headers,
-      body: body != null ? jsonEncode(body) : null,
+  }) {
+    return _send(
+      (headers) => httpClient.patch(
+        Uri.parse('$baseUrl$endpoint'),
+        headers: headers,
+        body: body != null ? jsonEncode(body) : null,
+      ),
+      requireAuth: requireAuth,
     );
   }
 
@@ -67,10 +116,12 @@ class ApiClient {
     String endpoint, {
     Map<String, dynamic>? query,
     bool requireAuth = true,
-  }) async {
-    final headers = await _getHeaders(requireAuth: requireAuth);
-    final uri = Uri.parse('$baseUrl$endpoint').replace(queryParameters: query);
-    return await httpClient.delete(uri, headers: headers);
+  }) {
+    return _send(
+      (headers) => httpClient
+          .delete(Uri.parse('$baseUrl$endpoint').replace(queryParameters: query), headers: headers),
+      requireAuth: requireAuth,
+    );
   }
 
   // ---------------------------------------------------------------------------
