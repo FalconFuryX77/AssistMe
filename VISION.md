@@ -191,7 +191,7 @@ Accept drops **both phones straight into the live session**. No codes, no rooms,
 ### 🔧 Built but unverified live
 - Actual screen-share video between the two physical phones
 - Two-way voice audio
-- Helper drawing → helpee overlay (stroke relay exists; helper-side draw input not yet wired to the video view)
+- Helper drawing → helpee overlay (normalized helper-side draw input and stroke relay are wired; needs live verification)
 
 ### 📋 Specced, not built
 - Escalation to touch control (Accessibility Service, panic stop)
