@@ -1,0 +1,85 @@
+"""Per-device WebSocket channel — the ring channel.
+
+A persistent connection every logged-in device keeps open regardless of
+sessions. Incoming help requests, acceptances and denials are pushed here so
+the helper's phone rings even when nobody is inside any session. This is what
+removes the session-code dance from the product.
+"""
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+
+from core.security import decode_access_token
+
+router = APIRouter()
+
+# user_id → list of live sockets (a user may have the app on several devices)
+_device_connections: dict[str, list[WebSocket]] = {}
+
+
+def is_user_online(user_id: str) -> bool:
+    """Whether the user currently has any live ring-channel socket."""
+    return bool(_device_connections.get(user_id))
+
+
+async def push_to_user(user_id: str, payload: dict) -> bool:
+    """Push a JSON event to every live socket of a user.
+
+    Returns True if at least one socket received it.
+    """
+    sockets = _device_connections.get(user_id, [])
+    delivered = False
+    dead: list[WebSocket] = []
+    for ws in sockets:
+        try:
+            await ws.send_json(payload)
+            delivered = True
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _drop(user_id, ws)
+    return delivered
+
+
+def _drop(user_id: str, ws: WebSocket) -> None:
+    sockets = _device_connections.get(user_id)
+    if not sockets:
+        return
+    try:
+        sockets.remove(ws)
+    except ValueError:
+        pass
+    if not sockets:
+        _device_connections.pop(user_id, None)
+
+
+@router.websocket("/ws/device")
+async def device_channel(websocket: WebSocket) -> None:
+    """Persistent ring channel: /ws/device?token=<JWT>."""
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=4001, reason="Missing token")
+        return
+
+    try:
+        payload = decode_access_token(token)
+    except Exception:
+        payload = None
+    user_id = (payload or {}).get("sub") if isinstance(payload, dict) else None
+    if not user_id:
+        await websocket.close(code=4001, reason="Authentication failed")
+        return
+
+    await websocket.accept()
+    _device_connections.setdefault(user_id, []).append(websocket)
+
+    try:
+        await websocket.send_json({"type": "channel_ready", "user_id": user_id})
+        while True:
+            raw = await websocket.receive_text()
+            # Minimal client protocol; heartbeat keeps intermediaries happy.
+            if raw == "heartbeat" or '"heartbeat"' in raw.replace(" ", ""):
+                await websocket.send_json({"type": "heartbeat_ack"})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        _drop(user_id, websocket)

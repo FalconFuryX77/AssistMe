@@ -1,11 +1,14 @@
 # AssistMe
 
-AssistMe is the reference implementation of the Adaptive Context-Aware Secure Assistance Framework (ACSAF).
+AssistMe is a one-tap remote assistance app for elderly people and their trusted family or friends.
 
 ## Project goal
 
-Build a secure, context-aware assistance platform with:
-- backend services for authentication, sessions, and policy handling
+Build a simple, security-first assistance flow with:
+- device-first identity with a one-time recovery code
+- mutual trusted-person pairing
+- one-tap screen sharing and in-app voice
+- shared drawing annotations and explicit, helpee-approved touch control
 - mobile clients for Android and iOS
 - real-time communication and collaboration features
 

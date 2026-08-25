@@ -1,3 +1,5 @@
 # Backend
 
-This folder will contain the FastAPI backend services for authentication, sessions, policy handling, and audit logging.
+This folder contains the FastAPI backend for AssistMe's device-first identity,
+mutual trusted-person pairing, one-tap help requests, persistent ring channel,
+WebRTC signaling, and helpee-approved control escalation.

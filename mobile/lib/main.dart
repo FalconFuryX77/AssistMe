@@ -1,24 +1,47 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'core/config/app_config.dart';
 import 'core/network/api_client.dart';
 import 'core/security/secure_storage_service.dart';
-import 'features/auth/login_screen.dart';
-import 'features/session/session_screen.dart';
+import 'features/devices/trusted_devices_screen.dart';
+import 'features/home/home_screen.dart';
+import 'features/onboarding/onboarding_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final secureStorage = SecureStorageService();
+  await secureStorage.init();
+
+  // Restore the saved server address (Settings) if present.
+  final savedUrl = await secureStorage.getServerUrl();
+  if (savedUrl != null && savedUrl.isNotEmpty) {
+    AppConfig.baseUrl = savedUrl;
+  }
+
+  // Firebase/FCM — closed-app ring notifications.
+  try {
+    await Firebase.initializeApp();
+    await FirebaseMessaging.instance.requestPermission(provisional: false);
+  } catch (_) {
+    // Push unavailable (no google-services on this flavor) — app still works
+    // over the live WebSocket channel.
+  }
+
   final apiClient = ApiClient(
-    baseUrl: 'http://localhost:8000',
+    baseUrl: AppConfig.baseUrl,
     secureStorage: secureStorage,
   );
 
+  // Device-first identity: a token means onboarding already happened.
   final accessToken = await secureStorage.getAccessToken();
+  final hasIdentity = accessToken != null && accessToken.isNotEmpty;
 
   runApp(AssistMeMobileApp(
     apiClient: apiClient,
     secureStorage: secureStorage,
-    initialRoute: accessToken != null ? '/sessions' : '/login',
+    initialRoute: hasIdentity ? '/home' : '/onboarding',
   ));
 }
 
@@ -37,16 +60,20 @@ class AssistMeMobileApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'AssistMe Mobile',
+      title: 'AssistMe',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       initialRoute: initialRoute,
       routes: {
-        '/login': (_) => LoginScreen(
+        '/onboarding': (_) => OnboardingScreen(
               apiClient: apiClient,
               secureStorage: secureStorage,
             ),
-        '/sessions': (_) => SessionScreen(
+        '/home': (_) => HomeScreen(
+              apiClient: apiClient,
+              secureStorage: secureStorage,
+            ),
+        '/trusted-devices': (_) => TrustedDevicesScreen(
               apiClient: apiClient,
               secureStorage: secureStorage,
             ),

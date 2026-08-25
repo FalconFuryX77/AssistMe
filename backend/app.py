@@ -6,11 +6,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.routers.auth.auth import router as auth_router
-from api.routers.contacts import router as contacts_router
+from api.routers.assistance_requests import router as assistance_requests_router
+from api.routers.device_ws import router as device_ws_router
 from api.routers.health import router as health_router
+from api.routers.help_flow import router as help_flow_router
 from api.routers.sessions import router as sessions_router
 from api.routers.session_ws import router as session_ws_router
-from api.routers.users import router as users_router
+from api.routers.trusted_devices import router as trusted_devices_router
 from core.config import settings
 from core.database import create_tables
 
@@ -28,7 +30,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AssistMe API",
     version="0.4.0",
-    description="Adaptive Context-Aware Secure Assistance Framework",
+    description="One-tap remote assistance for trusted family and friends: screen sharing, voice, drawing, and optional helpee-approved control.",
     lifespan=lifespan,
 )
 
@@ -44,7 +46,9 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(auth_router)
-app.include_router(users_router)
-app.include_router(contacts_router)
 app.include_router(sessions_router)
 app.include_router(session_ws_router)
+app.include_router(device_ws_router)
+app.include_router(help_flow_router)
+app.include_router(trusted_devices_router)
+app.include_router(assistance_requests_router)

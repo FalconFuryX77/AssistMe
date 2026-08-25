@@ -19,9 +19,10 @@ class User(Base):
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
-    email: Mapped[str] = mapped_column(
-        String(255), unique=True, nullable=False, index=True
-    )
+    # The install is the identity. These fields are retained only for
+    # compatibility with existing SQLite databases; they are never shown or
+    # collected by the client.
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

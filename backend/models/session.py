@@ -10,7 +10,7 @@ from core.database import Base
 
 
 class Session(Base):
-    """An assistance session between a helper and one or more helpees.
+    """An assistance session between exactly one helper and one helpee.
 
     Lifecycle:  waiting → active → ended
         - waiting:  created by the helper, awaiting the helpee to join
@@ -95,13 +95,4 @@ class Session(Base):
     # Relationships
     participants = relationship(
         "SessionParticipant", back_populates="session", cascade="all, delete-orphan"
-    )
-    audit_logs = relationship(
-        "AuditLog", back_populates="session", cascade="all, delete-orphan"
-    )
-    chat_messages = relationship(
-        "ChatMessage", back_populates="session", cascade="all, delete-orphan"
-    )
-    file_transfers = relationship(
-        "FileTransfer", back_populates="session", cascade="all, delete-orphan"
     )

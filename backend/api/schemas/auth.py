@@ -56,3 +56,45 @@ class MessageResponse(BaseModel):
     """Generic message response."""
 
     detail: str
+
+
+class DeviceBootstrapRequest(BaseModel):
+    """Device-first registration/login — no email or password, ever.
+
+    The client sends its stable install fingerprint; the first call creates an
+    invisible account and returns a one-time recovery code. Every later call
+    simply logs that identity back in.
+    """
+
+    device_fingerprint: str
+    display_name: str | None = None
+
+    @field_validator("device_fingerprint")
+    @classmethod
+    def fingerprint_shape(cls, v: str) -> str:
+        if len(v) < 16 or len(v) > 128:
+            raise ValueError("Device fingerprint must be 16-128 characters")
+        return v
+
+    @field_validator("display_name")
+    @classmethod
+    def name_length(cls, v: str | None) -> str | None:
+        if v is not None and (len(v.strip()) < 1 or len(v) > 60):
+            raise ValueError("Display name must be 1-60 characters")
+        return v.strip() if v else v
+
+
+class DeviceBootstrapResponse(BaseModel):
+    """Result of device bootstrap.
+
+    `recovery_code` is returned exactly once, on the call that created the
+    identity; it is the root credential for reclaiming after reinstall.
+    """
+
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user_id: str
+    display_name: str | None = None
+    created: bool
+    recovery_code: str | None = None

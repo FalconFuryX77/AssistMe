@@ -23,7 +23,15 @@ AssistMe/
 │   ├── models/                   # SQLAlchemy ORM models
 │   │   ├── user.py
 │   │   ├── refresh_token.py
-│   │   └── trusted_contact.py
+│   │   ├── trusted_contact.py
+│   │   ├── session.py
+│   │   ├── session_participant.py
+│   │   ├── audit_log.py
+│   │   ├── chat_message.py
+│   │   ├── file_transfer.py
+│   │   ├── context_snapshot.py        # Phase 20 Context Engine
+│   │   ├── policy_decision.py         # Phase 21 Adaptive Policy Engine
+│   │   └── intelligent_assistance.py  # Phase 22 Intelligent Assistance
 │   ├── api/
 │   │   ├── dependencies.py       # Shared FastAPI dependencies (auth, DB)
 │   │   ├── routers/              # Route handlers (thin layer)
@@ -31,16 +39,27 @@ AssistMe/
 │   │   │   ├── auth/
 │   │   │   │   └── auth.py
 │   │   │   ├── contacts.py
-│   │   │   └── users.py
+│   │   │   ├── users.py
+│   │   │   ├── sessions.py
+│   │   │   ├── session_ws.py
+│   │   │   ├── context_engine.py        # Phase 20
+│   │   │   ├── policy_engine.py         # Phase 21
+│   │   │   └── intelligent_assistance.py # Phase 22
 │   │   ├── schemas/              # Pydantic request/response models
 │   │   │   ├── auth.py
 │   │   │   ├── contacts.py
 │   │   │   ├── health.py
-│   │   │   └── users.py
+│   │   │   ├── users.py
+│   │   │   ├── context_engine.py        # Phase 20
+│   │   │   ├── policy_engine.py         # Phase 21
+│   │   │   └── intelligent_assistance.py # Phase 22
 │   │   └── services/             # Business logic
 │   │       ├── auth_service.py
 │   │       ├── contacts_service.py
-│   │       └── health_service.py
+│   │       ├── health_service.py
+│   │       ├── context_engine_service.py        # Phase 20
+│   │       ├── policy_engine_service.py         # Phase 21
+│   │       └── intelligent_assistance_service.py # Phase 22
 │   └── tests/                    # Pytest test suites
 │       ├── conftest.py           # Shared fixtures
 │       ├── test_auth.py

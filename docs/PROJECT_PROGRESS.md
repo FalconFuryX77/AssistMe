@@ -6,11 +6,11 @@ This document is the shared handoff file for the AssistMe project. It should be 
 
 ---
 
-## Current Status: ALL 19 PHASES + INTERNET CONNECTIVITY COMPLETE ✅ 🎉
+## Current Status: ALL 22 PHASES + INTERNET CONNECTIVITY COMPLETE ✅ 🎉
 
-**Last updated:** 2026-08-13T06:22Z
-**Last contributor:** Agent Session (via Antigravity)
-**All tests passing:** 176/176 (100% PASS RATE ACROSS ENTIRE PLATFORM)
+**Last updated:** 2026-08-13
+**Last contributor:** Agent Session (via opencode)
+**All tests passing:** 206/206 (100% PASS RATE ACROSS ENTIRE PLATFORM)
 **Full Audit Status:** Complete — Cleaned all API contracts, PostgreSQL production driver, model metadata registry, and Coturn port forwarding.
 **CI/CD Pipeline:** Active via GitHub Actions (`.github/workflows/ci.yml`)
 **Workflow:** Feature branch → Pull Request → Automated CI → Merge to `main`
@@ -278,8 +278,85 @@ Completed:
 9. **Internet Connectivity Test Suite** (`backend/tests/test_internet_connectivity.py`):
    - 24 new tests: CORS headers, preflight OPTIONS, ALLOWED_ORIGINS parsing, ICE public URLs (no Docker hostnames), Coturn `external-ip` directive, Nginx SSL/TLS block, Docker Compose env vars, dev cert presence.
 
+### Phase 20 — Context Engine ✅
+
+**Tests:** 206/206 passing (9 new context engine tests)
+
+Implemented the roadmap's **Phase 8 — Context Engine** (previously missing):
+
+1. **Model** (`backend/models/context_snapshot.py`):
+   - `context_snapshots` table with a per-(session, user) unique constraint.
+   - Stores platform, OS version, device model, screen dimensions/density, foreground app + category, sensitive-app flag, accessibility/gesture capability, screen-share/mic/remote-control permissions, screen sharing & FLAG_SECURE state, session state, battery, charging, and network type.
+2. **Schema** (`backend/api/schemas/context_engine.py`):
+   - `ContextReportRequest` (partial upsert, validated platform/network enums) + `ContextSnapshotResponse` + `ContextHistoryResponse`.
+3. **Service** (`backend/api/services/context_engine_service.py`):
+   - `report_context` upserts the snapshot, derives sensitive-app classification (banking/health/payment/ecommerce/government heuristics), and keeps participant streaming flags in sync.
+   - `get_context` / `list_context` with participant authorization.
+4. **Router** (`backend/api/routers/context_engine.py`):
+   - `POST /sessions/{session_id}/context/report`
+   - `GET /sessions/{session_id}/context/me`
+   - `GET /sessions/{session_id}/context/`
+5. **Tests** (`backend/tests/test_context_engine.py`):
+   - 9 tests covering report success, partial upsert, sensitive/non-sensitive classification, invalid platform rejection, retrieve-before-report 404, multi-participant listing, and non-participant 403.
+
+### Phase 21 — Adaptive Policy Engine ✅
+
+**Tests:** 206/206 passing (10 new policy engine tests)
+
+Implemented the roadmap's **Phase 9 — Adaptive Policy Engine (Research Core)** (previously missing):
+
+1. **Model** (`backend/models/policy_decision.py`):
+   - `policy_decisions` table (one per session).
+   - Persists `risk_level` (low/medium/high), `risk_reasons`, `negotiated_capabilities`, `assistance_mode` (voice/pointer/drawing/tap/restricted), and consent verification state.
+2. **Schema** (`backend/api/schemas/policy_engine.py`):
+   - `PolicyEvaluateRequest`, `PolicyCapabilityRequest`, `PolicyConsentRequest`, `PolicyStatusResponse`.
+3. **Service** (`backend/api/services/policy_engine_service.py`):
+   - Risk classification from live context (FLAG_SECURE / critical sensitive apps → high; other sensitive apps → medium; normal → low).
+   - Capability negotiation constrained by risk + accessibility state (least-privilege).
+   - Assistance-mode selection (restricted < voice < pointer < drawing < tap).
+   - Consent verification via a session-bound consent token (SHA-256 derived), `compare_digest` constant-time check.
+4. **Router** (`backend/api/routers/policy_engine.py`):
+   - `POST /sessions/{session_id}/policy/evaluate`
+   - `POST /sessions/{session_id}/policy/capabilities`
+   - `POST /sessions/{session_id}/policy/consent`
+   - `GET /sessions/{session_id}/policy/status`
+5. **Tests** (`backend/tests/test_policy_engine.py`):
+   - 10 tests covering low/medium/high risk, tap restriction, accessibility-gated modes, capability negotiation, consent success/invalid-token, default status, evaluation reflection, and non-participant 403.
+
+### Phase 22 — Intelligent Assistance ✅
+
+**Tests:** 206/206 passing (11 new intelligent assistance tests)
+
+Implemented the roadmap's **Phase 11 — Intelligent Assistance** (previously missing):
+
+1. **Models** (`backend/models/intelligent_assistance.py`):
+   - `assistance_task_patterns` — learned repeated-task patterns keyed by a stable (user, context_signature) hash, counting occurrences and recording last occurrence.
+   - `preferred_assistance_modes` — per-user preferred-mode memory.
+   - `assistance_suggestions` — persisted context-aware suggestions per session.
+2. **Schema** (`backend/api/schemas/intelligent_assistance.py`):
+   - `TaskRecordRequest`, `TaskPatternResponse`, `PreferredModeRequest/Response`, `AssistanceSuggestionResponse`, `SuggestionsResponse`, `TaskPatternListResponse`.
+3. **Service** (`backend/api/services/intelligent_assistance_service.py`):
+   - Repeated-task learning (`record_task` upserts occurrence count).
+   - Context-aware suggestions from repeated patterns, preferred-mode memory, and cold-start fallback.
+   - Preferred-mode set/get for each user.
+4. **Router** (`backend/api/routers/intelligent_assistance.py`):
+   - `POST /sessions/{session_id}/assistance/tasks`
+   - `GET /sessions/{session_id}/assistance/suggestions`
+   - `GET /users/me/assistance/task-patterns`
+   - `GET /users/me/assistance/preferred-mode`
+   - `PUT /users/me/assistance/preferred-mode`
+5. **Tests** (`backend/tests/test_intelligent_assistance.py`):
+   - 11 tests covering pattern learning, occurrence increments, invalid action rejection, cold-start suggestion, repeated-task suggestion, preferred-mode reminder/set/get/update/default, task pattern listing, and non-participant 403.
+
+### WebSocket Event Additions ✅
+
+Extended `backend/api/routers/session_ws.py` with real-time broadcast for the new features:
+- `context_reported` — helpee context snapshot updates
+- `policy_updated` — risk/mode/capability changes
+- `task_recorded`, `suggestions_updated`, `preferred_mode_updated` — intelligent-assistance events
+
 ---
 
 ## Final Project Status
 
-All core backend, WebRTC signaling, E2EE Signal Protocol, native drivers, hardening, Web Application Frontend, Flutter Mobile UI, Production Infrastructure, and Internet Connectivity phases (Phases 0 through 19) are 100% complete, fully tested (176/176 passing unit & integration tests), and validated! The platform is ready for deployment over the public internet. 🚀
+All core backend, WebRTC signaling, E2EE Signal Protocol, native drivers, hardening, Web Application Frontend, Flutter Mobile UI, Production Infrastructure, Internet Connectivity, Context Engine, Adaptive Policy Engine, and Intelligent Assistance phases (Phases 0 through 22) are 100% complete, fully tested (206/206 passing unit & integration tests), and validated! The platform is ready for deployment over the public internet. 🚀
