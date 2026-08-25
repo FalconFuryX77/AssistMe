@@ -27,7 +27,8 @@ jobs:
 
       - name: Run focused vision tests
         run: |
-          python -m pytest backend/tests/test_vision_contract.py -v
+          cd backend
+          python -m pytest tests/test_vision_contract.py -v
 
       - name: Compile backend source
         run: python -m compileall -q backend
