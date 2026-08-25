@@ -1,4 +1,4 @@
-"""Trusted device API routes — pairing, password-protected list management."""
+"""Trusted-person pairing and one-tap approval routes."""
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +11,6 @@ from api.schemas.trusted_device import (
     DeviceAuthResponse,
     DeviceClaimRequest,
     DeviceClaimResponse,
-    DevicePairingConfirmRequest,
-    DevicePairingConfirmResponse,
-    DevicePairingRequest,
-    DevicePairingResponse,
     DeviceSetupCodeRequest,
     DeviceSetupCodeResponse,
     PendingPairingResponse,
@@ -27,55 +23,6 @@ from core.database import get_db
 from models.user import User
 
 router = APIRouter(prefix="/devices", tags=["trusted-devices"])
-
-
-@router.post(
-    "/pairing/initiate",
-    response_model=DevicePairingResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def initiate_pairing(
-    payload: DevicePairingRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Start pairing a new device. Returns a one-time code for the owner to enter."""
-    pairing_id, code, expires_at = await TrustedDeviceService.initiate_pairing(
-        owner_user_id=current_user.id,
-        device_fingerprint=payload.device_fingerprint,
-        friendly_name=payload.friendly_name,
-        device_platform=payload.device_platform,
-        db=db,
-    )
-    return {
-        "pairing_id": pairing_id,
-        "pairing_code": code,
-        "expires_at": expires_at,
-    }
-
-
-@router.post(
-    "/pairing/confirm",
-    response_model=DevicePairingConfirmResponse,
-)
-async def confirm_pairing(
-    payload: DevicePairingConfirmRequest,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Confirm a pairing code. Requires the owner's password (protected list)."""
-    device = await TrustedDeviceService.confirm_pairing(
-        owner_user_id=current_user.id,
-        pairing_code=payload.pairing_code,
-        password=payload.password,
-        db=db,
-    )
-    return {
-        "device_id": device.id,
-        "device_fingerprint": device.device_fingerprint,
-        "friendly_name": device.friendly_name,
-        "status": device.status,
-    }
 
 
 @router.post(

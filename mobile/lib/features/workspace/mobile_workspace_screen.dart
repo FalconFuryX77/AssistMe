@@ -4,7 +4,6 @@ import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
 import 'remote_screen_view.dart';
 import 'mobile_voice_control_bar.dart';
-import 'mobile_chat_drawer.dart';
 import 'assistance_flow_coordinator.dart';
 
 class MobileWorkspaceScreen extends StatefulWidget {
@@ -30,7 +29,6 @@ class MobileWorkspaceScreen extends StatefulWidget {
 }
 
 class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
-  bool _isChatOpen = false;
   final _flowCoordinatorKey = GlobalKey<AssistanceFlowCoordinatorState>();
 
   // Live remote media stream, published by the flow coordinator's WebRTC
@@ -62,13 +60,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Session: ${widget.sessionCode}'),
-        actions: [
-          IconButton(
-            icon: Icon(_isChatOpen ? Icons.chat_bubble : Icons.chat_bubble_outline),
-            onPressed: () => setState(() => _isChatOpen = !_isChatOpen),
-          ),
-        ],
+        title: const Text('Help session'),
       ),
       body: Stack(
         children: [
@@ -108,18 +100,6 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
             ),
           ),
 
-          // Sliding Chat & File Drawer
-          if (_isChatOpen)
-            Positioned(
-              top: 0,
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: MobileChatDrawer(
-                sessionId: widget.sessionId,
-                apiClient: widget.apiClient,
-              ),
-            ),
         ],
       ),
     );

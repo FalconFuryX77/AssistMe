@@ -10,6 +10,9 @@ class RemoteScreenView extends StatefulWidget {
   final bool isFlagSecureActive;
   final bool isScreenSharing;
   final ValueNotifier<dynamic>? remoteStreamNotifier;
+  /// Control is opt-in and must only become true after the helpee approves
+  /// the plain-language risk screen. Annotation remains available without it.
+  final bool allowRemoteControl;
 
   const RemoteScreenView({
     Key? key,
@@ -18,6 +21,7 @@ class RemoteScreenView extends StatefulWidget {
     this.isFlagSecureActive = false,
     this.isScreenSharing = true,
     this.remoteStreamNotifier,
+    this.allowRemoteControl = false,
   }) : super(key: key);
 
   @override
@@ -68,6 +72,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     double? endY,
     int? durationMs,
   }) async {
+    if (!widget.allowRemoteControl) return;
     try {
       await widget.apiClient.post(
         '/sessions/${widget.sessionId}/remote-control/input',
@@ -96,6 +101,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
 
         return GestureDetector(
           onTapDown: (details) {
+            if (!widget.allowRemoteControl) return;
             final x = details.localPosition.dx / width;
             final y = details.localPosition.dy / height;
             setState(() {
@@ -104,9 +110,11 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
             _dispatchInput(eventType: 'tap', x: x, y: y);
           },
           onPanStart: (details) {
+            if (!widget.allowRemoteControl) return;
             _dragStartOffset = details.localPosition;
           },
           onPanEnd: (details) {
+            if (!widget.allowRemoteControl) return;
             if (_dragStartOffset != null) {
               final startX = _dragStartOffset!.dx / width;
               final startY = _dragStartOffset!.dy / height;
@@ -125,6 +133,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
             }
           },
           onLongPressStart: (details) {
+            if (!widget.allowRemoteControl) return;
             final x = details.localPosition.dx / width;
             final y = details.localPosition.dy / height;
             _dispatchInput(
