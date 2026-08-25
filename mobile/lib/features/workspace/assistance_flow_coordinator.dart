@@ -69,6 +69,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   bool _mediaReady = false;
   bool _screenShareStarted = false;
 
+  void _sendDrawStroke(List<Offset> points) {
+    setState(() => _strokes.add(DrawStroke(points: points)));
+    _realtime?.send({
+      'type': 'draw_stroke',
+      'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
+    });
+  }
+
+  void _clearDrawings() {
+    setState(() => _strokes.clear());
+    _realtime?.send({'type': 'draw_clear'});
+  }
+
   bool get isMediaReady => _mediaReady;
   bool get isScreenShareStarted => _screenShareStarted;
 
@@ -142,6 +155,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       };
       await _engine.initialize(iceServers: iceServers);
       if (mounted) setState(() => _mediaReady = true);
+
+      if (mounted && widget.isHelpee && widget.autoStartScreenShare) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && !_screenShareStarted) startScreenShare();
+        });
+      }
     } catch (e) {
       debugPrint('WebRTC init failed: $e');
       if (mounted) {
@@ -613,9 +632,27 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             ),
           ),
 
-        // Drawing overlay (renders helper strokes on top of the viewport)
+        // Drawing overlay (renders guidance strokes on top of the viewport)
         if (_strokes.isNotEmpty)
           Positioned.fill(child: DrawingOverlay(strokes: _strokes)),
+
+        // The helper can annotate without gaining any touch control.
+        if (!widget.isHelpee)
+          Positioned.fill(
+            child: DrawingInputOverlay(onStroke: _sendDrawStroke),
+          ),
+
+        if (_strokes.isNotEmpty && !widget.isHelpee)
+          Positioned(
+            top: 16,
+            left: 16,
+            child: FloatingActionButton.small(
+              heroTag: 'clear_drawings',
+              onPressed: _clearDrawings,
+              tooltip: 'Clear drawings',
+              child: const Icon(Icons.clear),
+            ),
+          ),
 
         // Helper: incoming assistance request popup
         if (_pendingRequestId != null)

@@ -426,6 +426,19 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
+            elif msg_type in ("draw_stroke", "draw_clear"):
+                # Drawing is the default, least-privilege guidance layer.
+                # It never grants touch control and is relayed to both phones.
+                await _broadcast(
+                    session_id,
+                    {
+                        "type": msg_type,
+                        "sender_user_id": user.id,
+                        "points": msg.get("points"),
+                    },
+                    exclude_user=user.id,
+                )
+
             else:
                 await websocket.send_json(
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
