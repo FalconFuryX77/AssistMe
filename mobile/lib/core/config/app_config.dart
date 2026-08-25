@@ -1,6 +1,6 @@
 /// App configuration.
 ///
-/// The server address is editable at runtime (Settings on the login screen)
+/// The server address is editable during first-run setup.
 /// and persisted on the device, so it can point to a LAN IP or a public
 /// internet HTTPS URL without rebuilding the app.
 class AppConfig {

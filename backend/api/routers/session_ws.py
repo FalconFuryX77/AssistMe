@@ -159,6 +159,20 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
 
             msg_type = msg.get("type")
 
+            # AssistMe is intentionally a two-person screen/voice session.
+            # Ignore legacy chat, file, group, policy, recording, and
+            # zeroization messages instead of forwarding them to a phone.
+            allowed_types = {
+                "heartbeat", "leave", "signal_offer", "signal_answer",
+                "signal_ice_candidate", "screen_share_start", "screen_share_stop",
+                "audio_mute_toggle", "draw_stroke", "draw_clear",
+                "assistance_requested", "assistance_request_responded",
+                "escalation_requested", "escalation_responded",
+            }
+            if msg_type not in allowed_types:
+                await websocket.send_json({"type": "unsupported_message"})
+                continue
+
             if msg_type == "heartbeat":
                 async with async_session_factory() as db:
                     await SessionService.heartbeat(session_id, user.id, db)

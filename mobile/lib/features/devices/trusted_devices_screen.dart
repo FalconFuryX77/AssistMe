@@ -231,7 +231,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
     if (confirmed != true) return;
 
     try {
-      final resp = await widget.apiClient.revokeDevice(device['id'], '');
+      final resp = await widget.apiClient.revokeDevice(device['id']);
       if (resp.statusCode == 204) {
         _loadDevices();
       } else {

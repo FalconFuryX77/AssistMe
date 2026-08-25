@@ -128,34 +128,12 @@ class ApiClient {
   // Trusted device endpoints
   // ---------------------------------------------------------------------------
 
-  Future<http.Response> initiatePairing({
-    required String deviceFingerprint,
-    String? friendlyName,
-    String? devicePlatform,
-  }) {
-    return post('/devices/pairing/initiate', body: {
-      'device_fingerprint': deviceFingerprint,
-      'friendly_name': friendlyName,
-      'device_platform': devicePlatform,
-    });
-  }
-
-  Future<http.Response> confirmPairing({
-    required String pairingCode,
-    required String password,
-  }) {
-    return post('/devices/pairing/confirm', body: {
-      'pairing_code': pairingCode,
-      'password': password,
-    });
-  }
-
   Future<http.Response> listTrustedDevices() {
     return get('/devices/');
   }
 
-  Future<http.Response> revokeDevice(String deviceId, String password) {
-    return delete('/devices/$deviceId', query: {'password': password});
+  Future<http.Response> revokeDevice(String deviceId) {
+    return delete('/devices/$deviceId');
   }
 
   Future<http.Response> checkDeviceIdentity(String deviceFingerprint) {
