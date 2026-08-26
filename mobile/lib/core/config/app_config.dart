@@ -33,11 +33,41 @@ class AppConfig {
 
   static bool get isConfigured => baseUrl.trim().isNotEmpty;
 
+  /// Normalise a user-entered server URL.
+  /// - trims whitespace
+  /// - ensures scheme (defaults to http:// for bare LAN IPs)
+  /// - removes trailing slash
+  /// - validates that a host is present — throws [FormatException] if not.
+  static String normalizeUrl(String raw) {
+    var v = raw.trim();
+    if (v.isEmpty) throw const FormatException('Server URL is empty');
+    if (!v.contains('://')) v = 'http://$v';
+    final uri = Uri.tryParse(v);
+    if (uri == null || uri.host.isEmpty) {
+      throw FormatException('No host specified in URI $v');
+    }
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      throw FormatException('URL must start with http:// or https://');
+    }
+    // Re-serialize without trailing slash.
+    var out = uri.toString();
+    if (out.endsWith('/')) out = out.substring(0, out.length - 1);
+    return out;
+  }
+
+  static void setBaseUrl(String url) {
+    baseUrl = normalizeUrl(url);
+  }
+
   /// Same address as a WebSocket URL (http->ws, https->wss).
   static String get wsUrl {
     if (baseUrl.startsWith('https://')) {
       return 'wss://${baseUrl.substring(8)}';
     }
-    return 'ws://${baseUrl.substring(7)}';
+    if (baseUrl.startsWith('http://')) {
+      return 'ws://${baseUrl.substring(7)}';
+    }
+    // No host — callers should have checked isConfigured first.
+    throw StateError('Server not configured: cannot build WebSocket URL');
   }
 }

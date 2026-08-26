@@ -12,6 +12,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
 import '../../core/notifications/push_notification_service.dart';
 import '../../core/realtime/device_channel_service.dart';
@@ -19,6 +20,7 @@ import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../devices/trusted_devices_screen.dart';
+import '../settings/server_config_screen.dart';
 import '../workspace/mobile_workspace_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -71,6 +73,22 @@ class _HomeScreenState extends State<HomeScreen> {
     _bootstrap();
   }
 
+  Future<void> _openServerSettings() async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => ServerConfigScreen(
+          apiClient: widget.apiClient,
+          secureStorage: widget.secureStorage,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Server set to $result')));
+      _loadLists();
+      _connectChannel();
+    }
+  }
+
   Future<void> _bootstrap() async {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
     _activeSession = await widget.secureStorage.getActiveSession();
@@ -101,6 +119,7 @@ class _HomeScreenState extends State<HomeScreen> {
   /// A closed app must never lose a request: fetch pending rings on open.
   Future<void> _checkMissedCalls() async {
     if (_incomingCall != null || _ringingRequestId != null) return;
+    if (!AppConfig.isConfigured) return;
     try {
       final resp = await widget.apiClient.listPendingCalls();
       if (resp.statusCode != 200) return;
@@ -122,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadLists() async {
+    if (!AppConfig.isConfigured) return;
     try {
       final helpersResp = await widget.apiClient.listTrustedDevices();
       if (helpersResp.statusCode == 200) {
@@ -139,12 +159,19 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       }
-    } catch (_) {
-      /* offline: lists stay empty */
+    } catch (e) {
+      if (e.toString().contains('No host specified') || e.toString().contains('Server not configured')) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Server not configured — tap the gear icon to set it')),
+          );
+        }
+      }
     }
   }
 
   Future<void> _connectChannel() async {
+    if (!AppConfig.isConfigured) return;
     final token = await widget.secureStorage.getAccessToken();
     if (token == null) return;
     _channel?.dispose();
@@ -232,6 +259,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _ringHelper(Map<String, dynamic> device) async {
     if (_isBusy) return;
+    if (!AppConfig.isConfigured) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Server not configured — set it in Settings first')),
+        );
+        await _openServerSettings();
+      }
+      return;
+    }
 
     final message = await _askForMessage(device);
     if (message == null) return; // cancelled
@@ -281,9 +317,11 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       _clearOutgoing();
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Network error: $e')));
+        final msg = e.toString().replaceFirst('Bad state: ', '').replaceFirst('FormatException: ', '');
+        final friendly = msg.contains('No host specified') || msg.contains('Server not configured')
+            ? 'Server not configured — open Settings (gear) and enter your server URL'
+            : 'Network error: $msg';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(friendly)));
       }
     }
   }
@@ -430,6 +468,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _respondIncoming({required bool accept}) async {
     final call = _incomingCall;
     if (call == null) return;
+    if (!AppConfig.isConfigured) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Server not configured')));
+      return;
+    }
     setState(() => _incomingCall = null);
 
     try {
@@ -537,6 +579,11 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Text(_myName.isEmpty ? 'AssistMe' : 'Hi, $_myName'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.settings),
+            tooltip: 'Server settings',
+            onPressed: _openServerSettings,
+          ),
+          IconButton(
             icon: const Icon(Icons.people_outline),
             tooltip: 'Trusted people',
             onPressed: () async {
@@ -558,6 +605,41 @@ class _HomeScreenState extends State<HomeScreen> {
           SafeArea(
             child: Column(
               children: [
+                if (!AppConfig.isConfigured)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentAmber.withOpacity(0.14),
+                      border: Border.all(color: AppTheme.accentAmber),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.warning_amber, color: AppTheme.accentAmber, size: 18),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            'Server not configured — devices will show "Network error".',
+                            style: TextStyle(color: AppTheme.accentAmber, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (!AppConfig.isConfigured)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _openServerSettings,
+                        icon: const Icon(Icons.dns, size: 16),
+                        label: const Text('Set server URL'),
+                        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.accentAmber, side: const BorderSide(color: AppTheme.accentAmber)),
+                      ),
+                    ),
+                  ),
                 _roleSwitch(),
                 Expanded(
                   child: _tab == _tabNeedHelp ? _needHelpTab() : _helpingTab(),

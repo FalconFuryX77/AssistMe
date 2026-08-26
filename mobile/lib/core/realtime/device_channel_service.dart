@@ -35,6 +35,7 @@ class DeviceChannelService {
 
   Future<void> connect() async {
     if (_socket != null || _disposed) return;
+    if (!AppConfig.isConfigured) return;
     try {
       final uri = '${AppConfig.wsUrl}/ws/device?token=$accessToken';
       _socket = await WebSocket.connect(uri);

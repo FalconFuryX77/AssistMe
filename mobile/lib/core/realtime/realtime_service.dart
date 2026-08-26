@@ -48,6 +48,7 @@ class RealtimeService {
 
   Future<void> connect() async {
     if (_disposed || _connecting || _socket != null) return;
+    if (!AppConfig.isConfigured) return;
     _connecting = true;
     try {
       final uri = '${AppConfig.wsUrl}/ws/session/$sessionId?token=$accessToken';

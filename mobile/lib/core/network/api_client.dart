@@ -14,6 +14,20 @@ class ApiClient {
     http.Client? httpClient,
   }) : httpClient = httpClient ?? http.Client();
 
+  void updateBaseUrl(String url) => baseUrl = url;
+
+  void _ensureConfigured() {
+    if (baseUrl.trim().isEmpty) {
+      throw StateError(
+        'Server not configured — open Settings and enter your server URL (e.g. http://192.168.1.39:8000)',
+      );
+    }
+    final uri = Uri.tryParse(baseUrl);
+    if (uri == null || uri.host.isEmpty) {
+      throw FormatException('No host specified in URI $baseUrl');
+    }
+  }
+
   Future<Map<String, String>> _getHeaders({bool requireAuth = true}) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -34,12 +48,15 @@ class ApiClient {
   /// Exchange the stored refresh token for a fresh access token.
   Future<bool> _tryRefresh() async {
     if (_refreshing) return false;
+    if (baseUrl.trim().isEmpty) return false;
+    final uri = Uri.tryParse('$baseUrl/auth/refresh');
+    if (uri == null || uri.host.isEmpty) return false;
     _refreshing = true;
     try {
       final refreshToken = await secureStorage.getRefreshToken();
       if (refreshToken == null || refreshToken.isEmpty) return false;
       final resp = await httpClient.post(
-        Uri.parse('$baseUrl/auth/refresh'),
+        uri,
         headers: const {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -79,6 +96,7 @@ class ApiClient {
   }
 
   Future<http.Response> get(String endpoint, {bool requireAuth = true}) {
+    _ensureConfigured();
     return _send(
       (headers) =>
           httpClient.get(Uri.parse('$baseUrl$endpoint'), headers: headers),
@@ -91,6 +109,7 @@ class ApiClient {
     Map<String, dynamic>? body,
     bool requireAuth = true,
   }) {
+    _ensureConfigured();
     return _send(
       (headers) => httpClient.post(
         Uri.parse('$baseUrl$endpoint'),
@@ -106,6 +125,7 @@ class ApiClient {
     Map<String, dynamic>? body,
     bool requireAuth = true,
   }) {
+    _ensureConfigured();
     return _send(
       (headers) => httpClient.patch(
         Uri.parse('$baseUrl$endpoint'),
@@ -121,6 +141,7 @@ class ApiClient {
     Map<String, dynamic>? query,
     bool requireAuth = true,
   }) {
+    _ensureConfigured();
     return _send(
       (headers) => httpClient.delete(
         Uri.parse('$baseUrl$endpoint').replace(queryParameters: query),
