@@ -15,6 +15,7 @@ from api.schemas.assistance_request import (
 )
 from api.services.assistance_request_service import AssistanceRequestService
 from core.database import get_db
+from core.realtime_bus import publish
 from models.user import User
 
 router = APIRouter(prefix="/sessions/{session_id}/assistance", tags=["assistance"])
@@ -52,6 +53,7 @@ async def respond_to_request(
 ) -> dict:
     """The helper accepts or denies a pending assistance request."""
     request = await AssistanceRequestService.respond_to_request(
+        session_id=session_id,
         request_id=request_id,
         helper_user_id=current_user.id,
         accept=payload.accept,
@@ -101,7 +103,12 @@ async def get_escalation(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Fetch an escalation (e.g. to display its disclaimer to the helpee)."""
-    escalation = await AssistanceRequestService.get_escalation(escalation_id, db)
+    escalation = await AssistanceRequestService.get_escalation(
+        escalation_id=escalation_id,
+        session_id=session_id,
+        user_id=current_user.id,
+        db=db,
+    )
     return _escalation_to_dict(escalation)
 
 
@@ -123,6 +130,18 @@ async def respond_to_escalation(
         accept=payload.accept,
         accept_disclaimer=payload.accept_disclaimer,
         db=db,
+    )
+    await publish(
+        f"assistme:session:{session_id}",
+        {
+            "message": {
+                "type": "escalation_responded",
+                "escalation_id": escalation.id,
+                "status": escalation.status,
+                "user_id": current_user.id,
+            },
+            "exclude_user": current_user.id,
+        },
     )
     return _escalation_to_dict(escalation)
 

@@ -127,9 +127,21 @@ async def grant_remote_control(session_id: str, payload: RemoteControlGrantReque
 
 @router.post("/{session_id}/remote-control/revoke", response_model=SessionResponse)
 async def revoke_remote_control(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    return _enrich_session(await RemoteControlService.revoke_remote_control(
+    session = await RemoteControlService.revoke_remote_control(
         session_id=session_id, user_id=current_user.id, db=db
-    ))
+    )
+    await publish(
+        f"assistme:session:{session_id}",
+        {
+            "message": {
+                "type": "remote_control_revoked",
+                "reason": "helpee_revoked",
+                "user_id": current_user.id,
+            },
+            "exclude_user": current_user.id,
+        },
+    )
+    return _enrich_session(session)
 
 
 @router.get("/{session_id}/remote-control/status")

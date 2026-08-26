@@ -14,6 +14,18 @@ class ApiClient {
     http.Client? httpClient,
   }) : httpClient = httpClient ?? http.Client();
 
+  void updateBaseUrl(String value) {
+    baseUrl = value.trim().replaceFirst(RegExp(r'/+$'), '');
+  }
+
+  void _ensureConfigured() {
+    if (baseUrl.trim().isEmpty) {
+      throw StateError(
+        'AssistMe backend is not configured. Build with DEFAULT_SERVER_URL.',
+      );
+    }
+  }
+
   Future<Map<String, String>> _getHeaders({bool requireAuth = true}) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -34,6 +46,7 @@ class ApiClient {
   /// Exchange the stored refresh token for a fresh access token.
   Future<bool> _tryRefresh() async {
     if (_refreshing) return false;
+    if (baseUrl.trim().isEmpty) return false;
     _refreshing = true;
     try {
       final refreshToken = await secureStorage.getRefreshToken();
@@ -67,6 +80,7 @@ class ApiClient {
     Future<http.Response> Function(Map<String, String> headers) run, {
     bool requireAuth = true,
   }) async {
+    _ensureConfigured();
     var headers = await _getHeaders(requireAuth: requireAuth);
     var resp = await run(headers);
     if (resp.statusCode == 401 && requireAuth) {
@@ -76,6 +90,12 @@ class ApiClient {
       }
     }
     return resp;
+  }
+
+  /// Return a fresh token for a long-lived WebSocket connection.
+  Future<String?> getRealtimeAccessToken() async {
+    await _tryRefresh();
+    return secureStorage.getAccessToken();
   }
 
   Future<http.Response> get(String endpoint, {bool requireAuth = true}) {
@@ -223,6 +243,10 @@ class ApiClient {
     return get('/help/call/$requestId');
   }
 
+  Future<http.Response> cancelHelpCall(String requestId) {
+    return post('/help/call/$requestId/cancel');
+  }
+
   /// The helper's address book — people this user has been trusted to help.
   Future<http.Response> listHelping() {
     return get('/devices/helping');
@@ -233,10 +257,15 @@ class ApiClient {
     required String sessionId,
     required String requestId,
     required bool accept,
+    String? helperDeviceFingerprint,
   }) {
     return post(
       '/sessions/$sessionId/assistance/request/$requestId/respond',
-      body: {'accept': accept},
+      body: {
+        'accept': accept,
+        if (helperDeviceFingerprint != null)
+          'helper_device_fingerprint': helperDeviceFingerprint,
+      },
     );
   }
 
