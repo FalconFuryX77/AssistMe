@@ -77,10 +77,23 @@ class WebRTCEngine {
     _pc!.onIceCandidate = (candidate) {
       onLocalCandidate?.call(candidate.toMap());
     };
-    _pc!.onTrack = (event) {
+    _pc!.onTrack = (event) async {
       if (event.streams.isNotEmpty) {
         onRemoteStream?.call(event.streams.first);
+      } else if (event.track != null) {
+        // Some Android WebRTC builds emit a track without a bundled stream.
+        // Synthesize a MediaStream so the helper's viewport never stays black.
+        try {
+          final stream = await createLocalMediaStream('assistme-remote-${event.track!.kind}');
+          await stream.addTrack(event.track!, addToNative: true);
+          onRemoteStream?.call(stream);
+        } catch (_) {
+          // Fallback: the coordinator also registers onAddStream.
+        }
       }
+    };
+    _pc!.onAddStream = (stream) {
+      onRemoteStream?.call(stream);
     };
     _pc!.onConnectionState = (state) {
       switch (state) {

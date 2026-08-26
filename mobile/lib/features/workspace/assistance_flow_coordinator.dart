@@ -214,12 +214,36 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       AnnotationOverlayService.initialize(
         onPanic: _panicStop,
         onClear: () async => _clearDrawings(notifyOverlay: false),
-        onDrawStroke: _sendDrawStroke,
+        onDrawStroke: (points, color, width) => _handleNativeHelpeeStroke(points, color, width),
+        onErase: (point) => _eraseAt(point),
         onUndo: _undoDrawing,
         onRedo: _redoDrawing,
       );
     }
     _bootstrap();
+  }
+
+  void _handleNativeHelpeeStroke(List<Offset> points, int colorValue, double width) {
+    // Helpee drew on the system overlay – use the native-selected color
+    // (not the helper's currently selected color) so both sides see the same.
+    final color = Color(colorValue);
+    _previewTimer?.cancel();
+    _previewTimer = null;
+    _pendingPreviewPoints = null;
+    setState(() {
+      _draftStroke = null;
+      _redoStrokes.clear();
+      _strokes.add(DrawStroke(points: points, color: color, width: width));
+    });
+    _realtime?.send({
+      'type': 'draw_stroke',
+      'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
+      'color': colorValue,
+      'width': width,
+    });
+    // Local overlay already shows the stroke via native canvas; _pushOverlay
+    // keeps it in sync for any future helper replay but does not duplicate.
+    _pushOverlay();
   }
 
   Future<void> toggleAudioMute(bool mute) async {
@@ -309,19 +333,27 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  /// The helpee-owned emergency exit. It revokes control immediately while
-  /// keeping the voice session available, so panic is reversible without
-  /// unexpectedly dropping the person who is helping.
+  /// Helpee STOP – VISION §12.5 panic: immediately shuts down everything for
+  /// both sides (screen, annotations, control, overlay) so helper never sees
+  /// stale docs after helpee closed the app or tapped STOP. This is what the
+  /// user asked for: "shutting down the meeting just shut down everything for
+  /// the other guy".
   Future<void> _panicStop() async {
     try {
-      await widget.apiClient.post(
-        '/sessions/${widget.sessionId}/remote-control/revoke',
-      );
+      await widget.apiClient.post('/sessions/${widget.sessionId}/leave');
     } catch (_) {}
     _remoteControlGranted = false;
     widget.remoteControlSink?.value = false;
-    await AnnotationOverlayService.clear();
+    await _clearDrawings(notifyOverlay: true);
+    await stopScreenShare();
+    try { await AnnotationOverlayService.stop(); } catch (_) {}
+    _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
+    // Ensure helper sees session_ended immediately (leave already broadcasts,
+    // but also send explicit clear for overlay docs).
+    _realtime?.send({'type': 'draw_clear'});
+    await widget.onSessionEnded?.call();
+    await widget.onSessionClosed?.call();
   }
 
   Future<void> _bootstrap() async {
@@ -358,10 +390,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   /// replaced. This avoids a second Android capture consent flow and restores
   /// the remote video after either phone briefly drops off the network.
   Future<void> _handleRealtimeConnected() async {
-    if (!widget.isHelpee || !_screenShareStarted || _mediaRecovering) return;
     await Future<void>.delayed(const Duration(milliseconds: 400));
-    if (!mounted || !_screenShareStarted) return;
-    await _recoverMedia(sendOffer: true);
+    if (!mounted || _mediaRecovering) return;
+    if (widget.isHelpee && _screenShareStarted) {
+      await _recoverMedia(sendOffer: true);
+    } else if (!widget.isHelpee) {
+      // Helper reconnected but still has no video – ask helpee to re-offer.
+      // The video check uses notifier so we don't trigger when video already live.
+      if (remoteStreamNotifier.value == null) {
+        await _recoverMedia(sendOffer: false);
+        // Nudge helpee to re-create offer if it hasn't already (e.g., helpee
+        // didn't detect the reconnect). This also restores mic.
+        _realtime?.send({'type': 'request_offer'});
+      }
+    }
   }
 
   Future<void> _recoverMedia({required bool sendOffer}) async {
@@ -372,13 +414,23 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     remoteStreamNotifier.value = null;
     try {
       await _engine.rebuildPeerConnection();
+      // Ensure mic is re-attached and respects previous mute state – VISION requires
+      // reconnection restores full session (voice + video), not just video.
       if (!widget.isHelpee) {
-        // Reattach the helper microphone if it was already active. If this is
-        // a reconnect before the first offer, the normal answer path adds it.
         await _engine.startMicOnly();
-      } else if (sendOffer && _screenShareStarted) {
-        final offer = await _engine.createOffer();
-        _realtime?.send({'type': 'signal_offer', 'sdp': offer});
+        // Re-apply mute state so mic doesn't stay muted after rebuild.
+        await _engine.toggleAudioMute(_engine.isAudioMuted);
+      } else {
+        // Helpee: mic was via screen capture's addMicrophone; ensure it's there.
+        // If screen stream was lost (e.g., app backgrounded), restart capture silently.
+        if (_engine.isScreenSharing) {
+          // Ensure mic track exists even after rebuild
+          await _engine.startMicOnly();
+        }
+        if (sendOffer && _screenShareStarted) {
+          final offer = await _engine.createOffer();
+          _realtime?.send({'type': 'signal_offer', 'sdp': offer});
+        }
       }
     } catch (e) {
       debugPrint('WebRTC recovery failed: $e');
@@ -538,7 +590,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  void _onEvent(RealtimeEvent event) {
+  Future<void> _onEvent(RealtimeEvent event) async {
     switch (event.type) {
       case 'assistance_requested':
         // A helpee is asking us (helper) for help.
@@ -710,6 +762,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
         break;
 
+      case 'request_offer':
+        if (widget.isHelpee && _screenShareStarted) {
+          // Helper reconnected and has no video – re-offer immediately.
+          // If media is still recovering, queue via _handleRealtimeConnected.
+          if (!_mediaRecovering) {
+            await _recoverMedia(sendOffer: true);
+          }
+        }
+        break;
+
       // --- WebRTC signaling relay ---
       case 'signal_offer':
         if (!widget.isHelpee) {
@@ -771,15 +833,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         if (!widget.isHelpee) remoteStreamNotifier.value = null;
         break;
       case 'session_ended':
+        // VISION: either side shutting down must clear everything for the other – annotations, overlay, control.
+        _clearDrawings(notifyOverlay: true);
         stopScreenShare();
         AnnotationOverlayService.stop();
         _remoteControlGranted = false;
         widget.remoteControlSink?.value = false;
+        remoteStreamNotifier.value = null;
+        _helpeeOverlayRunning = false;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'The other device disconnected. Help session ended.',
+                'Help session ended.',
               ),
             ),
           );
@@ -1068,6 +1134,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     if (mounted) setState(() => _pendingRequestId = null);
   }
 
+  Future<void> requestControl() => _requestEscalation();
+
   Future<void> _requestEscalation() async {
     final capabilities = await _promptCapabilities();
     if (capabilities == null) return;
@@ -1182,16 +1250,22 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             ),
           ),
 
-        // The helper can annotate without gaining any touch control.
+        // The helper can annotate without gaining any touch control, but only when video is live – per user's fix: don't allow drawing blind.
         if (!widget.isHelpee && (!_remoteControlGranted || _annotationMode))
-          Positioned.fill(
-            child: DrawingInputOverlay(
-              onStroke: _sendDrawStroke,
-              onStrokeUpdate: _sendDrawPreview,
-              onErase: _eraseAt,
-              tool: _annotationTool,
-              contentAspectRatio: 9 / 16,
-            ),
+          ValueListenableBuilder<dynamic>(
+            valueListenable: remoteStreamNotifier,
+            builder: (context, stream, _) {
+              if (stream == null) return const SizedBox.shrink();
+              return Positioned.fill(
+                child: DrawingInputOverlay(
+                  onStroke: _sendDrawStroke,
+                  onStrokeUpdate: _sendDrawPreview,
+                  onErase: _eraseAt,
+                  tool: _annotationTool,
+                  contentAspectRatio: 9 / 16,
+                ),
+              );
+            },
           ),
 
         // Helper controls stay visible in both phase 2 and phase 3. Only the
@@ -1286,7 +1360,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               color: _annotationTool == AnnotationTool.eraser
                   ? AppTheme.accentRose
                   : AppTheme.textSecondary,
-              icon: const Icon(Icons.auto_fix_normal),
+              icon: const Icon(Icons.cleaning_services),
               onPressed: () => _selectAnnotationTool(AnnotationTool.eraser),
             ),
             IconButton(

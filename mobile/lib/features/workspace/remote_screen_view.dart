@@ -116,27 +116,19 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     }
   }
 
-  /// Return the normalized coordinate inside the actual `contain` video
-  /// rectangle. The previous implementation used the whole widget bounds,
-  /// which included letterboxing and the helper's app chrome and caused taps
-  /// to land consistently above the visible target on the helpee phone.
+  /// Normalized point inside the bounded 9/16 video rect – must match
+  /// DrawingOverlay's contentRect so helper taps and annotations land at the
+  /// same spot on the helpee phone. Using fixed 9/16 (capture is 720x1280)
+  /// avoids the 2-3mm bottom-bar offset seen when sourceWidth/Height drifted
+  /// from the viewport's letterbox.
   Offset? _normalizedVideoPoint(Offset point, Size size) {
-    final sourceWidth = _renderer.videoWidth > 0
-        ? _renderer.videoWidth.toDouble()
-        : 9.0;
-    final sourceHeight = _renderer.videoHeight > 0
-        ? _renderer.videoHeight.toDouble()
-        : 16.0;
-    final scale = math.min(
-      size.width / sourceWidth,
-      size.height / sourceHeight,
-    );
-    final videoWidth = sourceWidth * scale;
-    final videoHeight = sourceHeight * scale;
-    final left = (size.width - videoWidth) / 2;
-    final top = (size.height - videoHeight) / 2;
-    final x = (point.dx - left) / videoWidth;
-    final y = (point.dy - top) / videoHeight;
+    const aspect = 9 / 16;
+    final contentHeight = math.min(size.height, size.width / aspect);
+    final contentWidth = contentHeight * aspect;
+    final left = (size.width - contentWidth) / 2;
+    final top = (size.height - contentHeight) / 2;
+    final x = (point.dx - left) / contentWidth;
+    final y = (point.dy - top) / contentHeight;
     if (x < 0 || x > 1 || y < 0 || y > 1) return null;
     return Offset(x, y);
   }
@@ -226,24 +218,59 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                   )
                 else
                   Center(
-                    child: AspectRatio(
-                      aspectRatio: 9 / 16,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
                       child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF161F30),
-                          border: Border.all(color: AppTheme.borderGlass),
+                          color: const Color(0xFF1E293B),
+                          border: Border.all(color: AppTheme.accentEmerald.withValues(alpha: 0.5), width: 1.5),
                           borderRadius: BorderRadius.circular(16),
                         ),
-                        child: Center(
-                          child: Text(
-                            _attachedStream != null
-                                ? 'Connecting to the remote screen…'
-                                : 'Waiting for the other device to share…',
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 12,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _attachedStream != null ? Icons.sync : Icons.videocam_off,
+                              color: AppTheme.accentEmerald,
+                              size: 36,
                             ),
-                          ),
+                            const SizedBox(height: 14),
+                            Text(
+                              _attachedStream != null
+                                  ? 'Connecting to remote screen…'
+                                  : 'Waiting for the other device to share…',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Make sure the helpee tapped Start Sharing\nand granted screen permission',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 12,
+                              ),
+                            ),
+                            if (!widget.isFlagSecureActive) ...[
+                              const SizedBox(height: 12),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.bgSecondary,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'Session: ${widget.sessionId.substring(0, 6)}',
+                                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ),

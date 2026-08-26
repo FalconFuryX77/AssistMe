@@ -96,8 +96,12 @@ class _DrawingInputOverlayState extends State<DrawingInputOverlay> {
         onPanEnd: (_) {
           if (widget.tool == AnnotationTool.eraser) {
             if (_points.isNotEmpty) widget.onErase?.call(_points.last);
-          } else if (_points.length > 1) {
-            widget.onStroke(List<Offset>.from(_points));
+          } else if (_points.isNotEmpty) {
+            // Ensure single-tap dot is visible – duplicate point if needed
+            final out = _points.length == 1
+                ? [ _points.first, Offset((_points.first.dx+0.001).clamp(0.0,1.0), _points.first.dy) ]
+                : List<Offset>.from(_points);
+            widget.onStroke(out);
           }
           _points.clear();
         },
@@ -158,13 +162,24 @@ class _StrokePainter extends CustomPainter {
       height: contentHeight,
     );
     for (final stroke in strokes) {
-      if (stroke.points.length < 2) continue;
+      if (stroke.points.isEmpty) continue;
       final paint = Paint()
         ..color = stroke.color
         ..strokeWidth = stroke.width
         ..strokeCap = StrokeCap.round
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
+      if (stroke.points.length == 1) {
+        // Single dot
+        final p = stroke.points.first;
+        canvas.drawCircle(
+          Offset(contentRect.left + p.dx * contentRect.width,
+                 contentRect.top + p.dy * contentRect.height),
+          stroke.width / 2,
+          paint..style = PaintingStyle.fill,
+        );
+        continue;
+      }
       final path = Path()
         ..moveTo(
           contentRect.left + stroke.points.first.dx * contentRect.width,

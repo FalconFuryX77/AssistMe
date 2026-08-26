@@ -12,7 +12,8 @@ class AnnotationOverlayService {
   static void initialize({
     required Future<void> Function() onPanic,
     required Future<void> Function() onClear,
-    void Function(List<Offset> points)? onDrawStroke,
+    void Function(List<Offset> points, int color, double width)? onDrawStroke,
+    void Function(Offset point)? onErase,
     void Function()? onUndo,
     void Function()? onRedo,
   }) {
@@ -25,9 +26,10 @@ class AnnotationOverlayService {
           await onClear();
           break;
         case 'drawStroke':
-          final rawPoints = call.arguments is Map
-              ? (call.arguments as Map)['points']
-              : null;
+          final args = call.arguments is Map ? call.arguments as Map : null;
+          final rawPoints = args?['points'];
+          final rawColor = args?['color'];
+          final rawWidth = args?['width'];
           if (onDrawStroke != null && rawPoints is List) {
             final points = <Offset>[];
             for (final raw in rawPoints) {
@@ -40,7 +42,17 @@ class AnnotationOverlayService {
                 );
               }
             }
-            if (points.length > 1) onDrawStroke(points);
+            final color = rawColor is int ? rawColor : 0xFFFF3B30;
+            final width = rawWidth is num ? rawWidth.toDouble() : 4.0;
+            if (points.isNotEmpty) onDrawStroke(points, color, width);
+          }
+          break;
+        case 'erase':
+          final args = call.arguments is Map ? call.arguments as Map : null;
+          final rx = args?['x'];
+          final ry = args?['y'];
+          if (onErase != null && rx is num && ry is num) {
+            onErase(Offset(rx.toDouble(), ry.toDouble()));
           }
           break;
         case 'undo':
