@@ -11,12 +11,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
-import '../settings/server_config_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final ApiClient apiClient;
@@ -34,41 +32,8 @@ class OnboardingScreen extends StatefulWidget {
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
   final _nameController = TextEditingController();
-  final _serverController = TextEditingController();
   bool _busy = false;
   String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _serverController.text = AppConfig.isConfigured ? AppConfig.baseUrl : '';
-  }
-
-  Future<void> _openServerSettings() async {
-    final result = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => ServerConfigScreen(
-          apiClient: widget.apiClient,
-          secureStorage: widget.secureStorage,
-        ),
-      ),
-    );
-    if (result != null && mounted) {
-      setState(() => _serverController.text = result);
-    }
-  }
-
-  Future<void> _ensureServerConfigured() async {
-    if (AppConfig.isConfigured) return;
-    final raw = _serverController.text.trim();
-    if (raw.isEmpty) {
-      throw StateError('Enter your server URL first (e.g. http://192.168.1.39:8000)');
-    }
-    final normalized = AppConfig.normalizeUrl(raw);
-    AppConfig.baseUrl = normalized;
-    widget.apiClient.updateBaseUrl(normalized);
-    await widget.secureStorage.saveServerUrl(normalized);
-  }
 
   Future<void> _start() async {
     final name = _nameController.text.trim();
@@ -76,26 +41,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _error = 'Please enter a name first');
       return;
     }
-    // Ensure server is set before touching the network — otherwise
-    // Dio/http throws "No host specified in URI /auth/device".
-    try {
-      await _ensureServerConfigured();
-    } catch (e) {
-      setState(() => _error = e.toString().replaceFirst('FormatException: ', '').replaceFirst('Bad state: ', ''));
-      return;
-    }
     setState(() {
       _busy = true;
       _error = null;
     });
-
-    String _detail(String body, String fallback) {
-      try {
-        final decoded = jsonDecode(body);
-        if (decoded is Map && decoded['detail'] != null) return decoded['detail'].toString();
-      } catch (_) {}
-      return fallback;
-    }
 
     try {
       final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
@@ -104,11 +53,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         displayName: name,
       );
       if (resp.statusCode != 201) {
-        final detail = _detail(resp.body, 'Could not set up');
         setState(() {
           _busy = false;
-          // Surface the DB-level "already in use" error clearly.
-          _error = detail.contains('already in use') ? detail : '$detail (${resp.statusCode})';
+          _error = 'Could not set up (${resp.statusCode}). Please try again.';
         });
         return;
       }
@@ -194,30 +141,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     } catch (e) {
       setState(() {
         _busy = false;
-        final msg = e.toString().replaceFirst('Bad state: ', '').replaceFirst('FormatException: ', '');
-        if (msg.contains('No host specified') || msg.contains('Server not configured')) {
-          _error = 'Server not set — tap "Server settings" below and enter http://192.168.1.39:8000 (or your https:// domain)';
-        } else {
-          _error = 'Network error: $msg';
-        }
+        _error = 'Network error: $e';
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final serverNotSet = !AppConfig.isConfigured;
     return Scaffold(
       backgroundColor: AppTheme.bgPrimary,
       appBar: AppBar(
         title: const Text('Welcome'),
-        actions: [
-          IconButton(
-            tooltip: 'Server settings',
-            icon: const Icon(Icons.dns),
-            onPressed: _openServerSettings,
-          ),
-        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -225,7 +159,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 16),
+              const SizedBox(height: 32),
               Icon(Icons.volunteer_activism,
                   size: 72, color: AppTheme.accentEmerald),
               const SizedBox(height: 24),
@@ -245,54 +179,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
               ),
-              const SizedBox(height: 24),
-              if (serverNotSet)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 16),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.accentAmber.withOpacity(0.12),
-                    border: Border.all(color: AppTheme.accentAmber),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.warning_amber, color: AppTheme.accentAmber, size: 18),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Server not configured — nothing can load until you set it.',
-                              style: TextStyle(color: AppTheme.accentAmber, fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      TextField(
-                        controller: _serverController,
-                        keyboardType: TextInputType.url,
-                        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-                        decoration: const InputDecoration(
-                          labelText: 'Server URL',
-                          hintText: 'http://192.168.1.39:8000',
-                          prefixIcon: Icon(Icons.link, size: 18),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          onPressed: _openServerSettings,
-                          icon: const Icon(Icons.settings, size: 16),
-                          label: const Text('Open server settings'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              const SizedBox(height: 40),
               TextField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
@@ -311,18 +198,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       style:
                           const TextStyle(color: AppTheme.accentRose, fontSize: 13)),
                 ),
-              const SizedBox(height: 10),
-              // Always-visible server settings entry — the empty-baseUrl build
-              // hides nothing behind a runtime flag.
-              TextButton.icon(
-                onPressed: _openServerSettings,
-                icon: const Icon(Icons.dns, size: 16),
-                label: Text(
-                  AppConfig.isConfigured ? 'Server: ${AppConfig.baseUrl}' : 'Server settings (not set)',
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 24),
               SizedBox(
                 height: 58,
                 child: ElevatedButton.icon(
@@ -352,13 +228,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   /// Reinstall path: enter the recovery code from the old install to
   /// reclaim that identity — trusted people come straight back.
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _serverController.dispose();
-    super.dispose();
-  }
-
   Future<void> _reclaimWithCode() async {
     final controller = TextEditingController();
     final code = await showDialog<String>(
@@ -401,16 +270,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     );
     if (code == null || code.isEmpty || !mounted) return;
 
-    // Reclaim also needs a host — give a clear error instead of a URI crash.
-    try {
-      await _ensureServerConfigured();
-    } catch (e) {
-      setState(() {
-        _busy = false;
-        _error = e.toString().replaceFirst('Bad state: ', '').replaceFirst('FormatException: ', '');
-      });
-      return;
-    }
     setState(() {
       _busy = true;
       _error = null;

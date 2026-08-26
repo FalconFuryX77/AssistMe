@@ -12,12 +12,10 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
-import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
-import '../settings/server_config_screen.dart';
 
 String _responseDetail(String body, {String fallback = 'The request failed'}) {
   try {
@@ -61,30 +59,11 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
     _loadDevices();
   }
 
-  Future<void> _openServerSettings() async {
-    final result = await Navigator.of(context).push<String>(
-      MaterialPageRoute(
-        builder: (_) => ServerConfigScreen(
-          apiClient: widget.apiClient,
-          secureStorage: widget.secureStorage,
-        ),
-      ),
-    );
-    if (result != null && mounted) _loadDevices();
-  }
-
   Future<void> _loadDevices() async {
     setState(() {
       _isLoading = true;
       _error = null;
     });
-    if (!AppConfig.isConfigured) {
-      setState(() {
-        _error = 'Server not configured — tap the gear icon and set your server URL (e.g. http://192.168.1.39:8000)';
-        _isLoading = false;
-      });
-      return;
-    }
     try {
       final resp = await widget.apiClient.listTrustedDevices();
       if (resp.statusCode == 200) {
@@ -96,12 +75,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
         setState(() => _error = 'Failed to load devices (${resp.statusCode})');
       }
     } catch (e) {
-      final msg = e.toString().replaceFirst('Bad state: ', '').replaceFirst('FormatException: ', '');
-      if (msg.contains('No host specified') || msg.contains('Server not configured')) {
-        setState(() => _error = 'Server not configured — tap the gear icon and enter http://192.168.1.39:8000 or your https:// domain');
-      } else {
-        setState(() => _error = 'Network error: $msg');
-      }
+      setState(() => _error = 'Network error: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -112,13 +86,6 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
   // -------------------------------------------------------------------------
 
   Future<void> _showMyCode() async {
-    if (!AppConfig.isConfigured) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Set your server URL first (gear icon)')));
-        await _openServerSettings();
-      }
-      return;
-    }
     String? pairingId;
     String? setupCode;
     String? error;
@@ -162,13 +129,6 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
   // -------------------------------------------------------------------------
 
   Future<void> _enterCode() async {
-    if (!AppConfig.isConfigured) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Set your server URL first (gear icon)')));
-        await _openServerSettings();
-      }
-      return;
-    }
     final code = await _promptForSetupCode();
     if (code == null || code.isEmpty) return;
 
@@ -320,7 +280,6 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
       appBar: AppBar(
         title: const Text('Help & Trusted People'),
         actions: [
-          IconButton(icon: const Icon(Icons.settings), tooltip: 'Server settings', onPressed: _openServerSettings),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _loadDevices),
         ],
       ),
@@ -330,40 +289,6 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!AppConfig.isConfigured)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppTheme.accentAmber.withOpacity(0.14),
-                    border: Border.all(color: AppTheme.accentAmber),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Row(
-                        children: [
-                          Icon(Icons.warning_amber, color: AppTheme.accentAmber, size: 18),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Server not configured — these buttons will show "No host specified" until you set the URL.',
-                              style: TextStyle(color: AppTheme.accentAmber, fontSize: 12),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: _openServerSettings,
-                        icon: const Icon(Icons.dns, size: 16),
-                        label: const Text('Set server URL'),
-                        style: OutlinedButton.styleFrom(foregroundColor: AppTheme.accentAmber, side: const BorderSide(color: AppTheme.accentAmber)),
-                      ),
-                    ],
-                  ),
-                ),
               // --- Getting help (elderly side) ---
               _FlowCard(
                 icon: Icons.help_outline,
