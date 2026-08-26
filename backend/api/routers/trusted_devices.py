@@ -134,11 +134,20 @@ async def list_devices(
         owner_user_id=current_user.id,
         db=db,
     )
+    response_devices = []
+    for device in devices:
+        data = TrustedDeviceResponse.model_validate(device).model_dump()
+        helper = (
+            await db.get(User, device.helper_user_id)
+            if device.helper_user_id
+            else None
+        )
+        data["helper_display_name"] = helper.display_name if helper else None
+        data["device_tag"] = device.id.replace("-", "")[:6].upper()
+        response_devices.append(data)
     return {
         "total": len(devices),
-        "devices": [
-            TrustedDeviceResponse.model_validate(d).model_dump() for d in devices
-        ],
+        "devices": response_devices,
     }
 
 

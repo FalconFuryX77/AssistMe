@@ -33,6 +33,14 @@ class HelpCallResponse(BaseModel):
     session_id: str
     status: str
     helper_online: bool
+    helper_name: str
+
+
+class HelpCallStatusResponse(BaseModel):
+    request_id: str
+    session_id: str
+    status: str
+    helper_name: str
 
 
 @router.post("/call", response_model=HelpCallResponse)
@@ -105,22 +113,59 @@ async def place_help_call(
         },
     )
 
-    # 5. Helper app closed? Wake the phone with an FCM notification.
-    if not helper_online:
-        await _send_fcm_ring(
-            helper_user_id,
-            from_name=current_user.display_name or "Someone you help",
-            message=payload.message,
-            request_id=request.id,
-            session_id=session.id,
-            db=db,
-        )
+    # 5. Send FCM as well as the live channel. Android does not show a
+    # notification automatically when the app is foregrounded, so the app
+    # also turns this payload into a local heads-up notification.
+    await _send_fcm_ring(
+        helper_user_id,
+        from_name=current_user.display_name or "Someone you help",
+        message=payload.message,
+        request_id=request.id,
+        session_id=session.id,
+        db=db,
+    )
+
+    helper = await db.get(User, helper_user_id)
+    helper_name = (helper.display_name if helper else None) or trust.friendly_name or "your helper"
 
     return {
         "request_id": request.id,
         "session_id": session.id,
         "status": "ringing",
         "helper_online": helper_online,
+        "helper_name": helper_name,
+    }
+
+
+@router.get("/call/{request_id}", response_model=HelpCallStatusResponse)
+async def get_help_call_status(
+    request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the durable state of a help call.
+
+    The device WebSocket is an optimization for instant updates, not the
+    source of truth. Mobile clients poll this endpoint while ringing so a
+    dropped socket cannot leave a caller stuck indefinitely.
+    """
+    from models.assistance_request import AssistanceRequest
+
+    result = await db.execute(
+        select(AssistanceRequest).where(AssistanceRequest.id == request_id)
+    )
+    request = result.scalar_one_or_none()
+    if request is None:
+        raise HTTPException(status_code=404, detail="Help request not found")
+    if current_user.id not in (request.helpee_user_id, request.helper_user_id):
+        raise HTTPException(status_code=403, detail="Not a participant in this help request")
+
+    helper = await db.get(User, request.helper_user_id) if request.helper_user_id else None
+    return {
+        "request_id": request.id,
+        "session_id": request.session_id,
+        "status": request.status,
+        "helper_name": (helper.display_name if helper else None) or "your helper",
     }
 
 

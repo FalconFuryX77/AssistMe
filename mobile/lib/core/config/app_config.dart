@@ -11,15 +11,15 @@ class AppConfig {
   /// or the in-app Settings screen.
   static const String defaultBackendHost = String.fromEnvironment(
     'BACKEND_HOST',
-    defaultValue: '10.0.2.2',
+    defaultValue: '',
   );
 
-  /// Public internet URL used as the default when the user has not set one.
-  /// Set to a Cloudflare/ngrok tunnel or a deployed host so the app works
-  /// over the internet without any configuration.
+  /// Public endpoint injected by the release environment. It is deliberately
+  /// empty in source control: temporary tunnels and machine-local URLs must
+  /// never be shipped as an app default.
   static const String defaultServerUrl = String.fromEnvironment(
     'DEFAULT_SERVER_URL',
-    defaultValue: 'https://ivory-pulse-broke-pounds.trycloudflare.com',
+    defaultValue: '',
   );
 
   static const int backendPort = 8000;
@@ -29,7 +29,9 @@ class AppConfig {
   /// Settings.
   static String baseUrl = defaultServerUrl.isNotEmpty
       ? defaultServerUrl
-      : 'http://$defaultBackendHost:$backendPort';
+      : (defaultBackendHost.isNotEmpty ? 'http://$defaultBackendHost:$backendPort' : '');
+
+  static bool get isConfigured => baseUrl.trim().isNotEmpty;
 
   /// Same address as a WebSocket URL (http->ws, https->wss).
   static String get wsUrl {

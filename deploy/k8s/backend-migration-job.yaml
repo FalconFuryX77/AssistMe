@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: assistme-backend-migration
+  labels:
+    app: assistme-backend
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: assistme-backend-migration
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: assistme-backend:latest
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: assistme-config
+          env:
+            - name: APP_ENV
+              value: "production"
+            - name: AUTO_CREATE_TABLES
+              value: "false"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: assistme-secrets
+                  key: database-url
+            - name: SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: assistme-secrets
+                  key: secret-key

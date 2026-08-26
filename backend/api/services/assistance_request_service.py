@@ -236,6 +236,14 @@ class AssistanceRequestService:
             escalation.disclaimer_accepted = True
             escalation.granted_capabilities = escalation.target_capabilities
 
+            # The escalation record is the durable source of truth for the
+            # approval, but the live input gateway checks the session flag.
+            # The old flow updated only the escalation row, so every control
+            # input was rejected with 403 even after the helpee accepted.
+            session.remote_control_granted = True
+            session.remote_control_granted_at = datetime.now(timezone.utc)
+            session.remote_control_platform = "android_accessibility"
+
         await db.commit()
         await db.refresh(escalation)
         return escalation

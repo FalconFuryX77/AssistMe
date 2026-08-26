@@ -360,3 +360,103 @@ Extended `backend/api/routers/session_ws.py` with real-time broadcast for the ne
 ## Final Project Status
 
 All core backend, WebRTC signaling, E2EE Signal Protocol, native drivers, hardening, Web Application Frontend, Flutter Mobile UI, Production Infrastructure, Internet Connectivity, Context Engine, Adaptive Policy Engine, and Intelligent Assistance phases (Phases 0 through 22) are 100% complete, fully tested (206/206 passing unit & integration tests), and validated! The platform is ready for deployment over the public internet. 🚀
+
+### Scalable Runtime Foundation — 2026-08-26
+
+Added the first production-readiness refactor for scalable deployment:
+
+- Environment-driven backend settings with production secret validation,
+  PostgreSQL pool controls, and production-safe schema initialization.
+- Separate `/health/live` and `/health/ready` probes, with database-aware
+  readiness checks and graceful engine disposal.
+- Registered the implemented contacts, users, context, policy, and intelligent
+  assistance routers in the application entrypoint.
+- Removed the expired Cloudflare Tunnel hostname and emulator host from the
+  mobile source defaults. Release endpoints are injected with
+  `DEFAULT_SERVER_URL` or entered through Settings.
+- Aligned Docker Compose and Kubernetes probes with the new readiness model.
+- Added `docs/SCALABLE_BACKEND_ARCHITECTURE.md` and `deploy/.env.example`.
+
+Validation: infrastructure/connectivity tests 30/30 passing; Flutter tests
+passing; Docker Compose configuration valid. The complete backend suite still
+contains legacy tests for email/password registration, while the current
+application contract is device-first (`/auth/device`); those unrelated legacy
+failures remain separately tracked.
+
+### Local Backend Deployment — 2026-08-26
+
+Completed and verified the local deployment path:
+
+- Added Alembic with an initial migration covering all 18 application tables.
+- Added a migration gate to Docker Compose and a Kubernetes migration Job.
+- Fixed the production image Python path so the Alembic CLI resolves inside
+  the unprivileged runtime container.
+- Started PostgreSQL, migration, FastAPI, Nginx, and Coturn through Compose.
+- Verified `/health/ready` through Nginx over HTTPS and directly over LAN HTTP.
+- Added `deploy/docker-compose.local.yml` for trusted-LAN physical-device
+  testing without exposing the API in the production Compose topology.
+- Built and installed the LAN-configured release APK on both connected phones.
+
+Local test endpoint: `http://192.168.1.39:8000`. Production still requires a
+stable DNS name, trusted TLS certificate, managed secrets, and public TURN
+configuration.
+
+### Deployment/API Smoke Fixes — 2026-08-26
+
+- Fixed the SQLAlchemy mapper graph that caused `/auth/device` to return HTTP
+  500 in the container (`Session` now declares all related collections and
+  `User` declares intelligent-assistance relationships).
+- Verified device bootstrap returns HTTP 201 against the PostgreSQL-backed
+  deployment.
+- Removed the server URL label and settings button/dialog from first-launch
+  onboarding. The release endpoint is now injected at build time.
+- Added an optional named Cloudflare Tunnel profile and managed Metered TURN
+  configuration path for clients on different networks.
+
+### Pairing Error Fix — 2026-08-26
+
+- Fixed the six-digit setup-code flow failing on PostgreSQL because timezone-
+  aware database timestamps were compared with naive timestamps.
+- Added client-side parsing for JSON and plain-text error responses so a proxy
+  500 cannot surface as a Dart `FormatException`.
+- Verified the full flow against the running deployment: owner creates code,
+  helper claims it, and owner approves it successfully.
+- Rebuilt and reinstalled the corrected release on both test phones.
+
+### Screen-share and multi-worker reliability — 2026-08-26
+
+- Added the Android MediaProjection preflight flow: request the system
+  consent first, then start the `mediaProjection` foreground service, then
+  call `getDisplayMedia`. This satisfies Android 14+ ordering requirements
+  and removes the crash caused by starting the service before consent.
+- Declared the `flutter_background` isolate service and required Android
+  foreground-service, wake-lock, microphone, and notification permissions.
+- Added automatic session WebSocket reconnects with heartbeat protection and
+  a 30-second server grace period, so the consent activity or a brief Android
+  background suspension no longer ends a live call.
+- Added Redis pub/sub fan-out for device rings, session events, WebRTC
+  signaling, and annotations across all API workers.
+- Added dynamic Docker DNS resolution to the Nginx gateway so backend
+  container replacement does not leave the proxy returning 502.
+
+Validation: cross-worker ring, signaling, and drawing relay passed; a
+three-second disconnect/reconnect kept the session `active`; sustained
+disconnect termination remained enabled. Flutter analyze produced no errors,
+Flutter tests passed, the release APK built successfully, and the latest APK
+was installed on both connected devices. Physical interaction with the
+MediaProjection consent sheet remains blocked on the locked helpee phone.
+## Live assistance flow hardening — 2026-08-26
+
+- Session REST leave/end now publishes `session_ended` across workers, so a
+  helper leaving with Back or the hang-up control ends the helpee's meeting.
+- Added reconnectable active-session state on mobile plus a short disconnect
+  grace period; Home can recover a session after a process/network restart.
+- Phase 2 is annotation-only. Phase 3 is one explicit full-touch request and
+  now activates the Android Accessibility path only after helpee approval.
+- Added helpee-owned Android overlay canvas with secure Clear and panic STOP
+  controls; helper strokes continue while the helpee uses another app.
+- Added annotation color/thickness controls, removed the duplicate Clear All
+  action, wired WebRTC mic mute to the actual local audio track, and made
+  incoming rings visible/heads-up while another AssistMe screen is open.
+- Added remote-control grant/revoke/status routes and relayed approved input
+  events through the session WebSocket.

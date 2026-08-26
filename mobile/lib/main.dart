@@ -3,6 +3,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'core/config/app_config.dart';
 import 'core/network/api_client.dart';
+import 'core/notifications/push_notification_service.dart';
 import 'core/security/secure_storage_service.dart';
 import 'features/devices/trusted_devices_screen.dart';
 import 'features/home/home_screen.dart';
@@ -24,6 +25,7 @@ void main() async {
   try {
     await Firebase.initializeApp();
     await FirebaseMessaging.instance.requestPermission(provisional: false);
+      await PushNotificationService.instance.initialize();
   } catch (_) {
     // Push unavailable (no google-services on this flavor) — app still works
     // over the live WebSocket channel.
@@ -38,11 +40,13 @@ void main() async {
   final accessToken = await secureStorage.getAccessToken();
   final hasIdentity = accessToken != null && accessToken.isNotEmpty;
 
-  runApp(AssistMeMobileApp(
-    apiClient: apiClient,
-    secureStorage: secureStorage,
-    initialRoute: hasIdentity ? '/home' : '/onboarding',
-  ));
+  runApp(
+    AssistMeMobileApp(
+      apiClient: apiClient,
+      secureStorage: secureStorage,
+      initialRoute: hasIdentity ? '/home' : '/onboarding',
+    ),
+  );
 }
 
 class AssistMeMobileApp extends StatelessWidget {
@@ -66,17 +70,15 @@ class AssistMeMobileApp extends StatelessWidget {
       initialRoute: initialRoute,
       routes: {
         '/onboarding': (_) => OnboardingScreen(
-              apiClient: apiClient,
-              secureStorage: secureStorage,
-            ),
-        '/home': (_) => HomeScreen(
-              apiClient: apiClient,
-              secureStorage: secureStorage,
-            ),
+          apiClient: apiClient,
+          secureStorage: secureStorage,
+        ),
+        '/home': (_) =>
+            HomeScreen(apiClient: apiClient, secureStorage: secureStorage),
         '/trusted-devices': (_) => TrustedDevicesScreen(
-              apiClient: apiClient,
-              secureStorage: secureStorage,
-            ),
+          apiClient: apiClient,
+          secureStorage: secureStorage,
+        ),
       },
     );
   }

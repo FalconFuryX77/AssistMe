@@ -123,4 +123,41 @@ class AssistMeAccessibilityService : AccessibilityService() {
             else -> false
         }
     }
+
+    /** Dispatches the normalized event received from the helper phone. */
+    @RequiresApi(Build.VERSION_CODES.N)
+    fun dispatchInput(event: Map<*, *>): Boolean {
+        val metrics = resources.displayMetrics
+        val normalizedX = (event["normalized_x"] as? Number)?.toFloat()
+            ?: ((event["x"] as? Number)?.toFloat() ?: 0f) / metrics.widthPixels
+        val normalizedY = (event["normalized_y"] as? Number)?.toFloat()
+            ?: ((event["y"] as? Number)?.toFloat() ?: 0f) / metrics.heightPixels
+        val x = normalizedX * metrics.widthPixels
+        val y = normalizedY * metrics.heightPixels
+        return when ((event["event_type"] as? String)?.lowercase()) {
+            "tap" -> dispatchTap(x, y)
+            "long_press" -> dispatchLongPress(x, y)
+            "drag" -> {
+                val endX = (
+                    (event["normalized_end_x"] as? Number)?.toFloat()
+                        ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX)
+                            .let { if (it > 1f) it / metrics.widthPixels else it })
+                    ) * metrics.widthPixels
+                val endY = (
+                    (event["normalized_end_y"] as? Number)?.toFloat()
+                        ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY)
+                            .let { if (it > 1f) it / metrics.heightPixels else it })
+                    ) * metrics.heightPixels
+                dispatchDrag(
+                    x,
+                    y,
+                    endX,
+                    endY,
+                    (event["duration_ms"] as? Number)?.toLong() ?: 300L
+                )
+            }
+            "key_event" -> dispatchGlobalAction(event["key_code"] as? String ?: "")
+            else -> false
+        }
+    }
 }

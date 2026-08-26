@@ -51,6 +51,11 @@ class RemoteControlService:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not a participant of this session",
             )
+        if participant.role != "helpee":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the helpee may grant remote control",
+            )
 
         session.remote_control_granted = True
         session.remote_control_granted_at = datetime.now(timezone.utc)
@@ -131,7 +136,8 @@ class RemoteControlService:
                 detail="Remote control permission has not been granted by the helpee",
             )
 
-        # Verify sender is a participant
+        # Only the helper may send remote input.  The helpee can revoke it,
+        # but can never accidentally become the input source.
         participant = next(
             (p for p in session.participants if p.user_id == user_id), None
         )
@@ -139,6 +145,11 @@ class RemoteControlService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not a participant of this session",
+            )
+        if participant.role != "helper":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the helper may send remote input",
             )
 
         return {

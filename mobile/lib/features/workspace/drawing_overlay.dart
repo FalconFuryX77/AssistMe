@@ -12,16 +12,31 @@ class DrawStroke {
   final Color color;
   final double width;
 
-  DrawStroke({required this.points, this.color = const Color(0xFFFF3B30), this.width = 4});
+  DrawStroke({
+    required this.points,
+    this.color = const Color(0xFFFF3B30),
+    this.width = 4,
+  });
 }
+
+enum AnnotationTool { pen, highlighter, eraser }
 
 /// Captures a helper's pen stroke without turning the screen viewport into a
 /// remote-control surface. Points are normalized so phones with different
 /// screen sizes render the same mark in the same place.
 class DrawingInputOverlay extends StatefulWidget {
   final ValueChanged<List<Offset>> onStroke;
+  final ValueChanged<List<Offset>>? onStrokeUpdate;
+  final ValueChanged<Offset>? onErase;
+  final AnnotationTool tool;
 
-  const DrawingInputOverlay({Key? key, required this.onStroke}) : super(key: key);
+  const DrawingInputOverlay({
+    Key? key,
+    required this.onStroke,
+    this.onStrokeUpdate,
+    this.onErase,
+    this.tool = AnnotationTool.pen,
+  }) : super(key: key);
 
   @override
   State<DrawingInputOverlay> createState() => _DrawingInputOverlayState();
@@ -35,18 +50,36 @@ class _DrawingInputOverlayState extends State<DrawingInputOverlay> {
     return LayoutBuilder(
       builder: (context, constraints) => GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onPanStart: (details) => _points
-          ..clear()
-          ..add(Offset(
-            details.localPosition.dx / constraints.maxWidth,
-            details.localPosition.dy / constraints.maxHeight,
-          )),
-        onPanUpdate: (details) => _points.add(Offset(
-          details.localPosition.dx / constraints.maxWidth,
-          details.localPosition.dy / constraints.maxHeight,
-        )),
+        onPanStart: (details) {
+          _points
+            ..clear()
+            ..add(
+              Offset(
+                details.localPosition.dx / constraints.maxWidth,
+                details.localPosition.dy / constraints.maxHeight,
+              ),
+            );
+          if (widget.tool != AnnotationTool.eraser) {
+            widget.onStrokeUpdate?.call(List<Offset>.from(_points));
+          }
+        },
+        onPanUpdate: (details) {
+          _points.add(
+            Offset(
+              details.localPosition.dx / constraints.maxWidth,
+              details.localPosition.dy / constraints.maxHeight,
+            ),
+          );
+          if (widget.tool != AnnotationTool.eraser) {
+            widget.onStrokeUpdate?.call(List<Offset>.from(_points));
+          }
+        },
         onPanEnd: (_) {
-          if (_points.length > 1) widget.onStroke(List<Offset>.from(_points));
+          if (widget.tool == AnnotationTool.eraser) {
+            if (_points.isNotEmpty) widget.onErase?.call(_points.last);
+          } else if (_points.length > 1) {
+            widget.onStroke(List<Offset>.from(_points));
+          }
           _points.clear();
         },
         child: const SizedBox.expand(),
@@ -62,6 +95,14 @@ class DrawingOverlay extends StatefulWidget {
 
   @override
   State<DrawingOverlay> createState() => _DrawingOverlayState();
+}
+
+bool strokeNearPoint(DrawStroke stroke, Offset point, {double radius = 0.035}) {
+  return stroke.points.any((p) {
+    final dx = p.dx - point.dx;
+    final dy = p.dy - point.dy;
+    return (dx * dx) + (dy * dy) <= radius * radius;
+  });
 }
 
 class _DrawingOverlayState extends State<DrawingOverlay> {
@@ -92,7 +133,10 @@ class _StrokePainter extends CustomPainter {
         ..strokeJoin = StrokeJoin.round
         ..style = PaintingStyle.stroke;
       final path = Path()
-        ..moveTo(stroke.points.first.dx * size.width, stroke.points.first.dy * size.height);
+        ..moveTo(
+          stroke.points.first.dx * size.width,
+          stroke.points.first.dy * size.height,
+        );
       for (final p in stroke.points.skip(1)) {
         path.lineTo(p.dx * size.width, p.dy * size.height);
       }
