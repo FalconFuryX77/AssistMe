@@ -26,6 +26,7 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import com.assistme.AssistMeNativeBridge
+import com.assistme.R
 
 /** Helpee-owned annotation layer with controls that the helper cannot touch. */
 class AssistMeAnnotationOverlayService : Service() {
@@ -182,7 +183,15 @@ class AssistMeAnnotationOverlayService : Service() {
             setOnClickListener { setTool("pen") }
         }
         eraserButton = Button(this).apply {
-            text = "⌫"
+            text = ""
+            // Use the provided eraser PNG (white outline) as drawable – matches helper
+            try {
+                val d = resources.getDrawable(R.drawable.eraser, null)
+                setCompoundDrawablesWithIntrinsicBounds(d, null, null, null)
+                compoundDrawablePadding = 0
+            } catch (_: Exception) {
+                text = "Eraser"
+            }
             setOnClickListener { setTool("eraser") }
         }
         inner.addView(penButton)
