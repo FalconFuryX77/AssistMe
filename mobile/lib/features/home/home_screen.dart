@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/network/api_client.dart';
+import '../../core/notifications/push_notification_service.dart';
 import '../../core/realtime/device_channel_service.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
@@ -41,8 +42,8 @@ class _HomeScreenState extends State<HomeScreen> {
   int _tab = _tabNeedHelp;
   String _myName = '';
 
-  List<Map<String, dynamic>> _myHelpers = [];   // who can help me
-  List<Map<String, dynamic>> _iHelp = [];       // who I help
+  List<Map<String, dynamic>> _myHelpers = []; // who can help me
+  List<Map<String, dynamic>> _iHelp = []; // who I help
 
   DeviceChannelService? _channel;
   StreamSubscription<DeviceChannelEvent>? _channelSub;
@@ -51,10 +52,18 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _ringingRequestId;
   String? _ringingSessionId;
   String? _ringingName;
+  Timer? _ringStatusTimer;
+  DateTime? _ringStartedAt;
   bool _showRingPopup = false;
   Map<String, dynamic>? _incomingCall;
+  bool _incomingDialogOpen = false;
+  Map<String, dynamic>? _activeSession;
 
-  bool get _isBusy => _ringingRequestId != null || _showRingPopup;
+  bool get _isBusy =>
+      _ringingRequestId != null ||
+      _showRingPopup ||
+      _incomingCall != null ||
+      _incomingDialogOpen;
 
   @override
   void initState() {
@@ -64,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _bootstrap() async {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
+    _activeSession = await widget.secureStorage.getActiveSession();
     await [Permission.microphone, Permission.notification].request();
     await _loadLists();
     await _connectChannel();
@@ -83,7 +93,9 @@ class _HomeScreenState extends State<HomeScreen> {
       messaging.onTokenRefresh.listen((t) {
         widget.apiClient.registerPushToken(t);
       });
-    } catch (_) {/* push not available on this build */}
+    } catch (_) {
+      /* push not available on this build */
+    }
   }
 
   /// A closed app must never lose a request: fetch pending rings on open.
@@ -104,29 +116,42 @@ class _HomeScreenState extends State<HomeScreen> {
           'message': first['message'],
         };
       });
-    } catch (_) {/* offline — try again next bootstrap */}
+    } catch (_) {
+      /* offline — try again next bootstrap */
+    }
   }
 
   Future<void> _loadLists() async {
     try {
       final helpersResp = await widget.apiClient.listTrustedDevices();
       if (helpersResp.statusCode == 200) {
-        setState(() => _myHelpers = List<Map<String, dynamic>>.from(
-            jsonDecode(helpersResp.body)['devices']));
+        setState(
+          () => _myHelpers = List<Map<String, dynamic>>.from(
+            jsonDecode(helpersResp.body)['devices'],
+          ),
+        );
       }
       final helpingResp = await widget.apiClient.listHelping();
       if (helpingResp.statusCode == 200) {
-        setState(() => _iHelp =
-            List<Map<String, dynamic>>.from(jsonDecode(helpingResp.body)['entries']));
+        setState(
+          () => _iHelp = List<Map<String, dynamic>>.from(
+            jsonDecode(helpingResp.body)['entries'],
+          ),
+        );
       }
-    } catch (_) {/* offline: lists stay empty */}
+    } catch (_) {
+      /* offline: lists stay empty */
+    }
   }
 
   Future<void> _connectChannel() async {
     final token = await widget.secureStorage.getAccessToken();
     if (token == null) return;
     _channel?.dispose();
-    final channel = DeviceChannelService(accessToken: token);
+    final channel = DeviceChannelService(
+      accessToken: token,
+      accessTokenProvider: widget.apiClient.getRealtimeAccessToken,
+    );
     _channel = channel;
     _channelSub?.cancel();
     _channelSub = channel.events.listen(_onChannelEvent);
@@ -142,24 +167,29 @@ class _HomeScreenState extends State<HomeScreen> {
       case 'incoming_call':
         if (!mounted || _isBusy) return;
         setState(() => _incomingCall = event.data);
+        try {
+          await PushNotificationService.instance.showIncomingCall(
+            title: '${event.data['from_name'] ?? 'Someone'} needs your help',
+            body: (event.data['message'] as String?) ?? 'Tap to respond',
+          );
+        } catch (_) {
+          // The live full-screen dialog below remains the source of truth if
+          // notifications are unavailable on this device/build.
+        }
+        if (ModalRoute.of(context)?.isCurrent != true) {
+          _showIncomingDialog();
+        }
         break;
 
       case 'call_accepted':
         if (_ringingSessionId == event.data['session_id']) {
           final sessionId = _ringingSessionId!;
+          final peerName =
+              (event.data['helper_name'] as String?) ??
+              _ringingName ??
+              'your helper';
           _clearOutgoing();
-          if (mounted) {
-            Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => MobileWorkspaceScreen(
-                sessionId: sessionId,
-                sessionCode: 'LIVE',
-                apiClient: widget.apiClient,
-                secureStorage: widget.secureStorage,
-                isHelpee: true,
-                autoStartScreenShare: true,
-              ),
-            ));
-          }
+          _openLiveSession(sessionId, isHelpee: true, peerName: peerName);
         }
         break;
 
@@ -168,9 +198,22 @@ class _HomeScreenState extends State<HomeScreen> {
           final name = _ringingName ?? 'They';
           _clearOutgoing();
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-              content: Text('$name can\'t help right now'),
-            ));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('$name can\'t help right now')),
+            );
+          }
+        }
+        break;
+
+      case 'call_cancelled':
+        if (_incomingCall?['request_id'] == event.data['request_id']) {
+          if (!_incomingDialogOpen) {
+            setState(() => _incomingCall = null);
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('The help request was cancelled.')),
+            );
           }
         }
         break;
@@ -178,6 +221,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _clearOutgoing() {
+    _ringStatusTimer?.cancel();
+    _ringStatusTimer = null;
+    _ringStartedAt = null;
     if (mounted) {
       setState(() {
         _ringingRequestId = null;
@@ -191,6 +237,11 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _clearActiveSession() async {
+    await widget.secureStorage.clearActiveSession();
+    if (mounted) setState(() => _activeSession = null);
+  }
+
   // -------------------------------------------------------------------------
   // Helpee: tap a trusted person to ring them
   // -------------------------------------------------------------------------
@@ -202,11 +253,16 @@ class _HomeScreenState extends State<HomeScreen> {
     if (message == null) return; // cancelled
 
     setState(() {
-      _ringingName = (device['friendly_name'] as String?) ?? 'your helper';
+      _ringingName =
+          (device['helper_display_name'] as String?) ??
+          (device['friendly_name'] as String?) ??
+          'your helper';
     });
 
     try {
-      final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+      final fingerprint = await DeviceIdentity.getFingerprint(
+        widget.secureStorage,
+      );
       // NOTE: we ring the HELPER's fingerprint stored in our trusted list.
       final resp = await widget.apiClient.placeHelpCall(
         helperDeviceFingerprint:
@@ -218,34 +274,127 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _ringingRequestId = data['request_id'] as String?;
           _ringingSessionId = data['session_id'] as String?;
+          _ringingName = (data['helper_name'] as String?) ?? _ringingName;
+          _ringStartedAt = DateTime.now();
         });
+        _startRingStatusPolling();
         if (data['helper_online'] == false && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('They are not online right now — calling anyway…'),
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('They are not online right now — calling anyway…'),
+            ),
+          );
         }
       } else {
         _clearOutgoing();
         if (mounted) {
-          final detail = jsonDecode(resp.body)['detail'] ?? 'Call failed';
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(detail.toString())));
+          final detail = _responseDetail(resp.body, fallback: 'Call failed');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(detail.toString())));
         }
       }
     } catch (e) {
       _clearOutgoing();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Network error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Network error: $e')));
       }
     }
+  }
+
+  String _responseDetail(String body, {required String fallback}) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map && decoded['detail'] != null) {
+        return decoded['detail'].toString();
+      }
+    } catch (_) {}
+    return body.trim().isEmpty ? fallback : body.trim();
+  }
+
+  void _startRingStatusPolling() {
+    _ringStatusTimer?.cancel();
+    _ringStatusTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+      final requestId = _ringingRequestId;
+      if (!mounted || requestId == null) return;
+      final started = _ringStartedAt ?? DateTime.now();
+      if (DateTime.now().difference(started) > const Duration(seconds: 90)) {
+        _clearOutgoing();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No response yet. You can try again when they are available.',
+            ),
+          ),
+        );
+        return;
+      }
+      try {
+        final resp = await widget.apiClient.getHelpCallStatus(requestId);
+        if (resp.statusCode != 200) return;
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final state = data['status']?.toString();
+        if (state == 'accepted') {
+          final sessionId = _ringingSessionId ?? data['session_id']?.toString();
+          if (sessionId != null) {
+            final peerName =
+                _ringingName ??
+                data['helper_name']?.toString() ??
+                'your helper';
+            _clearOutgoing();
+            _openLiveSession(sessionId, isHelpee: true, peerName: peerName);
+          }
+        } else if (state == 'denied') {
+          final name = _ringingName ?? 'They';
+          _clearOutgoing();
+          if (mounted)
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('$name can\'t help right now')),
+            );
+        }
+      } catch (_) {
+        // Keep the overlay while transient connectivity recovers.
+      }
+    });
+  }
+
+  void _openLiveSession(
+    String sessionId, {
+    required bool isHelpee,
+    String? peerName,
+  }) {
+    if (!mounted) return;
+    final resolvedPeerName = peerName ?? _ringingName ?? 'your contact';
+    widget.secureStorage.saveActiveSession(
+      sessionId: sessionId,
+      peerName: resolvedPeerName,
+      isHelpee: isHelpee,
+    );
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MobileWorkspaceScreen(
+          sessionId: sessionId,
+          sessionCode: 'LIVE',
+          apiClient: widget.apiClient,
+          secureStorage: widget.secureStorage,
+          isHelpee: isHelpee,
+          autoStartScreenShare: isHelpee,
+          peerName: resolvedPeerName,
+          onSessionClosed: _clearActiveSession,
+        ),
+      ),
+    );
   }
 
   /// Optional context before ringing; empty string rings immediately.
   Future<String?> _askForMessage(Map<String, dynamic> device) async {
     final controller = TextEditingController();
-    final name = (device['friendly_name'] as String?) ?? 'them';
+    final name =
+        (device['helper_display_name'] as String?) ??
+        (device['friendly_name'] as String?) ??
+        'them';
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -266,7 +415,9 @@ class _HomeScreenState extends State<HomeScreen> {
               maxLength: 500,
               autofocus: true,
               style: const TextStyle(color: AppTheme.textPrimary),
-              decoration: const InputDecoration(hintText: 'e.g. My WhatsApp won\'t open'),
+              decoration: const InputDecoration(
+                hintText: 'e.g. My WhatsApp won\'t open',
+              ),
             ),
           ],
         ),
@@ -284,7 +435,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _cancelRing() {
+  Future<void> _cancelRing() async {
+    final requestId = _ringingRequestId;
+    if (requestId != null) {
+      try {
+        final response = await widget.apiClient.cancelHelpCall(requestId);
+        if (response.statusCode != 200 && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_responseDetail(response.body, fallback: 'Could not cancel the call'))),
+          );
+        }
+      } catch (_) {
+        // Clear the local ring even if the network is temporarily unavailable.
+      }
+    }
     _clearOutgoing();
   }
 
@@ -298,10 +462,14 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _incomingCall = null);
 
     try {
+      final fingerprint = accept
+          ? await DeviceIdentity.getFingerprint(widget.secureStorage)
+          : null;
       final resp = await widget.apiClient.respondToRequestSimple(
         sessionId: call['session_id'] as String,
         requestId: call['request_id'] as String,
         accept: accept,
+        helperDeviceFingerprint: fingerprint,
       );
       if (resp.statusCode != 200 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -310,25 +478,84 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       if (accept && mounted) {
-        Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => MobileWorkspaceScreen(
-            sessionId: call['session_id'] as String,
-            sessionCode: 'LIVE',
-            apiClient: widget.apiClient,
-            secureStorage: widget.secureStorage,
-            isHelpee: false,
-          ),
-        ));
-      }
-      } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Network error: $e')),
+        await widget.secureStorage.saveActiveSession(
+          sessionId: call['session_id'] as String,
+          peerName: (call['from_name'] as String?) ?? 'your contact',
+          isHelpee: false,
         );
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MobileWorkspaceScreen(
+              sessionId: call['session_id'] as String,
+              sessionCode: 'LIVE',
+              apiClient: widget.apiClient,
+              secureStorage: widget.secureStorage,
+              isHelpee: false,
+              peerName: (call['from_name'] as String?) ?? 'your contact',
+              onSessionClosed: _clearActiveSession,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Network error: $e')));
       }
     }
     // Surface the next missed ring, if any.
     await _checkMissedCalls();
+  }
+
+  Future<void> _showIncomingDialog() async {
+    if (!mounted || _incomingCall == null || _incomingDialogOpen) return;
+    _incomingDialogOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => _incomingCallCard(
+          onAccept: () async {
+            Navigator.of(dialogContext).pop();
+            await _respondIncoming(accept: true);
+          },
+          onDeny: () async {
+            Navigator.of(dialogContext).pop();
+            await _respondIncoming(accept: false);
+          },
+        ),
+      );
+    } finally {
+      _incomingDialogOpen = false;
+    }
+  }
+
+  Widget _incomingCallCard({
+    required VoidCallback onAccept,
+    required VoidCallback onDeny,
+  }) {
+    final call = _incomingCall!;
+    final fromName = (call['from_name'] as String?) ?? 'Someone';
+    final message = call['message'] as String?;
+    return AlertDialog(
+      backgroundColor: AppTheme.bgSecondary,
+      title: const Text('Incoming help request'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text('$fromName needs your help', textAlign: TextAlign.center),
+          if (message != null && message.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Text('"$message"', textAlign: TextAlign.center),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: onDeny, child: const Text('Can\'t right now')),
+        ElevatedButton(onPressed: onAccept, child: const Text('Accept')),
+      ],
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -346,12 +573,14 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.people_outline),
             tooltip: 'Trusted people',
             onPressed: () async {
-              await Navigator.of(context).push(MaterialPageRoute(
-                builder: (_) => TrustedDevicesScreen(
-                  apiClient: widget.apiClient,
-                  secureStorage: widget.secureStorage,
+              await Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => TrustedDevicesScreen(
+                    apiClient: widget.apiClient,
+                    secureStorage: widget.secureStorage,
+                  ),
                 ),
-              ));
+              );
               _loadLists();
             },
           ),
@@ -363,12 +592,15 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               children: [
                 _roleSwitch(),
-                Expanded(child: _tab == _tabNeedHelp ? _needHelpTab() : _helpingTab()),
+                Expanded(
+                  child: _tab == _tabNeedHelp ? _needHelpTab() : _helpingTab(),
+                ),
               ],
             ),
           ),
           if (_ringingRequestId != null) _ringingOverlay(),
           if (_incomingCall != null) _incomingPopup(),
+          if (_activeSession != null) _activeSessionBanner(),
         ],
       ),
     );
@@ -385,8 +617,16 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         child: Row(
           children: [
-            Expanded(child: _roleTab(_tabNeedHelp, 'I need help', Icons.help_outline)),
-            Expanded(child: _roleTab(_tabHelping, 'I\'m helping', Icons.volunteer_activism)),
+            Expanded(
+              child: _roleTab(_tabNeedHelp, 'I need help', Icons.help_outline),
+            ),
+            Expanded(
+              child: _roleTab(
+                _tabHelping,
+                'I\'m helping',
+                Icons.volunteer_activism,
+              ),
+            ),
           ],
         ),
       ),
@@ -407,16 +647,22 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon,
-                size: 20,
-                color: selected ? AppTheme.accentPrimary : AppTheme.textSecondary),
+            Icon(
+              icon,
+              size: 20,
+              color: selected ? AppTheme.accentPrimary : AppTheme.textSecondary,
+            ),
             const SizedBox(width: 8),
-            Text(label,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: selected ? AppTheme.accentPrimary : AppTheme.textSecondary,
-                )),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: selected
+                    ? AppTheme.accentPrimary
+                    : AppTheme.textSecondary,
+              ),
+            ),
           ],
         ),
       ),
@@ -427,7 +673,8 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_myHelpers.isEmpty) {
       return _emptyState(
         icon: Icons.person_add_alt_1,
-        text: 'No trusted helpers yet.\nOpen "Trusted people" to add someone — '
+        text:
+            'No trusted helpers yet.\nOpen "Trusted people" to add someone — '
             'they just type your code once.',
       );
     }
@@ -439,7 +686,16 @@ class _HomeScreenState extends State<HomeScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: 14),
         itemBuilder: (ctx, i) {
           final d = _myHelpers[i];
-          final name = (d['friendly_name'] as String?) ?? 'Helper';
+          final name =
+              (d['helper_display_name'] as String?) ??
+              (d['friendly_name'] as String?) ??
+              'Helper';
+          final tag = d['device_tag']?.toString();
+          final platform = d['device_platform']?.toString();
+          final identity = [
+            if (platform != null && platform.isNotEmpty) platform,
+            if (tag != null && tag.isNotEmpty) '#$tag',
+          ].join(' · ');
           return SizedBox(
             height: 84,
             child: ElevatedButton.icon(
@@ -450,27 +706,43 @@ class _HomeScreenState extends State<HomeScreen> {
                 elevation: 0,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(color: AppTheme.accentEmerald.withOpacity(0.5)),
+                  side: BorderSide(
+                    color: AppTheme.accentEmerald.withOpacity(0.5),
+                  ),
                 ),
                 alignment: Alignment.centerLeft,
                 padding: const EdgeInsets.symmetric(horizontal: 18),
               ),
               icon: CircleAvatar(
                 backgroundColor: AppTheme.accentEmerald,
-                child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                    style: const TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.w800)),
+                child: Text(
+                  name.isNotEmpty ? name[0].toUpperCase() : '?',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
               ),
               label: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontSize: 19, fontWeight: FontWeight.w700)),
-                  Text('Tap to ask for help',
-                      style: TextStyle(
-                          fontSize: 12, color: AppTheme.textSecondary)),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    identity.isEmpty
+                        ? 'Tap to ask for help'
+                        : 'Tap to ask for help · $identity',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -480,11 +752,74 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Widget _activeSessionBanner() {
+    final active = _activeSession!;
+    final name = active['peer_name'] as String? ?? 'your contact';
+    return Positioned(
+      left: 20,
+      right: 20,
+      bottom: 20,
+      child: Card(
+        color: AppTheme.bgSecondary,
+        child: ListTile(
+          leading: const Icon(
+            Icons.phone_in_talk,
+            color: AppTheme.accentEmerald,
+          ),
+          title: Text('Reconnect to $name'),
+          subtitle: const Text(
+            'This session can recover after a brief disconnect.',
+          ),
+          trailing: IconButton(
+            icon: const Icon(Icons.arrow_forward),
+            onPressed: _reconnectActiveSession,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _reconnectActiveSession() async {
+    final active = _activeSession;
+    if (active == null || !mounted) return;
+    final sessionId = active['session_id'] as String;
+    try {
+      final response = await widget.apiClient.post(
+        '/sessions/recover',
+        body: {'session_id': sessionId},
+      );
+      if (response.statusCode != 200) {
+        // A process can be killed after the server has already observed the
+        // disconnect and another reconnect may have restored the participant
+        // row.  In that case recovery returns 400 even though the live room
+        // is still valid, so verify the durable session before discarding it.
+        final session = await widget.apiClient.get('/sessions/$sessionId');
+        if (session.statusCode != 200) {
+          await widget.secureStorage.clearActiveSession();
+          if (mounted) setState(() => _activeSession = null);
+          return;
+        }
+      }
+      _openLiveSession(
+        sessionId,
+        isHelpee: active['is_helpee'] == true,
+        peerName: active['peer_name'] as String? ?? 'your contact',
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That session is no longer available.')),
+        );
+      }
+    }
+  }
+
   Widget _helpingTab() {
     if (_iHelp.isEmpty) {
       return _emptyState(
-        icon:Icons.favorite_border,
-        text: 'You are not set up as a helper yet.\nAsk your family member to '
+        icon: Icons.favorite_border,
+        text:
+            'You are not set up as a helper yet.\nAsk your family member to '
             'show you their code, then add it under "Trusted people".',
       );
     }
@@ -508,21 +843,31 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 CircleAvatar(
                   backgroundColor: AppTheme.accentPrimary,
-                  child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                      style: const TextStyle(color: Colors.white)),
+                  child: Text(
+                    name.isNotEmpty ? name[0].toUpperCase() : '?',
+                    style: const TextStyle(color: Colors.white),
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name,
-                          style: const TextStyle(
-                              fontSize: 17, fontWeight: FontWeight.w700,
-                              color: AppTheme.textPrimary)),
-                      Text('They can ring you any time',
-                          style: TextStyle(
-                              fontSize: 12, color: AppTheme.textSecondary)),
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.textPrimary,
+                        ),
+                      ),
+                      Text(
+                        'They can ring you any time',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textSecondary,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -543,10 +888,15 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(icon, size: 56, color: AppTheme.textMuted),
             const SizedBox(height: 18),
-            Text(text,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 15, height: 1.5)),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 15,
+                height: 1.5,
+              ),
+            ),
           ],
         ),
       ),
@@ -565,19 +915,24 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const CircularProgressIndicator(color: AppTheme.accentEmerald),
               const SizedBox(height: 28),
-              Text('Calling $_ringingName…',
-                  style: const TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700)),
+              Text(
+                'Connecting to ${_ringingName ?? 'your helper'}…',
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 40),
               OutlinedButton(
                 onPressed: _cancelRing,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppTheme.accentRose,
                   side: BorderSide(color: AppTheme.accentRose),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 14,
+                  ),
                 ),
                 child: const Text('Cancel', style: TextStyle(fontSize: 16)),
               ),
@@ -610,23 +965,32 @@ class _HomeScreenState extends State<HomeScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.ring_volume,
-                    size: 54, color: AppTheme.accentEmerald),
+                Icon(
+                  Icons.ring_volume,
+                  size: 54,
+                  color: AppTheme.accentEmerald,
+                ),
                 const SizedBox(height: 16),
-                Text('$fromName needs your help',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800)),
+                Text(
+                  '$fromName needs your help',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 21,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
                 if (message != null && message.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  Text('"$message"',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: AppTheme.textSecondary,
-                          fontSize: 15,
-                          fontStyle: FontStyle.italic)),
+                  Text(
+                    '"$message"',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 15,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
                 ],
                 const SizedBox(height: 30),
                 SizedBox(
@@ -636,7 +1000,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     icon: const Icon(Icons.call),
                     label: const Text('Accept', style: TextStyle(fontSize: 18)),
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.accentEmerald),
+                      backgroundColor: AppTheme.accentEmerald,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -648,8 +1013,10 @@ class _HomeScreenState extends State<HomeScreen> {
                       foregroundColor: AppTheme.accentRose,
                       side: BorderSide(color: AppTheme.accentRose),
                     ),
-                    child: const Text('Can\'t right now',
-                        style: TextStyle(fontSize: 16)),
+                    child: const Text(
+                      'Can\'t right now',
+                      style: TextStyle(fontSize: 16),
+                    ),
                   ),
                 ),
               ],
@@ -662,6 +1029,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _ringStatusTimer?.cancel();
     _channelSub?.cancel();
     _channel?.dispose();
     super.dispose();

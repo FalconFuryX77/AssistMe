@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_current_user
-from api.schemas.remote_control import RemoteControlInputEvent
+from api.schemas.remote_control import RemoteControlGrantRequest, RemoteControlInputEvent
 from api.schemas.sessions import SessionCreateRequest, SessionJoinRequest, SessionListItem, SessionRecoverRequest, SessionResponse
 from api.schemas.voice import AudioMuteToggleRequest, AudioStatusResponse
 from api.schemas.webrtc import ICEServersResponse
@@ -13,6 +13,7 @@ from api.services.session_service import SessionService
 from api.services.voice_service import VoiceService
 from api.services.webrtc_service import WebRTCService
 from core.database import get_db
+from core.realtime_bus import publish
 from models.session import Session
 from models.user import User
 
@@ -67,12 +68,32 @@ async def get_ice_servers(session_id: str, current_user: User = Depends(get_curr
 
 @router.post("/{session_id}/leave", response_model=SessionResponse)
 async def leave_session(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    return _enrich_session(await SessionService.leave_session(session_id=session_id, user_id=current_user.id, db=db))
+    session = await SessionService.leave_session(session_id=session_id, user_id=current_user.id, db=db)
+    await publish(
+        f"assistme:session:{session_id}",
+        {
+            "message": {
+                "type": "session_ended",
+                "reason": "participant_left",
+                "user_id": current_user.id,
+            },
+            "exclude_user": current_user.id,
+        },
+    )
+    return _enrich_session(session)
 
 
 @router.post("/{session_id}/end", response_model=SessionResponse)
 async def end_session(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    return _enrich_session(await SessionService.end_session(session_id=session_id, user_id=current_user.id, db=db))
+    session = await SessionService.end_session(session_id=session_id, user_id=current_user.id, db=db)
+    await publish(
+        f"assistme:session:{session_id}",
+        {
+            "message": {"type": "session_ended", "reason": "participant_ended"},
+            "exclude_user": current_user.id,
+        },
+    )
+    return _enrich_session(session)
 
 
 @router.post("/recover", response_model=SessionResponse)
@@ -94,3 +115,37 @@ async def toggle_audio_mute(session_id: str, payload: AudioMuteToggleRequest, cu
 @router.post("/{session_id}/remote-control/input")
 async def dispatch_remote_control_input(session_id: str, payload: RemoteControlInputEvent, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     return await RemoteControlService.dispatch_input_event(session_id=session_id, user_id=current_user.id, input_event=payload, db=db)
+
+
+@router.post("/{session_id}/remote-control/grant", response_model=SessionResponse)
+async def grant_remote_control(session_id: str, payload: RemoteControlGrantRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    """Helpee-side compatibility endpoint for the explicit control grant."""
+    return _enrich_session(await RemoteControlService.grant_remote_control(
+        session_id=session_id, user_id=current_user.id, platform=payload.platform, db=db
+    ))
+
+
+@router.post("/{session_id}/remote-control/revoke", response_model=SessionResponse)
+async def revoke_remote_control(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    session = await RemoteControlService.revoke_remote_control(
+        session_id=session_id, user_id=current_user.id, db=db
+    )
+    await publish(
+        f"assistme:session:{session_id}",
+        {
+            "message": {
+                "type": "remote_control_revoked",
+                "reason": "helpee_revoked",
+                "user_id": current_user.id,
+            },
+            "exclude_user": current_user.id,
+        },
+    )
+    return _enrich_session(session)
+
+
+@router.get("/{session_id}/remote-control/status")
+async def remote_control_status(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    return await RemoteControlService.get_status(
+        session_id=session_id, user_id=current_user.id, db=db
+    )

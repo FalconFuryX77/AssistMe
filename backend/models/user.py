@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, String
+from sqlalchemy import Boolean, DateTime, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from core.database import Base
@@ -38,5 +38,18 @@ class User(Base):
         nullable=False,
     )
 
+    __table_args__ = (
+        # Display name is the human-facing username in the device-first flow.
+        # Case-insensitive uniqueness prevents confusing identities such as
+        # "Dad" and "dad" while still allowing legacy nullable accounts.
+        Index("uq_users_display_name_ci", func.lower(display_name), unique=True),
+    )
+
     # Relationships
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")
+    task_patterns = relationship(
+        "AssistanceTaskPattern", back_populates="user", cascade="all, delete-orphan"
+    )
+    preferred_mode = relationship(
+        "PreferredAssistanceMode", back_populates="user", uselist=False, cascade="all, delete-orphan"
+    )

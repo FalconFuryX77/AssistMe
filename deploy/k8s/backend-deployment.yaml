@@ -25,6 +25,10 @@ spec:
             - configMapRef:
                 name: assistme-config
           env:
+            - name: APP_ENV
+              value: "production"
+            - name: AUTO_CREATE_TABLES
+              value: "false"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -49,13 +53,13 @@ spec:
               memory: "1Gi"
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: 8000
             initialDelaySeconds: 5
             periodSeconds: 10

@@ -20,6 +20,7 @@ from api.schemas.trusted_device import (
 )
 from api.services.trusted_device_service import TrustedDeviceService
 from core.database import get_db
+from core.rate_limiter import limit_pairing_attempts
 from models.user import User
 
 router = APIRouter(prefix="/devices", tags=["trusted-devices"])
@@ -54,6 +55,7 @@ async def generate_setup_code(
 @router.post(
     "/pairing/claim",
     response_model=DeviceClaimResponse,
+    dependencies=[Depends(limit_pairing_attempts)],
 )
 async def claim_setup_code(
     payload: DeviceClaimRequest,
@@ -94,6 +96,7 @@ async def list_pending_pairings(
 @router.post(
     "/pairing/approve",
     response_model=DeviceApproveResponse,
+    dependencies=[Depends(limit_pairing_attempts)],
 )
 async def approve_pairing(
     payload: DeviceApproveRequest,
@@ -134,11 +137,20 @@ async def list_devices(
         owner_user_id=current_user.id,
         db=db,
     )
+    response_devices = []
+    for device in devices:
+        data = TrustedDeviceResponse.model_validate(device).model_dump()
+        helper = (
+            await db.get(User, device.helper_user_id)
+            if device.helper_user_id
+            else None
+        )
+        data["helper_display_name"] = helper.display_name if helper else None
+        data["device_tag"] = device.id.replace("-", "")[:6].upper()
+        response_devices.append(data)
     return {
         "total": len(devices),
-        "devices": [
-            TrustedDeviceResponse.model_validate(d).model_dump() for d in devices
-        ],
+        "devices": response_devices,
     }
 
 

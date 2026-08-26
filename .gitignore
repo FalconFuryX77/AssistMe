@@ -7,6 +7,10 @@ __pycache__/
 venv/
 .env
 
+# Runtime-only Firebase credentials
+backend/firebase-service-account.json
+firebase-service-account*.json
+
 # Node / React Native
 node_modules/
 .expo/

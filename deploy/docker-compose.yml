@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # --- FastAPI Backend Service ---
   backend:
@@ -9,7 +7,10 @@ services:
     container_name: assistme_backend
     restart: unless-stopped
     environment:
+      - APP_ENV=${APP_ENV:-development}
+      - AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES:-false}
       - DATABASE_URL=postgresql+asyncpg://assistme:assistme_secret_pass@db:5432/assistmedb
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-a1b2c3d4e5f6}
       # Internal Docker-network STUN/TURN (backend health / internal signaling)
       - STUN_SERVER_1=stun:coturn:3478
@@ -19,17 +20,53 @@ services:
       - TURN_SERVER_CREDENTIAL=${TURN_CREDENTIAL:-assistme_turn_secret}
       # Public-facing URLs returned to mobile/web clients over the internet
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
-      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-http://localhost:8000}
-      - PUBLIC_WS_BASE_URL=${PUBLIC_WS_BASE_URL:-ws://localhost:8000/ws}
-      - PUBLIC_TURN_URL=${PUBLIC_TURN_URL:-turn:localhost:3478}
-      - PUBLIC_STUN_URLS=${PUBLIC_STUN_URLS:-stun:stun.l.google.com:19302}
+      # Public URLs are deployment inputs. Leave empty for local-only testing;
+      # never commit a temporary tunnel hostname here.
+      - PUBLIC_API_BASE_URL=${PUBLIC_API_BASE_URL:-}
+      - PUBLIC_WS_BASE_URL=${PUBLIC_WS_BASE_URL:-}
+      - PUBLIC_TURN_URL=${PUBLIC_TURN_URL:-}
+      - PUBLIC_STUN_URLS=${PUBLIC_STUN_URLS:-}
+      # Optional managed TURN provider for clients on unrelated networks.
+      - METERED_API_KEY=${METERED_API_KEY:-}
+      - METERED_DOMAIN=${METERED_DOMAIN:-assistme.metered.live}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # Keep the LAN development endpoint used by the installed Android build.
+    # Nginx remains the public ingress on ports 80/443.
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - assistme_net
+
+  # Schema changes run once before API replicas start. In production, replace
+  # this with the platform's one-shot migration job.
+  migrate:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: assistme_migrate
+    restart: "no"
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - AUTO_CREATE_TABLES=false
+      - DATABASE_URL=postgresql+asyncpg://assistme:assistme_secret_pass@db:5432/assistmedb
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-a1b2c3d4e5f6}
+    command: ["alembic", "upgrade", "head"]
     depends_on:
       db:
         condition: service_healthy
     networks:
       - assistme_net
-    expose:
-      - "8000"
 
   # --- PostgreSQL 16 Database ---
   db:
@@ -48,6 +85,21 @@ services:
       - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U assistme -d assistmedb"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: assistme_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks:
+      - assistme_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -95,9 +147,27 @@ services:
     networks:
       - assistme_net
 
+  # Stable public ingress option. Create a named Cloudflare Tunnel and set
+  # its dashboard ingress target to http://backend:8000. The token is supplied
+  # only at runtime; no ephemeral trycloudflare URL is used.
+  cloudflared:
+    image: cloudflare/cloudflared:2025.8.1
+    container_name: assistme_cloudflared
+    profiles: ["public-edge"]
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARED_TUNNEL_TOKEN:-}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - assistme_net
+
 networks:
   assistme_net:
     driver: bridge
 
 volumes:
   pgdata:
+  redisdata:

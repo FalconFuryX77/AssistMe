@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.schemas.auth import AccessTokenResponse, DeviceBootstrapRequest, DeviceBootstrapResponse, RefreshTokenRequest
 from api.services.auth_service import AuthService
 from core.database import get_db
+from core.rate_limiter import limit_bootstrap_attempts, limit_reclaim_attempts
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
     "/device",
     response_model=DeviceBootstrapResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(limit_bootstrap_attempts)],
 )
 async def device_bootstrap(
     payload: DeviceBootstrapRequest,
@@ -44,7 +46,11 @@ class ReclaimRequest(BaseModel):
         return v
 
 
-@router.post("/device/reclaim", response_model=DeviceBootstrapResponse)
+@router.post(
+    "/device/reclaim",
+    response_model=DeviceBootstrapResponse,
+    dependencies=[Depends(limit_reclaim_attempts)],
+)
 async def device_reclaim(
     payload: ReclaimRequest,
     db: AsyncSession = Depends(get_db),

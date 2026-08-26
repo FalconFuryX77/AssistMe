@@ -1,0 +1,7 @@
+# Local-device override. Use only on a trusted LAN for manual testing:
+# docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+# The production compose file intentionally does not expose the API container.
+services:
+  backend:
+    ports:
+      - "${BACKEND_BIND_PORT:-8000}:8000"

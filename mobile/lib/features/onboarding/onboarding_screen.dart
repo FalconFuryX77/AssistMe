@@ -11,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../core/config/app_config.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
@@ -56,8 +55,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       if (resp.statusCode != 201) {
         setState(() {
           _busy = false;
-          _error = 'Could not set up (${resp.statusCode}). Check the server '
-              'address in Settings.';
+          _error = 'Could not set up (${resp.statusCode}). Please try again.';
         });
         return;
       }
@@ -154,13 +152,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       backgroundColor: AppTheme.bgPrimary,
       appBar: AppBar(
         title: const Text('Welcome'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings),
-            tooltip: 'Server address',
-            onPressed: _openServerSettings,
-          ),
-        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -224,12 +215,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text(
-                'Connected to ${AppConfig.baseUrl}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
-              ),
-              const SizedBox(height: 20),
               TextButton(
                 onPressed: _busy ? null : _reclaimWithCode,
                 child: const Text('Reinstalling? I have a recovery code'),
@@ -319,41 +304,4 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  /// Same server-address dialog pattern as before: quick, saved locally.
-  Future<void> _openServerSettings() async {
-    final controller = TextEditingController(text: AppConfig.baseUrl);
-    final url = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.bgSecondary,
-        title: const Text('Server address'),
-        content: TextField(
-          controller: controller,
-          style: const TextStyle(color: AppTheme.textPrimary),
-          decoration: const InputDecoration(
-            labelText: 'https:// or http:// address',
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          ElevatedButton(
-            onPressed: () {
-              var v = controller.text.trim();
-              if (v.isNotEmpty && !v.startsWith('http')) v = 'http://$v';
-              Navigator.pop(ctx, v);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-    if (url == null || url.isEmpty) return;
-    AppConfig.baseUrl = url;
-    await widget.secureStorage.saveServerUrl(url);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Server set to $url')),
-      );
-    }
-  }
 }

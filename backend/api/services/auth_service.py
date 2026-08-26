@@ -4,7 +4,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.security import (
@@ -45,6 +46,7 @@ class AuthService:
 
         if account is None:
             # --- first launch: create invisible identity ---
+            await AuthService._ensure_display_name_available(display_name, db)
             suffix = secrets.token_hex(8)
             random_password = secrets.token_urlsafe(24)
             user = User(
@@ -74,6 +76,9 @@ class AuthService:
                 )
             created = False
             if display_name and display_name != user.display_name:
+                await AuthService._ensure_display_name_available(
+                    display_name, db, exclude_user_id=user.id
+                )
                 user.display_name = display_name
             resolved_name = user.display_name
 
@@ -88,7 +93,17 @@ class AuthService:
             + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
         )
         db.add(refresh_record)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            detail = "That name is already in use. Choose a different name."
+            if "display_name" not in str(exc.orig).lower():
+                detail = "This device identity is already being created. Please retry."
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=detail,
+            ) from exc
 
         return {
             "access_token": access_token,
@@ -99,6 +114,30 @@ class AuthService:
             "created": created,
             "recovery_code": recovery_code,
         }
+
+    @staticmethod
+    async def _ensure_display_name_available(
+        display_name: str | None,
+        db: AsyncSession,
+        *,
+        exclude_user_id: str | None = None,
+    ) -> None:
+        """Reserve the human-facing device username case-insensitively."""
+        if not display_name:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Choose a unique name for this device",
+            )
+        normalized = display_name.strip().casefold()
+        query = select(User).where(func.lower(User.display_name) == normalized)
+        if exclude_user_id is not None:
+            query = query.where(User.id != exclude_user_id)
+        result = await db.execute(query)
+        if result.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="That name is already in use. Choose a different name.",
+            )
 
     @staticmethod
     async def device_reclaim(
@@ -194,6 +233,8 @@ class AuthService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered",
             )
+
+        await AuthService._ensure_display_name_available(display_name, db)
 
         # Create user
         user = User(

@@ -127,6 +127,37 @@ class SessionService:
         return session
 
     @staticmethod
+    async def ensure_helper_available(
+        helpee_id: str,
+        helper_id: str,
+        db: AsyncSession,
+    ) -> None:
+        """Prevent one helper from serving two helpees at the same time."""
+        result = await db.execute(
+            select(Session)
+            .join(SessionParticipant)
+            .where(
+                Session.status.in_(["waiting", "active"]),
+                SessionParticipant.user_id == helper_id,
+                SessionParticipant.role == "helper",
+                SessionParticipant.status.in_(["connected", "disconnected"]),
+            )
+            .options(selectinload(Session.participants))
+        )
+        for session in result.scalars().unique().all():
+            has_other_helpee = any(
+                p.role == "helpee"
+                and p.user_id != helpee_id
+                and p.status in ("connected", "disconnected")
+                for p in session.participants
+            )
+            if has_other_helpee:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="That helper is already helping someone else",
+                )
+
+    @staticmethod
     async def join_session(
         session_code: str,
         user_id: str,
@@ -257,15 +288,14 @@ class SessionService:
         participant.status = "left"
         participant.left_at = now
 
-        # If the helper leaves, end the session
-        if session.creator_id == user_id:
-            session.status = "ended"
-            session.ended_at = now
-            # Mark all remaining participants as left
-            for p in session.participants:
-                if p.status == "connected":
-                    p.status = "left"
-                    p.left_at = now
+        # This product is a two-person call: either person leaving ends the
+        # call for the other participant as well.
+        session.status = "ended"
+        session.ended_at = now
+        for p in session.participants:
+            if p.status == "connected":
+                p.status = "left"
+                p.left_at = now
 
         session_id_val = session.id
         await db.commit()
@@ -453,6 +483,34 @@ class SessionService:
                 detail="Not a participant of this session",
             )
 
+        return session
+
+    @staticmethod
+    async def terminate_on_disconnect(
+        session_id: str,
+        user_id: str,
+        db: AsyncSession,
+    ) -> Session | None:
+        """End a two-person session when either client disappears unexpectedly."""
+        result = await db.execute(
+            select(Session)
+            .where(Session.id == session_id)
+            .options(selectinload(Session.participants))
+        )
+        session = result.scalar_one_or_none()
+        if session is None or session.status == "ended":
+            return session
+        if not any(p.user_id == user_id for p in session.participants):
+            return session
+
+        now = datetime.now(timezone.utc)
+        session.status = "ended"
+        session.ended_at = now
+        for participant in session.participants:
+            if participant.status in ("connected", "disconnected"):
+                participant.status = "left"
+                participant.left_at = now
+        await db.commit()
         return session
 
     @staticmethod

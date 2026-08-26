@@ -15,6 +15,7 @@ from api.routers.device_ws import is_user_online, push_to_user
 from api.services.assistance_request_service import AssistanceRequestService
 from api.services.session_service import SessionService
 from core.database import get_db
+from core.rate_limiter import limit_help_call_attempts
 from models.trusted_device import TrustedDevice
 from models.user import User
 
@@ -33,9 +34,21 @@ class HelpCallResponse(BaseModel):
     session_id: str
     status: str
     helper_online: bool
+    helper_name: str
 
 
-@router.post("/call", response_model=HelpCallResponse)
+class HelpCallStatusResponse(BaseModel):
+    request_id: str
+    session_id: str
+    status: str
+    helper_name: str
+
+
+@router.post(
+    "/call",
+    response_model=HelpCallResponse,
+    dependencies=[Depends(limit_help_call_attempts)],
+)
 async def place_help_call(
     payload: HelpCallRequest,
     current_user: User = Depends(get_current_user),
@@ -62,6 +75,12 @@ async def place_help_call(
         )
 
     helper_user_id = trust.helper_user_id
+
+    await SessionService.ensure_helper_available(
+        helpee_id=current_user.id,
+        helper_id=helper_user_id,
+        db=db,
+    )
 
     # 2. Find-or-create the pair session (no codes involved).
     session = await SessionService.get_or_create_pair_session(
@@ -105,22 +124,87 @@ async def place_help_call(
         },
     )
 
-    # 5. Helper app closed? Wake the phone with an FCM notification.
-    if not helper_online:
-        await _send_fcm_ring(
-            helper_user_id,
-            from_name=current_user.display_name or "Someone you help",
-            message=payload.message,
-            request_id=request.id,
-            session_id=session.id,
-            db=db,
-        )
+    # 5. Send FCM as well as the live channel. Android does not show a
+    # notification automatically when the app is foregrounded, so the app
+    # also turns this payload into a local heads-up notification.
+    await _send_fcm_ring(
+        helper_user_id,
+        from_name=current_user.display_name or "Someone you help",
+        message=payload.message,
+        request_id=request.id,
+        session_id=session.id,
+        db=db,
+    )
+
+    helper = await db.get(User, helper_user_id)
+    helper_name = (helper.display_name if helper else None) or trust.friendly_name or "your helper"
 
     return {
         "request_id": request.id,
         "session_id": session.id,
         "status": "ringing",
         "helper_online": helper_online,
+        "helper_name": helper_name,
+    }
+
+
+@router.get("/call/{request_id}", response_model=HelpCallStatusResponse)
+async def get_help_call_status(
+    request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the durable state of a help call.
+
+    The device WebSocket is an optimization for instant updates, not the
+    source of truth. Mobile clients poll this endpoint while ringing so a
+    dropped socket cannot leave a caller stuck indefinitely.
+    """
+    from models.assistance_request import AssistanceRequest
+
+    result = await db.execute(
+        select(AssistanceRequest).where(AssistanceRequest.id == request_id)
+    )
+    request = result.scalar_one_or_none()
+    if request is None:
+        raise HTTPException(status_code=404, detail="Help request not found")
+    if current_user.id not in (request.helpee_user_id, request.helper_user_id):
+        raise HTTPException(status_code=403, detail="Not a participant in this help request")
+
+    helper = await db.get(User, request.helper_user_id) if request.helper_user_id else None
+    return {
+        "request_id": request.id,
+        "session_id": request.session_id,
+        "status": request.status,
+        "helper_name": (helper.display_name if helper else None) or "your helper",
+    }
+
+
+@router.post("/call/{request_id}/cancel", response_model=HelpCallStatusResponse)
+async def cancel_help_call(
+    request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Stop an outgoing ring and notify the helper's live device channel."""
+    request = await AssistanceRequestService.cancel_request(
+        request_id=request_id,
+        helpee_user_id=current_user.id,
+        db=db,
+    )
+    await push_to_user(
+        request.helper_user_id or "",
+        {
+            "type": "call_cancelled",
+            "request_id": request.id,
+            "session_id": request.session_id,
+        },
+    )
+    return {
+        "request_id": request.id,
+        "session_id": request.session_id,
+        "status": request.status,
+        "helper_name": "your helper",
     }
 
 
@@ -204,11 +288,11 @@ async def _send_fcm_ring(
 
     logger = logging.getLogger("uvicorn.error")
 
-    creds_path = os.getenv(
-        "FIREBASE_SERVICE_ACCOUNT",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                     "firebase-service-account.json"),
-    )
+    # Credentials are intentionally runtime-only. Never fall back to a file
+    # shipped in the repository; a service-account key is a production secret.
+    creds_path = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+    if not creds_path:
+        return
     if not os.path.exists(creds_path):
         logger.warning("FCM skipped: %s not found (helper offline, push unavailable)",
                        creds_path)

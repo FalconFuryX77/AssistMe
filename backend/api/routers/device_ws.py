@@ -6,14 +6,18 @@ the helper's phone rings even when nobody is inside any session. This is what
 removes the session-code dance from the product.
 """
 
+import asyncio
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from core.realtime_bus import listen, publish
 from core.security import decode_access_token
 
 router = APIRouter()
 
 # user_id → list of live sockets (a user may have the app on several devices)
 _device_connections: dict[str, list[WebSocket]] = {}
+_device_bus_tasks: dict[str, asyncio.Task] = {}
 
 
 def is_user_online(user_id: str) -> bool:
@@ -37,7 +41,28 @@ async def push_to_user(user_id: str, payload: dict) -> bool:
             dead.append(ws)
     for ws in dead:
         _drop(user_id, ws)
+    await publish(f"assistme:user:{user_id}", {"payload": payload})
     return delivered
+
+
+async def _listen_user_bus(user_id: str) -> None:
+    async def deliver(event: dict) -> None:
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            return
+        for ws in list(_device_connections.get(user_id, [])):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                _drop(user_id, ws)
+
+    await listen(f"assistme:user:{user_id}", deliver)
+
+
+def _ensure_user_bus(user_id: str) -> None:
+    task = _device_bus_tasks.get(user_id)
+    if task is None or task.done():
+        _device_bus_tasks[user_id] = asyncio.create_task(_listen_user_bus(user_id))
 
 
 def _drop(user_id: str, ws: WebSocket) -> None:
@@ -50,6 +75,9 @@ def _drop(user_id: str, ws: WebSocket) -> None:
         pass
     if not sockets:
         _device_connections.pop(user_id, None)
+        task = _device_bus_tasks.pop(user_id, None)
+        if task:
+            task.cancel()
 
 
 @router.websocket("/ws/device")
@@ -71,6 +99,7 @@ async def device_channel(websocket: WebSocket) -> None:
 
     await websocket.accept()
     _device_connections.setdefault(user_id, []).append(websocket)
+    _ensure_user_bus(user_id)
 
     try:
         await websocket.send_json({"type": "channel_ready", "user_id": user_id})

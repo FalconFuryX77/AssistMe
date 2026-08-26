@@ -25,9 +25,10 @@ class DeviceChannelService {
   final _controller = StreamController<DeviceChannelEvent>.broadcast();
   bool _disposed = false;
 
-  final String accessToken;
+  final String? accessToken;
+  final Future<String?> Function()? accessTokenProvider;
 
-  DeviceChannelService({required this.accessToken});
+  DeviceChannelService({this.accessToken, this.accessTokenProvider});
 
   Stream<DeviceChannelEvent> get events => _controller.stream;
 
@@ -35,8 +36,11 @@ class DeviceChannelService {
 
   Future<void> connect() async {
     if (_socket != null || _disposed) return;
+    if (!AppConfig.isConfigured) return;
     try {
-      final uri = '${AppConfig.wsUrl}/ws/device?token=$accessToken';
+      final token = await (accessTokenProvider?.call() ?? Future.value(accessToken));
+      if (token == null || token.isEmpty) return;
+      final uri = '${AppConfig.wsUrl}/ws/device?token=$token';
       _socket = await WebSocket.connect(uri);
       _sub = _socket!.listen(
         (raw) {

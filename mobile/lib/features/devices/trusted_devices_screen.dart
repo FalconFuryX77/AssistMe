@@ -17,6 +17,23 @@ import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
 
+String _responseDetail(String body, {String fallback = 'The request failed'}) {
+  try {
+    final decoded = jsonDecode(body);
+    if (decoded is Map<String, dynamic>) {
+      final detail = decoded['detail'];
+      if (detail is String && detail.isNotEmpty) return detail;
+      if (detail is List && detail.isNotEmpty) {
+        return detail.map((item) => item.toString()).join(', ');
+      }
+    }
+  } catch (_) {
+    // Some proxies return plain text for 5xx responses.
+  }
+  final plainText = body.trim();
+  return plainText.isNotEmpty && plainText.length <= 200 ? plainText : fallback;
+}
+
 class TrustedDevicesScreen extends StatefulWidget {
   final ApiClient apiClient;
   final SecureStorageService secureStorage;
@@ -80,7 +97,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
         pairingId = data['pairing_id'];
         setupCode = data['setup_code'];
       } else {
-        final detail = jsonDecode(resp.body)['detail'] ?? 'Failed';
+        final detail = _responseDetail(resp.body, fallback: 'Failed');
         error = 'Could not create code: $detail';
       }
     } catch (e) {
@@ -89,8 +106,9 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
 
     if (!mounted) return;
     if (error != null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error)));
       return;
     }
 
@@ -116,11 +134,16 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
 
     String? error;
     try {
-      final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+      final fingerprint = await DeviceIdentity.getFingerprint(
+        widget.secureStorage,
+      );
+      final storedName = (await widget.secureStorage.getDisplayName())?.trim();
       final resp = await widget.apiClient.claimSetupCode(
         setupCode: code,
         deviceFingerprint: fingerprint,
-        friendlyName: 'My Device',
+        friendlyName: storedName == null || storedName.isEmpty
+            ? 'Helper'
+            : storedName,
         devicePlatform: 'android',
       );
       if (resp.statusCode == 200) {
@@ -146,7 +169,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
         );
         return;
       } else {
-        final detail = jsonDecode(resp.body)['detail'] ?? 'Failed';
+        final detail = _responseDetail(resp.body, fallback: 'Failed');
         error = 'Could not send request: $detail';
       }
     } catch (e) {
@@ -235,18 +258,18 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
       if (resp.statusCode == 204) {
         _loadDevices();
       } else {
-        final detail = jsonDecode(resp.body)['detail'] ?? 'Failed to remove';
+        final detail = _responseDetail(resp.body, fallback: 'Failed to remove');
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Remove failed: $detail')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Remove failed: $detail')));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Network error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Network error: $e')));
       }
     }
   }
@@ -257,10 +280,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
       appBar: AppBar(
         title: const Text('Help & Trusted People'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadDevices,
-          ),
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadDevices),
         ],
       ),
       body: SafeArea(
@@ -303,7 +323,10 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
                   ),
                   child: Text(
                     _error!,
-                    style: const TextStyle(color: AppTheme.accentRose, fontSize: 13),
+                    style: const TextStyle(
+                      color: AppTheme.accentRose,
+                      fontSize: 13,
+                    ),
                   ),
                 ),
               const Text(
@@ -352,11 +375,13 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
           child: Icon(Icons.person, color: Colors.white),
         ),
         title: Text(
-          device['friendly_name'] ?? 'Device',
+          device['helper_display_name'] ?? device['friendly_name'] ?? 'Device',
           style: const TextStyle(color: AppTheme.textPrimary),
         ),
         subtitle: Text(
-          '${device['device_platform'] ?? 'unknown'} • ${device['status']}',
+          '${device['device_platform'] ?? 'unknown'}'
+          '${device['device_tag'] == null ? '' : ' • #${device['device_tag']}'}'
+          ' • ${device['status']}',
           style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
         trailing: IconButton(
@@ -486,7 +511,8 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
       );
       if (pairing.isEmpty || pairing['pairing_id'] != widget.pairingId) return;
 
-      final friendlyName = pairing['friendly_name']?.toString() ?? 'this person';
+      final friendlyName =
+          pairing['friendly_name']?.toString() ?? 'this person';
       if (!mounted) return;
       _timer?.cancel();
 
@@ -541,16 +567,18 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
         }
       } else {
         if (mounted) {
-          final detail = jsonDecode(resp.body)['detail'] ?? 'Failed';
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text('Could not approve: $detail')));
+          final detail = _responseDetail(resp.body, fallback: 'Failed');
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Could not approve: $detail')));
           _restartPolling();
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Network error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Network error: $e')));
         _restartPolling();
       }
     } finally {
@@ -616,7 +644,9 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
               const SizedBox(height: 24),
               if (_approving)
                 const Center(
-                  child: CircularProgressIndicator(color: AppTheme.accentPrimary),
+                  child: CircularProgressIndicator(
+                    color: AppTheme.accentPrimary,
+                  ),
                 ),
             ],
           ),

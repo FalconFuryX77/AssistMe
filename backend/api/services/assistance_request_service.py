@@ -47,10 +47,15 @@ class AssistanceRequestService:
             409 – there is already a pending request for this session
         """
         session = await AssistanceRequestService._load_session(session_id, db)
+        if session.status == "ended":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This help session has already ended",
+            )
         await AssistanceRequestService._ensure_participant(session, helpee_user_id, "helpee", db)
 
         # The helper must be a participant too.
-        await AssistanceRequestService._ensure_participant(session, helper_user_id, None, db)
+        await AssistanceRequestService._ensure_participant(session, helper_user_id, "helper", db)
 
         # Enforce: the helper's device MUST be trusted by the helpee.
         trusted = await AssistanceRequestService._is_device_trusted(
@@ -91,6 +96,7 @@ class AssistanceRequestService:
 
     @staticmethod
     async def respond_to_request(
+        session_id: str,
         request_id: str,
         helper_user_id: str,
         accept: bool,
@@ -111,6 +117,12 @@ class AssistanceRequestService:
                 detail="Assistance request not found",
             )
 
+        if request.session_id != session_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Assistance request not found",
+            )
+
         if request.status != "pending":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -123,10 +135,18 @@ class AssistanceRequestService:
                 detail="Not the intended helper for this request",
             )
 
-        # If accepting, re-verify the helper's device is still trusted.
-        if accept and helper_device_fingerprint:
+        # If accepting, re-verify the helper's device is still trusted. The
+        # request's bound fingerprint is the safe fallback for older clients
+        # that did not include it in the response payload.
+        if accept:
+            fingerprint = helper_device_fingerprint or request.helper_device_fingerprint
+            if not fingerprint:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="The helper device could not be verified",
+                )
             trusted = await AssistanceRequestService._is_device_trusted(
-                request.helpee_user_id, helper_device_fingerprint, db
+                request.helpee_user_id, fingerprint, db
             )
             if not trusted:
                 raise HTTPException(
@@ -135,6 +155,39 @@ class AssistanceRequestService:
                 )
 
         request.status = "accepted" if accept else "denied"
+        request.responded_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(request)
+        return request
+
+    @staticmethod
+    async def cancel_request(
+        request_id: str,
+        helpee_user_id: str,
+        db: AsyncSession,
+    ) -> AssistanceRequest:
+        """Cancel a pending outgoing ring from the helpee's device."""
+        result = await db.execute(
+            select(AssistanceRequest).where(AssistanceRequest.id == request_id)
+        )
+        request = result.scalar_one_or_none()
+        if request is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Help request not found",
+            )
+        if request.helpee_user_id != helpee_user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the person who started the call can cancel it",
+            )
+        if request.status != "pending":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This help request has already been answered",
+            )
+
+        request.status = "cancelled"
         request.responded_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(request)
@@ -236,12 +289,25 @@ class AssistanceRequestService:
             escalation.disclaimer_accepted = True
             escalation.granted_capabilities = escalation.target_capabilities
 
+            # The escalation record is the durable source of truth for the
+            # approval, but the live input gateway checks the session flag.
+            # The old flow updated only the escalation row, so every control
+            # input was rejected with 403 even after the helpee accepted.
+            session.remote_control_granted = True
+            session.remote_control_granted_at = datetime.now(timezone.utc)
+            session.remote_control_platform = "android_accessibility"
+
         await db.commit()
         await db.refresh(escalation)
         return escalation
 
     @staticmethod
-    async def get_escalation(escalation_id: str, db: AsyncSession) -> AssistanceEscalation:
+    async def get_escalation(
+        escalation_id: str,
+        session_id: str,
+        user_id: str,
+        db: AsyncSession,
+    ) -> AssistanceEscalation:
         """Fetch an escalation (e.g. to display its disclaimer)."""
         result = await db.execute(
             select(AssistanceEscalation).where(AssistanceEscalation.id == escalation_id)
@@ -252,6 +318,13 @@ class AssistanceRequestService:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Escalation not found",
             )
+        if escalation.session_id != session_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Escalation not found",
+            )
+        session = await AssistanceRequestService._load_session(session_id, db)
+        await AssistanceRequestService._ensure_participant(session, user_id, None, db)
         return escalation
 
     # ------------------------------------------------------------------
