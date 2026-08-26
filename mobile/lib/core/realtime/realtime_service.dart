@@ -19,7 +19,8 @@ class RealtimeEvent {
 
 class RealtimeService {
   final String sessionId;
-  final String accessToken;
+  final String? accessToken;
+  final Future<String?> Function()? accessTokenProvider;
 
   WebSocket? _socket;
   final _controller = StreamController<RealtimeEvent>.broadcast();
@@ -31,7 +32,11 @@ class RealtimeService {
   bool _hasConnected = false;
   final List<Map<String, dynamic>> _pendingMessages = [];
 
-  RealtimeService({required this.sessionId, required this.accessToken});
+  RealtimeService({
+    required this.sessionId,
+    this.accessToken,
+    this.accessTokenProvider,
+  });
 
   /// Called after every successful socket connection, including recovery
   /// connections. The workspace uses this to restart WebRTC negotiation when
@@ -48,9 +53,12 @@ class RealtimeService {
 
   Future<void> connect() async {
     if (_disposed || _connecting || _socket != null) return;
+    if (!AppConfig.isConfigured) return;
     _connecting = true;
     try {
-      final uri = '${AppConfig.wsUrl}/ws/session/$sessionId?token=$accessToken';
+      final token = await (accessTokenProvider?.call() ?? Future.value(accessToken));
+      if (token == null || token.isEmpty) return;
+      final uri = '${AppConfig.wsUrl}/ws/session/$sessionId?token=$token';
       final socket = await WebSocket.connect(uri);
       if (_disposed) {
         await socket.close();

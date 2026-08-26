@@ -15,6 +15,7 @@ from api.routers.device_ws import is_user_online, push_to_user
 from api.services.assistance_request_service import AssistanceRequestService
 from api.services.session_service import SessionService
 from core.database import get_db
+from core.rate_limiter import limit_help_call_attempts
 from models.trusted_device import TrustedDevice
 from models.user import User
 
@@ -43,7 +44,11 @@ class HelpCallStatusResponse(BaseModel):
     helper_name: str
 
 
-@router.post("/call", response_model=HelpCallResponse)
+@router.post(
+    "/call",
+    response_model=HelpCallResponse,
+    dependencies=[Depends(limit_help_call_attempts)],
+)
 async def place_help_call(
     payload: HelpCallRequest,
     current_user: User = Depends(get_current_user),
@@ -70,6 +75,12 @@ async def place_help_call(
         )
 
     helper_user_id = trust.helper_user_id
+
+    await SessionService.ensure_helper_available(
+        helpee_id=current_user.id,
+        helper_id=helper_user_id,
+        db=db,
+    )
 
     # 2. Find-or-create the pair session (no codes involved).
     session = await SessionService.get_or_create_pair_session(
@@ -166,6 +177,34 @@ async def get_help_call_status(
         "session_id": request.session_id,
         "status": request.status,
         "helper_name": (helper.display_name if helper else None) or "your helper",
+    }
+
+
+@router.post("/call/{request_id}/cancel", response_model=HelpCallStatusResponse)
+async def cancel_help_call(
+    request_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Stop an outgoing ring and notify the helper's live device channel."""
+    request = await AssistanceRequestService.cancel_request(
+        request_id=request_id,
+        helpee_user_id=current_user.id,
+        db=db,
+    )
+    await push_to_user(
+        request.helper_user_id or "",
+        {
+            "type": "call_cancelled",
+            "request_id": request.id,
+            "session_id": request.session_id,
+        },
+    )
+    return {
+        "request_id": request.id,
+        "session_id": request.session_id,
+        "status": request.status,
+        "helper_name": "your helper",
     }
 
 

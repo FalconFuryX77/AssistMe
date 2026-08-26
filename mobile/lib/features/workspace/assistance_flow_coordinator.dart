@@ -300,19 +300,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  /// The helpee-owned emergency exit.  It revokes the live session before
-  /// returning home, and the helper never receives a touch target for it.
+  /// The helpee-owned emergency exit. It revokes control immediately while
+  /// keeping the voice session available, so panic is reversible without
+  /// unexpectedly dropping the person who is helping.
   Future<void> _panicStop() async {
     try {
-      await _engine.stopScreenCapture();
-      _realtime?.send({'type': 'screen_share_stop'});
-      await widget.apiClient.post('/sessions/${widget.sessionId}/leave');
+      await widget.apiClient.post(
+        '/sessions/${widget.sessionId}/remote-control/revoke',
+      );
     } catch (_) {}
-    _helpeeOverlayRunning = false;
     _remoteControlGranted = false;
-    await AnnotationOverlayService.stop();
     widget.remoteControlSink?.value = false;
-    await widget.onSessionEnded?.call();
+    await AnnotationOverlayService.clear();
+    if (mounted) setState(() {});
   }
 
   Future<void> _bootstrap() async {
@@ -327,6 +327,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         _realtime = RealtimeService(
           sessionId: widget.sessionId,
           accessToken: token,
+          accessTokenProvider: widget.apiClient.getRealtimeAccessToken,
         );
         _realtime!.onConnected = _handleRealtimeConnected;
         await _realtime!.connect();
@@ -648,6 +649,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           widget.remoteControlSink?.value = true;
           if (mounted) setState(() {});
         }
+        break;
+
+      case 'remote_control_revoked':
+        _remoteControlGranted = false;
+        widget.remoteControlSink?.value = false;
+        if (mounted) setState(() {});
         break;
 
       case 'remote_control_input':
@@ -1034,7 +1041,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         _realtime?.send({
           'type': 'assistance_request_responded',
           'request_id': requestId,
-          'status': 'accepted',
+          'status': accept ? 'accepted' : 'denied',
         });
       }
     } catch (e) {
@@ -1153,6 +1160,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           Positioned.fill(
             child: DrawingOverlay(
               strokes: [..._strokes, if (_draftStroke != null) _draftStroke!],
+              contentAspectRatio: 9 / 16,
             ),
           ),
 
@@ -1164,6 +1172,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               onStrokeUpdate: _sendDrawPreview,
               onErase: _eraseAt,
               tool: _annotationTool,
+              contentAspectRatio: 9 / 16,
             ),
           ),
 

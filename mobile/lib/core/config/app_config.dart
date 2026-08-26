@@ -1,22 +1,16 @@
 /// App configuration.
 ///
-/// The server address is editable during first-run setup.
-/// and persisted on the device, so it can point to a LAN IP or a public
-/// internet HTTPS URL without rebuilding the app.
+/// Runtime configuration for the backend used by the mobile client.
 class AppConfig {
   AppConfig._();
 
-  /// Compile-time default (used only on first launch). Override via
-  /// `--dart-define=BACKEND_HOST=...`, `--dart-define=DEFAULT_SERVER_URL=...`,
-  /// or the in-app Settings screen.
+  /// Compile-time default. The emulator host is useful for local Android
+  /// development; release builds should provide DEFAULT_SERVER_URL.
   static const String defaultBackendHost = String.fromEnvironment(
     'BACKEND_HOST',
-    defaultValue: '',
+    defaultValue: '10.0.2.2',
   );
 
-  /// Public endpoint injected by the release environment. It is deliberately
-  /// empty in source control: temporary tunnels and machine-local URLs must
-  /// never be shipped as an app default.
   static const String defaultServerUrl = String.fromEnvironment(
     'DEFAULT_SERVER_URL',
     defaultValue: '',
@@ -24,20 +18,44 @@ class AppConfig {
 
   static const int backendPort = 8000;
 
-  /// Runtime-editable server address. Seeded from [defaultServerUrl] (or the
-  /// older LAN-style host/port) and overridden by whatever the user saves in
-  /// Settings.
-  static String baseUrl = defaultServerUrl.isNotEmpty
-      ? defaultServerUrl
-      : (defaultBackendHost.isNotEmpty ? 'http://$defaultBackendHost:$backendPort' : '');
+  /// Runtime server address. A saved value may override the compile-time
+  /// default after the app has been initialized.
+  static String baseUrl = _initialBaseUrl();
+
+  static String _initialBaseUrl() {
+    final configured = defaultServerUrl.trim();
+    if (configured.isNotEmpty) return normalize(configured);
+    if (defaultBackendHost.trim().isNotEmpty) {
+      return normalize('http://${defaultBackendHost.trim()}:$backendPort');
+    }
+    return '';
+  }
+
+  /// Normalize a backend address once so REST and WebSocket clients use the
+  /// same origin. Host-only values are treated as local HTTP endpoints.
+  static String normalize(String value) {
+    var result = value.trim();
+    if (result.isEmpty) return '';
+    if (!result.contains('://')) result = 'http://$result';
+    final uri = Uri.tryParse(result);
+    if (uri == null || uri.host.isEmpty || !{'http', 'https'}.contains(uri.scheme)) {
+      throw FormatException('Use an http:// or https:// backend URL');
+    }
+    return uri.replace(path: uri.path.replaceFirst(RegExp(r'/+$'), '')).toString();
+  }
+
+  static void setBaseUrl(String value) {
+    baseUrl = normalize(value);
+  }
 
   static bool get isConfigured => baseUrl.trim().isNotEmpty;
 
   /// Same address as a WebSocket URL (http->ws, https->wss).
   static String get wsUrl {
-    if (baseUrl.startsWith('https://')) {
-      return 'wss://${baseUrl.substring(8)}';
+    if (!isConfigured) {
+      throw StateError('AssistMe backend is not configured');
     }
-    return 'ws://${baseUrl.substring(7)}';
+    final uri = Uri.parse(baseUrl);
+    return uri.replace(scheme: uri.scheme == 'https' ? 'wss' : 'ws').toString();
   }
 }

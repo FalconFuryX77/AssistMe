@@ -39,7 +39,7 @@ class RemoteControlService:
         if session.status != "active":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Remote control can only be granted in an active session",
+                detail="Remote control is only available in an active session",
             )
 
         # Verify user is a participant
@@ -92,8 +92,23 @@ class RemoteControlService:
                 detail="Session not found",
             )
 
+        participant = next(
+            (p for p in session.participants if p.user_id == user_id), None
+        )
+        if participant is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a participant of this session",
+            )
+        if participant.role != "helpee":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the helpee may revoke remote control",
+            )
+
         session.remote_control_granted = False
         session.remote_control_granted_at = None
+        session.remote_control_platform = None
 
         session_id_val = session.id
         await db.commit()
@@ -128,6 +143,12 @@ class RemoteControlService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session not found",
+            )
+
+        if session.status != "active":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Remote control is only available in an active session",
             )
 
         if not session.remote_control_granted:
@@ -177,6 +198,15 @@ class RemoteControlService:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session not found",
+            )
+
+        participant = next(
+            (p for p in session.participants if p.user_id == user_id), None
+        )
+        if participant is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a participant of this session",
             )
 
         return {

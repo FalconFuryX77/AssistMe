@@ -1,4 +1,10 @@
-"""API Rate Limiting Middleware for Brute-Force & DDoS Protection."""
+"""Small in-process rate limiters for security-sensitive API operations.
+
+The production deployment should eventually move these counters to Redis so
+all API workers share one window.  Keeping the dependency-free implementation
+here still gives local development and the single-worker deployment a real
+brute-force guard instead of leaving the endpoints unprotected.
+"""
 
 import time
 from collections import defaultdict
@@ -6,7 +12,7 @@ from fastapi import HTTPException, Request, status
 
 
 class RateLimiter:
-  """In-memory sliding window rate limiter per IP / User."""
+  """In-memory sliding window rate limiter per IP / user identifier."""
 
   def __init__(
       self, max_requests: int = 100, window_seconds: int = 60
@@ -30,7 +36,7 @@ class RateLimiter:
     if len(timestamps) >= self.max_requests:
       raise HTTPException(
           status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-          detail="Rate limit exceeded. Please try again later.",
+          detail="Too many attempts. Please try again later.",
           headers={"Retry-After": str(self.window_seconds)},
       )
 
@@ -39,3 +45,37 @@ class RateLimiter:
 
 # Global rate limiter instance (100 requests / min per IP)
 global_rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
+
+# These are intentionally separate buckets: a user who has exhausted pairing
+# attempts should not also be able to exhaust recovery attempts, and normal
+# authenticated API traffic must not consume security-operation capacity.
+pairing_rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
+reclaim_rate_limiter = RateLimiter(max_requests=8, window_seconds=60)
+bootstrap_rate_limiter = RateLimiter(max_requests=20, window_seconds=60)
+help_call_rate_limiter = RateLimiter(max_requests=12, window_seconds=60)
+
+
+def _client_identifier(request: Request, bucket: str) -> str:
+  """Return a stable limiter key without trusting spoofable user input."""
+  host = request.client.host if request.client else "unknown"
+  return f"{bucket}:{host}"
+
+
+def limit_pairing_attempts(request: Request) -> None:
+  """Limit setup-code claim/approval attempts by source IP."""
+  pairing_rate_limiter.check_rate_limit(_client_identifier(request, "pairing"))
+
+
+def limit_reclaim_attempts(request: Request) -> None:
+  """Limit recovery-code guesses by source IP."""
+  reclaim_rate_limiter.check_rate_limit(_client_identifier(request, "reclaim"))
+
+
+def limit_bootstrap_attempts(request: Request) -> None:
+  """Limit unauthenticated device-account creation attempts by source IP."""
+  bootstrap_rate_limiter.check_rate_limit(_client_identifier(request, "bootstrap"))
+
+
+def limit_help_call_attempts(request: Request) -> None:
+  """Limit repeated rings by source IP."""
+  help_call_rate_limiter.check_rate_limit(_client_identifier(request, "help-call"))

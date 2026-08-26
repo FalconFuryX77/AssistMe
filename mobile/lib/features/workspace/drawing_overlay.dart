@@ -5,6 +5,8 @@
 /// default (least-privilege) capability granted when a helper accepts.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 class DrawStroke {
@@ -29,6 +31,7 @@ class DrawingInputOverlay extends StatefulWidget {
   final ValueChanged<List<Offset>>? onStrokeUpdate;
   final ValueChanged<Offset>? onErase;
   final AnnotationTool tool;
+  final double contentAspectRatio;
 
   const DrawingInputOverlay({
     Key? key,
@@ -36,6 +39,7 @@ class DrawingInputOverlay extends StatefulWidget {
     this.onStrokeUpdate,
     this.onErase,
     this.tool = AnnotationTool.pen,
+    this.contentAspectRatio = 9 / 16,
   }) : super(key: key);
 
   @override
@@ -45,31 +49,46 @@ class DrawingInputOverlay extends StatefulWidget {
 class _DrawingInputOverlayState extends State<DrawingInputOverlay> {
   final List<Offset> _points = [];
 
+  Offset? _normalizedPoint(Offset point, Size size) {
+    final scale = math.min(
+      size.width / widget.contentAspectRatio,
+      size.height,
+    );
+    final contentSize = Size(
+      scale * widget.contentAspectRatio,
+      scale,
+    );
+    final contentRect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: contentSize.width,
+      height: contentSize.height,
+    );
+    if (!contentRect.contains(point)) return null;
+    return Offset(
+      (point.dx - contentRect.left) / contentRect.width,
+      (point.dy - contentRect.top) / contentRect.height,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
-      builder: (context, constraints) => GestureDetector(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        return GestureDetector(
         behavior: HitTestBehavior.translucent,
         onPanStart: (details) {
-          _points
-            ..clear()
-            ..add(
-              Offset(
-                details.localPosition.dx / constraints.maxWidth,
-                details.localPosition.dy / constraints.maxHeight,
-              ),
-            );
+          final point = _normalizedPoint(details.localPosition, size);
+          _points.clear();
+          if (point != null) _points.add(point);
           if (widget.tool != AnnotationTool.eraser) {
             widget.onStrokeUpdate?.call(List<Offset>.from(_points));
           }
         },
         onPanUpdate: (details) {
-          _points.add(
-            Offset(
-              details.localPosition.dx / constraints.maxWidth,
-              details.localPosition.dy / constraints.maxHeight,
-            ),
-          );
+          final point = _normalizedPoint(details.localPosition, size);
+          if (point == null) return;
+          _points.add(point);
           if (widget.tool != AnnotationTool.eraser) {
             widget.onStrokeUpdate?.call(List<Offset>.from(_points));
           }
@@ -83,15 +102,21 @@ class _DrawingInputOverlayState extends State<DrawingInputOverlay> {
           _points.clear();
         },
         child: const SizedBox.expand(),
-      ),
+        );
+      },
     );
   }
 }
 
 class DrawingOverlay extends StatefulWidget {
   final List<DrawStroke> strokes;
+  final double contentAspectRatio;
 
-  const DrawingOverlay({Key? key, required this.strokes}) : super(key: key);
+  const DrawingOverlay({
+    Key? key,
+    required this.strokes,
+    this.contentAspectRatio = 9 / 16,
+  }) : super(key: key);
 
   @override
   State<DrawingOverlay> createState() => _DrawingOverlayState();
@@ -111,7 +136,7 @@ class _DrawingOverlayState extends State<DrawingOverlay> {
     return IgnorePointer(
       child: CustomPaint(
         size: Size.infinite,
-        painter: _StrokePainter(widget.strokes),
+        painter: _StrokePainter(widget.strokes, widget.contentAspectRatio),
       ),
     );
   }
@@ -119,11 +144,19 @@ class _DrawingOverlayState extends State<DrawingOverlay> {
 
 class _StrokePainter extends CustomPainter {
   final List<DrawStroke> strokes;
+  final double contentAspectRatio;
 
-  _StrokePainter(this.strokes);
+  _StrokePainter(this.strokes, this.contentAspectRatio);
 
   @override
   void paint(Canvas canvas, Size size) {
+    final contentHeight = math.min(size.height, size.width / contentAspectRatio);
+    final contentWidth = contentHeight * contentAspectRatio;
+    final contentRect = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: contentWidth,
+      height: contentHeight,
+    );
     for (final stroke in strokes) {
       if (stroke.points.length < 2) continue;
       final paint = Paint()
@@ -134,11 +167,14 @@ class _StrokePainter extends CustomPainter {
         ..style = PaintingStyle.stroke;
       final path = Path()
         ..moveTo(
-          stroke.points.first.dx * size.width,
-          stroke.points.first.dy * size.height,
+          contentRect.left + stroke.points.first.dx * contentRect.width,
+          contentRect.top + stroke.points.first.dy * contentRect.height,
         );
       for (final p in stroke.points.skip(1)) {
-        path.lineTo(p.dx * size.width, p.dy * size.height);
+        path.lineTo(
+          contentRect.left + p.dx * contentRect.width,
+          contentRect.top + p.dy * contentRect.height,
+        );
       }
       canvas.drawPath(path, paint);
     }

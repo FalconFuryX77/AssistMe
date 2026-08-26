@@ -18,7 +18,12 @@ void main() async {
   // Restore the saved server address (Settings) if present.
   final savedUrl = await secureStorage.getServerUrl();
   if (savedUrl != null && savedUrl.isNotEmpty) {
-    AppConfig.baseUrl = savedUrl;
+    try {
+      AppConfig.setBaseUrl(savedUrl);
+    } catch (_) {
+      // Ignore an invalid value left by an older build and use the compiled
+      // default instead.
+    }
   }
 
   // Firebase/FCM — closed-app ring notifications.

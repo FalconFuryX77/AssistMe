@@ -48,6 +48,13 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
   );
   bool _leaving = false;
   bool _allowPop = false;
+  Offset _modeSwitcherOffset = Offset.zero;
+  Offset _voiceBarOffset = Offset.zero;
+
+  Offset _boundedOffset(Offset offset) => Offset(
+    offset.dx.clamp(-180.0, 180.0).toDouble(),
+    offset.dy.clamp(-320.0, 320.0).toDouble(),
+  );
 
   Future<void> _handleLeaveSession() async {
     if (_leaving) return;
@@ -153,7 +160,19 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
                     top: 12,
                     left: 0,
                     right: 0,
-                    child: Center(child: _phaseModeSwitcher()),
+                    child: Center(
+                      child: Transform.translate(
+                        offset: _modeSwitcherOffset,
+                        child: GestureDetector(
+                          onPanUpdate: (details) => setState(() {
+                            _modeSwitcherOffset = _boundedOffset(
+                              _modeSwitcherOffset + details.delta,
+                            );
+                          }),
+                          child: _phaseModeSwitcher(),
+                        ),
+                      ),
+                    ),
                   );
                 },
               ),
@@ -164,15 +183,25 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
               left: 0,
               right: 0,
               child: Center(
-                child: MobileVoiceControlBar(
-                  sessionId: widget.sessionId,
-                  apiClient: widget.apiClient,
-                  onLeaveSession: _handleLeaveSession,
-                  onMuteChanged: (muted) async {
-                    await _flowCoordinatorKey.currentState?.toggleAudioMute(
-                      muted,
-                    );
-                  },
+                child: Transform.translate(
+                  offset: _voiceBarOffset,
+                  child: GestureDetector(
+                    onPanUpdate: (details) => setState(() {
+                      _voiceBarOffset = _boundedOffset(
+                        _voiceBarOffset + details.delta,
+                      );
+                    }),
+                    child: MobileVoiceControlBar(
+                      sessionId: widget.sessionId,
+                      apiClient: widget.apiClient,
+                      onLeaveSession: _handleLeaveSession,
+                      onMuteChanged: (muted) async {
+                        await _flowCoordinatorKey.currentState?.toggleAudioMute(
+                          muted,
+                        );
+                      },
+                    ),
+                  ),
                 ),
               ),
             ),

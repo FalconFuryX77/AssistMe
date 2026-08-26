@@ -148,7 +148,10 @@ class _HomeScreenState extends State<HomeScreen> {
     final token = await widget.secureStorage.getAccessToken();
     if (token == null) return;
     _channel?.dispose();
-    final channel = DeviceChannelService(accessToken: token);
+    final channel = DeviceChannelService(
+      accessToken: token,
+      accessTokenProvider: widget.apiClient.getRealtimeAccessToken,
+    );
     _channel = channel;
     _channelSub?.cancel();
     _channelSub = channel.events.listen(_onChannelEvent);
@@ -197,6 +200,19 @@ class _HomeScreenState extends State<HomeScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('$name can\'t help right now')),
+            );
+          }
+        }
+        break;
+
+      case 'call_cancelled':
+        if (_incomingCall?['request_id'] == event.data['request_id']) {
+          if (!_incomingDialogOpen) {
+            setState(() => _incomingCall = null);
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('The help request was cancelled.')),
             );
           }
         }
@@ -419,7 +435,20 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _cancelRing() {
+  Future<void> _cancelRing() async {
+    final requestId = _ringingRequestId;
+    if (requestId != null) {
+      try {
+        final response = await widget.apiClient.cancelHelpCall(requestId);
+        if (response.statusCode != 200 && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_responseDetail(response.body, fallback: 'Could not cancel the call'))),
+          );
+        }
+      } catch (_) {
+        // Clear the local ring even if the network is temporarily unavailable.
+      }
+    }
     _clearOutgoing();
   }
 
@@ -433,10 +462,14 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _incomingCall = null);
 
     try {
+      final fingerprint = accept
+          ? await DeviceIdentity.getFingerprint(widget.secureStorage)
+          : null;
       final resp = await widget.apiClient.respondToRequestSimple(
         sessionId: call['session_id'] as String,
         requestId: call['request_id'] as String,
         accept: accept,
+        helperDeviceFingerprint: fingerprint,
       );
       if (resp.statusCode != 200 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

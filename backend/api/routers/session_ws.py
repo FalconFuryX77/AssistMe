@@ -9,14 +9,17 @@ import json
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.services.session_service import SessionService
+from api.schemas.remote_control import RemoteControlInputEvent
+from api.services.remote_control_service import RemoteControlService
 from core.database import async_session_factory
 from core.realtime_bus import listen, publish
 from core.security import decode_access_token
+from models.session import Session
 from models.session_participant import SessionParticipant
 from models.user import User
 
@@ -132,17 +135,29 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         await websocket.close(code=4001, reason="Authentication failed")
         return
 
-    # Verify user is a participant
+    # Verify that the room is still live and that this participant has not
+    # explicitly left.  This prevents a stale token from reopening a finished
+    # call and receiving buffered signaling frames.
     async with async_session_factory() as db:
         result = await db.execute(
-            select(SessionParticipant).where(
+            select(Session, SessionParticipant)
+            .join(Session, Session.id == SessionParticipant.session_id)
+            .where(
                 SessionParticipant.session_id == session_id,
                 SessionParticipant.user_id == user.id,
             )
         )
-        participant = result.scalar_one_or_none()
+        row = result.one_or_none()
 
-    if participant is None:
+    if row is None:
+        await websocket.close(code=4003, reason="Not a session participant")
+        return
+
+    session, participant = row
+    if session.status == "ended":
+        await websocket.close(code=4004, reason="Session has ended")
+        return
+    if participant.status == "left":
         await websocket.close(code=4003, reason="Not a session participant")
         return
 
@@ -332,17 +347,37 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
-            elif msg_type in (
-                "remote_control_grant",
-                "remote_control_revoke",
-                "remote_control_input",
-            ):
-                # Broadcast or forward remote control gesture/key events
+            elif msg_type == "remote_control_input":
+                # The WebSocket is a transport optimization, not a second
+                # authorization path. Apply the same active-session,
+                # helper-role, and helpee-granted checks as REST input.
+                try:
+                    input_event = RemoteControlInputEvent.model_validate(
+                        msg.get("event") or {}
+                    )
+                    async with async_session_factory() as db:
+                        dispatched = await RemoteControlService.dispatch_input_event(
+                            session_id=session_id,
+                            user_id=user.id,
+                            input_event=input_event,
+                            db=db,
+                        )
+                except HTTPException as exc:
+                    await websocket.send_json(
+                        {"type": "error", "detail": exc.detail}
+                    )
+                    continue
+                except ValueError as exc:
+                    await websocket.send_json(
+                        {"type": "error", "detail": str(exc)}
+                    )
+                    continue
+
                 payload = {
                     "type": msg_type,
                     "sender_user_id": user.id,
-                    "platform": msg.get("platform"),
-                    "event": msg.get("event"),
+                    "platform": dispatched["platform"],
+                    "event": dispatched["event"],
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 

@@ -20,6 +20,7 @@ from api.schemas.trusted_device import (
 )
 from api.services.trusted_device_service import TrustedDeviceService
 from core.database import get_db
+from core.rate_limiter import limit_pairing_attempts
 from models.user import User
 
 router = APIRouter(prefix="/devices", tags=["trusted-devices"])
@@ -54,6 +55,7 @@ async def generate_setup_code(
 @router.post(
     "/pairing/claim",
     response_model=DeviceClaimResponse,
+    dependencies=[Depends(limit_pairing_attempts)],
 )
 async def claim_setup_code(
     payload: DeviceClaimRequest,
@@ -94,6 +96,7 @@ async def list_pending_pairings(
 @router.post(
     "/pairing/approve",
     response_model=DeviceApproveResponse,
+    dependencies=[Depends(limit_pairing_attempts)],
 )
 async def approve_pairing(
     payload: DeviceApproveRequest,
