@@ -68,6 +68,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
 class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   RealtimeService? _realtime;
   List<DrawStroke> _strokes = [];
+  final List<DrawStroke> _redoStrokes = [];
   AnnotationTool _annotationTool = AnnotationTool.pen;
   Color _annotationColor = const Color(0xFFFF3B30);
   double _annotationWidth = 4;
@@ -125,7 +126,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   }
 
   void _sendDrawPreview(List<Offset> points) {
-    if (widget.isHelpee || points.isEmpty) return;
+    if (points.isEmpty) return;
     final draft = DrawStroke(
       points: points,
       color: _annotationColor,
@@ -158,6 +159,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _pendingPreviewPoints = null;
     setState(() {
       _draftStroke = null;
+      _redoStrokes.clear();
       _strokes.add(DrawStroke(points: points, color: color, width: width));
     });
     _realtime?.send({
@@ -173,6 +175,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     setState(
       () => _strokes.removeWhere((stroke) => strokeNearPoint(stroke, point)),
     );
+    _redoStrokes.clear();
     _realtime?.send({
       'type': 'draw_erase',
       'point': {'x': point.dx, 'y': point.dy},
@@ -187,7 +190,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _overlayTimer?.cancel();
     _overlayTimer = null;
     _draftStroke = null;
-    setState(() => _strokes.clear());
+    setState(() {
+      _strokes.clear();
+      _redoStrokes.clear();
+    });
     _realtime?.send({'type': 'draw_clear'});
     if (notifyOverlay) {
       try {
@@ -208,6 +214,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       AnnotationOverlayService.initialize(
         onPanic: _panicStop,
         onClear: () async => _clearDrawings(notifyOverlay: false),
+        onDrawStroke: _sendDrawStroke,
+        onUndo: _undoDrawing,
+        onRedo: _redoDrawing,
       );
     }
     _bootstrap();
@@ -569,6 +578,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           final rawWidth = event.data['width'];
           setState(() {
             _draftStroke = null;
+            _redoStrokes.clear();
             _strokes.add(
               DrawStroke(
                 points: points,
@@ -630,7 +640,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
       case 'draw_undo':
         if (_strokes.isNotEmpty) {
-          setState(() => _strokes.removeLast());
+          setState(() => _redoStrokes.add(_strokes.removeLast()));
+          _pushOverlay();
+        }
+        break;
+
+      case 'draw_redo':
+        if (_redoStrokes.isNotEmpty) {
+          setState(() => _strokes.add(_redoStrokes.removeLast()));
           _pushOverlay();
         }
         break;
@@ -639,6 +656,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         setState(() {
           _draftStroke = null;
           _strokes.clear();
+          _redoStrokes.clear();
         });
         _pushOverlay();
         break;
@@ -1279,13 +1297,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             IconButton(
               tooltip: 'Undo',
               icon: const Icon(Icons.undo),
-              onPressed: _strokes.isEmpty
-                  ? null
-                  : () {
-                      setState(() => _strokes.removeLast());
-                      _realtime?.send({'type': 'draw_undo'});
-                      _pushOverlay();
-                    },
+              onPressed: _strokes.isEmpty ? null : _undoDrawing,
+            ),
+            IconButton(
+              tooltip: 'Redo',
+              icon: const Icon(Icons.redo),
+              onPressed: _redoStrokes.isEmpty ? null : _redoDrawing,
             ),
             IconButton(
               tooltip: 'Clear annotations',
@@ -1296,6 +1313,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         ),
       ),
     );
+  }
+
+  void _undoDrawing() {
+    if (_strokes.isEmpty) return;
+    setState(() => _redoStrokes.add(_strokes.removeLast()));
+    _realtime?.send({'type': 'draw_undo'});
+    _pushOverlay();
+  }
+
+  void _redoDrawing() {
+    if (_redoStrokes.isEmpty) return;
+    setState(() => _strokes.add(_redoStrokes.removeLast()));
+    _realtime?.send({'type': 'draw_redo'});
+    _pushOverlay();
   }
 
   Future<void> _showAnnotationOptions() async {

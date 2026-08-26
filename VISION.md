@@ -154,7 +154,7 @@ Accept drops **both phones straight into the live session**. No codes, no rooms,
 | Backend | FastAPI + SQLite, REST + WebSockets | ✅ built |
 | Signaling | Existing session WebSocket (`signal_offer/answer/ice_candidate`) | ✅ built |
 | Ring channel | Persistent per-device WebSocket (`/ws/device`) + FCM fallback | ✅ built |
-| Push | **FCM** — Firebase project `assistme-8332b`; service account on backend; wake-up-ping discipline (minimal payload, details fetched over our API) | ✅ wired |
+| Push | **FCM** — wake-up ping with minimal payload; service-account credentials supplied at runtime | ✅ wired |
 | NAT traversal | **Metered.ca TURN** (`assistme.metered.live`), short-lived REST creds, cached 10 min | ✅ wired |
 | Screen capture | flutter_webrtc `getDisplayMedia` → MediaProjection consent | ✅ built, needs live verification |
 | Voice | WebRTC mic track both directions | ✅ built, needs live verification |
@@ -173,7 +173,7 @@ Accept drops **both phones straight into the live session**. No codes, no rooms,
 - **Accessibility service:** hard-gated to active sessions, panic stop, visible indicator.
 - **FCM:** minimal payloads only.
 - **Screen capture:** full-screen disclosure ("your helper sees everything on screen"); Android 14+ single-app sharing as progressive enhancement later.
-- **Known gap:** rate limiting on claim/approve/reclaim endpoints — not yet implemented.
+- **Rate limiting:** device bootstrap, claim/approve pairing, recovery, and one-tap call attempts are IP-limited in the current API. Production should move the counters to shared Redis storage when running multiple workers.
 
 ---
 
@@ -187,19 +187,19 @@ Accept drops **both phones straight into the live session**. No codes, no rooms,
 - WebRTC pipeline (capture, mic, offer/answer, ICE) with Metered TURN
 - Session screen: live video viewport, mic + hang-up only
 - Auto token refresh (401 → refresh → retry)
+- Explicit touch-control escalation, risk disclaimer, active indicator, and helpee panic/revoke path
+- Shared annotations from either side with pen colors, eraser, clear, undo/redo, and normalized video-coordinate mapping
 
 ### 🔧 Built but unverified live
 - Actual screen-share video between the two physical phones
 - Two-way voice audio
-- Helper drawing → helpee overlay (normalized helper-side draw input and stroke relay are wired; needs live verification)
+- Helper and helpee drawing → shared overlay (native helpee DRAW mode and normalized stroke relay are wired; needs live verification)
 
 ### 📋 Specced, not built
-- Escalation to touch control (Accessibility Service, panic stop)
 - Deny-with-reason shown to helpee
 - Voice notes on requests
 - Rich notification (expandable, playable voice note)
 - Recovery-code rotation + dormant trust + reclaim alerts to contacts
-- Rate limiting on security-sensitive endpoints
 - Android 14+ partial screen sharing
 - Encrypted storage (currently SharedPreferences)
 
