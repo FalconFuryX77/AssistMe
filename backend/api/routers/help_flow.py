@@ -288,11 +288,11 @@ async def _send_fcm_ring(
 
     logger = logging.getLogger("uvicorn.error")
 
-    creds_path = os.getenv(
-        "FIREBASE_SERVICE_ACCOUNT",
-        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                     "firebase-service-account.json"),
-    )
+    # Credentials are intentionally runtime-only. Never fall back to a file
+    # shipped in the repository; a service-account key is a production secret.
+    creds_path = os.getenv("FIREBASE_SERVICE_ACCOUNT")
+    if not creds_path:
+        return
     if not os.path.exists(creds_path):
         logger.warning("FCM skipped: %s not found (helper offline, push unavailable)",
                        creds_path)
