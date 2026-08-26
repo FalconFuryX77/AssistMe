@@ -1,28 +1,55 @@
 # AssistMe
 
-AssistMe is a one-tap remote assistance app for elderly people and their trusted family or friends.
+AssistMe is a device-first, one-tap remote assistance app for an older adult
+and a trusted family member or friend. The live product path is deliberately
+small: pair trusted devices, tap a person to ring them, share the helpee's
+screen and voice, draw guidance, and request touch control only with explicit
+helpee approval.
 
-## Project goal
+## Repository layout
 
-Build a simple, security-first assistance flow with:
-- device-first identity with a one-time recovery code
-- mutual trusted-person pairing
-- one-tap screen sharing and in-app voice
-- shared drawing annotations and explicit, helpee-approved touch control
-- mobile clients for Android and iOS
-- real-time communication and collaboration features
+- `backend/` — FastAPI, SQLAlchemy, device identity, pairing, help calls, WebRTC signaling, and native-control authorization
+- `mobile/` — Flutter Android/iOS client, WebRTC media, drawing overlay, FCM ring notifications, and Android accessibility bridge
+- `deploy/` — Docker Compose deployment with PostgreSQL, Redis, coturn, and ingress services
+- `docs/` — vision, architecture, threat-model, and progress notes
 
-## Current focus
+## Local backend
 
-This repository is being initialized from the development roadmap and will serve as the shared starting point for the two-person team.
+```powershell
+cd backend
+python -m venv ..\.venv
+..\.venv\Scripts\pip.exe install -r requirements.txt
+..\.venv\Scripts\python.exe -m pytest tests/test_vision_contract.py tests/test_device_first_e2e.py -q
+..\.venv\Scripts\python.exe -m uvicorn app:app --reload
+```
 
-## Repository structure
+The development backend uses SQLite by default. Docker deployment uses
+PostgreSQL and Redis:
 
-- docs/ - shared project notes, handoff updates, and planning documents
-- backend/ - API services and business logic
-- mobile/ - React Native client application
-- tests/ - automated test suites
+```powershell
+docker compose -f deploy/docker-compose.yml up --build
+```
 
-## Collaboration note
+## Flutter client
 
-A shared progress document lives in docs/PROJECT_PROGRESS.md and should be updated after every meaningful change so the other contributor can continue from the latest state.
+```powershell
+cd mobile
+flutter pub get
+flutter analyze --no-fatal-infos
+flutter test
+flutter run --dart-define=DEFAULT_SERVER_URL=http://10.0.2.2:8000
+```
+
+`10.0.2.2` is the Android-emulator address for the host machine. For a
+physical phone, use the computer's LAN address; release builds must use a
+stable HTTPS URL. Flutter/Dart must be installed to run these checks.
+
+## Security notes
+
+FCM credentials are runtime-only. Set `FIREBASE_SERVICE_ACCOUNT` to a mounted
+service-account JSON path when push notifications are enabled. A service key
+was present in the inherited repository history and must be revoked/rotated
+in Firebase; it is no longer tracked in the working tree.
+
+The current handoff and verification status is recorded in
+[`docs/PROJECT_PROGRESS.md`](docs/PROJECT_PROGRESS.md).
