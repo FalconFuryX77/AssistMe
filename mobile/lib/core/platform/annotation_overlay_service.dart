@@ -1,9 +1,10 @@
+import 'dart:ui';
+
 import 'package:flutter/services.dart';
 
-/// Controls the helpee's always-on-top annotation layer.  The drawing canvas
-/// is non-touchable; only the helpee-owned Clear and Panic Stop controls are
-/// touchable.  This keeps the helper from ever receiving input on the helpee's
-/// phone while the helpee is using another app.
+/// Controls the helpee's always-on-top annotation layer. The native canvas is
+/// non-touchable until the helpee explicitly taps DRAW; Clear and STOP remain
+/// helpee-owned controls above the annotation layer.
 class AnnotationOverlayService {
   static const MethodChannel _channel = MethodChannel(
     'com.assistme/annotation_overlay',
@@ -11,6 +12,9 @@ class AnnotationOverlayService {
   static void initialize({
     required Future<void> Function() onPanic,
     required Future<void> Function() onClear,
+    void Function(List<Offset> points)? onDrawStroke,
+    void Function()? onUndo,
+    void Function()? onRedo,
   }) {
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
@@ -19,6 +23,31 @@ class AnnotationOverlayService {
           break;
         case 'clear':
           await onClear();
+          break;
+        case 'drawStroke':
+          final rawPoints = call.arguments is Map
+              ? (call.arguments as Map)['points']
+              : null;
+          if (onDrawStroke != null && rawPoints is List) {
+            final points = <Offset>[];
+            for (final raw in rawPoints) {
+              if (raw is Map && raw['x'] is num && raw['y'] is num) {
+                points.add(
+                  Offset(
+                    (raw['x'] as num).toDouble(),
+                    (raw['y'] as num).toDouble(),
+                  ),
+                );
+              }
+            }
+            if (points.length > 1) onDrawStroke(points);
+          }
+          break;
+        case 'undo':
+          onUndo?.call();
+          break;
+        case 'redo':
+          onRedo?.call();
           break;
       }
     });

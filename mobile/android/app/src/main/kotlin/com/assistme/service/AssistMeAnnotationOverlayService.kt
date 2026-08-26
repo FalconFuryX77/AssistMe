@@ -11,10 +11,12 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.PointF
 import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
@@ -49,6 +51,9 @@ class AssistMeAnnotationOverlayService : Service() {
     private var canvasView: AnnotationCanvasView? = null
     private var controlsView: LinearLayout? = null
     private val strokes = mutableListOf<Map<*, *>>()
+    private val activePoints = mutableListOf<PointF>()
+    private var drawingEnabled = false
+    private var drawButton: Button? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -69,11 +74,28 @@ class AssistMeAnnotationOverlayService : Service() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(8, 8, 8, 8)
             setBackgroundColor(Color.argb(210, 20, 25, 35))
+            drawButton = Button(context).apply {
+                text = "DRAW"
+                setOnClickListener { setDrawingEnabled(!drawingEnabled) }
+            }
+            drawButton?.let { addView(it) }
             addView(Button(context).apply {
                 text = "Clear"
                 setOnClickListener {
                     clearStrokes()
                     AssistMeNativeBridge.channel?.invokeMethod("clear", null)
+                }
+            })
+            addView(Button(context).apply {
+                text = "UNDO"
+                setOnClickListener {
+                    AssistMeNativeBridge.channel?.invokeMethod("undo", null)
+                }
+            })
+            addView(Button(context).apply {
+                text = "REDO"
+                setOnClickListener {
+                    AssistMeNativeBridge.channel?.invokeMethod("redo", null)
                 }
             })
             addView(Button(context).apply {
@@ -97,18 +119,31 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     fun clearStrokes() {
+        activePoints.clear()
         strokes.clear()
         canvasView?.invalidate()
     }
+
+    private fun setDrawingEnabled(enabled: Boolean) {
+        drawingEnabled = enabled
+        drawButton?.text = if (enabled) "DRAW ON" else "DRAW"
+        canvasView?.let { view ->
+            val params = view.layoutParams as WindowManager.LayoutParams
+            params.flags = canvasFlags()
+            windowManager.updateViewLayout(view, params)
+        }
+    }
+
+    private fun canvasFlags(): Int = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+        if (!drawingEnabled) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
 
     private fun canvasLayout() = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
         WindowManager.LayoutParams.MATCH_PARENT,
         overlayType(),
-        WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        canvasFlags(),
         PixelFormat.TRANSLUCENT
     ).apply { gravity = Gravity.TOP or Gravity.START }
 
@@ -139,6 +174,8 @@ class AssistMeAnnotationOverlayService : Service() {
         try { controlsView?.let(windowManager::removeView) } catch (_: Exception) {}
         canvasView = null
         controlsView = null
+        drawButton = null
+        activePoints.clear()
         instance = null
         super.onDestroy()
     }
@@ -166,7 +203,7 @@ class AssistMeAnnotationOverlayService : Service() {
         }
         return builder
             .setContentTitle("AssistMe is active")
-            .setContentText("Annotations are visible. STOP ends help immediately.")
+            .setContentText("Annotations are visible. STOP revokes control immediately.")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .build()
@@ -182,19 +219,66 @@ class AssistMeAnnotationOverlayService : Service() {
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             strokes.forEach { stroke ->
-                val points = stroke["points"] as? List<*> ?: return@forEach
-                if (points.size < 2) return@forEach
-                val first = points[0] as? Map<*, *> ?: return@forEach
+                drawStroke(canvas, stroke["points"] as? List<*>, stroke)
+            }
+            if (activePoints.size > 1) {
                 val path = Path()
-                path.moveTo(number(first["x"]) * width, number(first["y"]) * height)
-                points.drop(1).forEach { raw ->
-                    val point = raw as? Map<*, *> ?: return@forEach
-                    path.lineTo(number(point["x"]) * width, number(point["y"]) * height)
+                path.moveTo(activePoints.first().x * width, activePoints.first().y * height)
+                activePoints.drop(1).forEach { point ->
+                    path.lineTo(point.x * width, point.y * height)
                 }
-                paint.color = (stroke["color"] as? Number)?.toInt() ?: Color.RED
-                paint.strokeWidth = maxOf(3f, number(stroke["width"]))
+                paint.color = Color.RED
+                paint.strokeWidth = 4f
                 canvas.drawPath(path, paint)
             }
+        }
+
+        private fun drawStroke(canvas: Canvas, points: List<*>?, stroke: Map<*, *>) {
+            if (points == null || points.size < 2) return
+            val first = points[0] as? Map<*, *> ?: return
+            val path = Path()
+            path.moveTo(number(first["x"]) * width, number(first["y"]) * height)
+            points.drop(1).forEach { raw ->
+                val point = raw as? Map<*, *> ?: return@forEach
+                path.lineTo(number(point["x"]) * width, number(point["y"]) * height)
+            }
+            paint.color = (stroke["color"] as? Number)?.toInt() ?: Color.RED
+            paint.strokeWidth = maxOf(3f, number(stroke["width"]))
+            canvas.drawPath(path, paint)
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (!drawingEnabled) return false
+            val x = (event.x / width.coerceAtLeast(1)).coerceIn(0f, 1f)
+            val y = (event.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    activePoints.clear()
+                    activePoints.add(PointF(x, y))
+                }
+                MotionEvent.ACTION_MOVE -> activePoints.add(PointF(x, y))
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    activePoints.add(PointF(x, y))
+                    if (activePoints.size > 1) {
+                        val points = activePoints.map {
+                            mapOf<String, Any>("x" to it.x, "y" to it.y)
+                        }
+                        val stroke = mapOf<String, Any>(
+                            "points" to points,
+                            "color" to Color.RED,
+                            "width" to 4f,
+                        )
+                        strokes.add(stroke)
+                        AssistMeNativeBridge.channel?.invokeMethod(
+                            "drawStroke",
+                            mapOf("points" to points),
+                        )
+                    }
+                    activePoints.clear()
+                }
+            }
+            invalidate()
+            return true
         }
 
         private fun number(value: Any?): Float = (value as? Number)?.toFloat() ?: 0f

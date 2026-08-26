@@ -246,7 +246,7 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 "audio_call_start", "audio_call_stop", "audio_mute_toggle",
                 "audio_route_change", "audio_degradation_report",
                 "remote_control_input",
-                "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_clear",
+                "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_redo", "draw_clear",
                 "assistance_requested", "assistance_request_responded",
                 "escalation_requested", "escalation_responded",
             }
@@ -545,7 +545,7 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
             elif msg_type in (
-                "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_clear"
+                "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_redo", "draw_clear"
             ):
                 # Drawing is the default, least-privilege guidance layer.
                 # It never grants touch control and is relayed to both phones.
