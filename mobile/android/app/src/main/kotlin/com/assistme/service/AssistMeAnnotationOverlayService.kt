@@ -137,7 +137,7 @@ class AssistMeAnnotationOverlayService : Service() {
     private fun canvasFlags(): Int = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-        if (!drawingEnabled) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0
+        (if (!drawingEnabled) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0)
 
     private fun canvasLayout() = WindowManager.LayoutParams(
         WindowManager.LayoutParams.MATCH_PARENT,
