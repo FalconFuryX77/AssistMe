@@ -4,7 +4,10 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-# Capabilities that a helper may be granted.
+# Capabilities that a helper may be granted.  Touch is deliberately one
+# escalation package in the UI: the helper asks for "full touch control" and
+# the helpee accepts one clear risk screen.  `drag` is the wire-level name for
+# swipe/scroll and is not a separate privilege request.
 VALID_CAPABILITIES = ("overlay_draw", "pointer", "tap", "drag", "voice")
 
 

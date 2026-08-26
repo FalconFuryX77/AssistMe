@@ -96,3 +96,21 @@ class Session(Base):
     participants = relationship(
         "SessionParticipant", back_populates="session", cascade="all, delete-orphan"
     )
+    audit_logs = relationship(
+        "AuditLog", back_populates="session", cascade="all, delete-orphan"
+    )
+    chat_messages = relationship(
+        "ChatMessage", back_populates="session", cascade="all, delete-orphan"
+    )
+    file_transfers = relationship(
+        "FileTransfer", back_populates="session", cascade="all, delete-orphan"
+    )
+    context_snapshots = relationship(
+        "ContextSnapshot", back_populates="session", cascade="all, delete-orphan"
+    )
+    policy_decision = relationship(
+        "PolicyDecision", back_populates="session", uselist=False, cascade="all, delete-orphan"
+    )
+    assistance_suggestions = relationship(
+        "AssistanceSuggestion", back_populates="session", cascade="all, delete-orphan"
+    )

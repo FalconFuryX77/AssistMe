@@ -13,6 +13,9 @@ class SecureStorageService {
   static const String keyE2EEIdentityKey = 'e2ee_identity_key';
   static const String keyServerUrl = 'server_base_url';
   static const String keyDisplayName = 'device_display_name';
+  static const String keyActiveSessionId = 'active_session_id';
+  static const String keyActiveSessionPeerName = 'active_session_peer_name';
+  static const String keyActiveSessionIsHelpee = 'active_session_is_helpee';
 
   late final Object _prefs;
   bool _ready = false;
@@ -35,12 +38,39 @@ class SecureStorageService {
 
   Future<String?> getServerUrl() => read(key: keyServerUrl);
 
-  Future<void> saveServerUrl(String url) => write(key: keyServerUrl, value: url);
+  Future<void> saveServerUrl(String url) =>
+      write(key: keyServerUrl, value: url);
 
   Future<void> saveDisplayName(String name) =>
       write(key: keyDisplayName, value: name);
 
   Future<String?> getDisplayName() => read(key: keyDisplayName);
+
+  Future<void> saveActiveSession({
+    required String sessionId,
+    required String peerName,
+    required bool isHelpee,
+  }) async {
+    await prefs.setString(keyActiveSessionId, sessionId);
+    await prefs.setString(keyActiveSessionPeerName, peerName);
+    await prefs.setBool(keyActiveSessionIsHelpee, isHelpee);
+  }
+
+  Future<Map<String, dynamic>?> getActiveSession() async {
+    final sessionId = prefs.getString(keyActiveSessionId);
+    if (sessionId == null || sessionId.isEmpty) return null;
+    return {
+      'session_id': sessionId,
+      'peer_name': prefs.getString(keyActiveSessionPeerName) ?? 'your contact',
+      'is_helpee': prefs.getBool(keyActiveSessionIsHelpee) ?? true,
+    };
+  }
+
+  Future<void> clearActiveSession() async {
+    await prefs.remove(keyActiveSessionId);
+    await prefs.remove(keyActiveSessionPeerName);
+    await prefs.remove(keyActiveSessionIsHelpee);
+  }
 
   Future<void> write({required String key, required String value}) async {
     await prefs.setString(key, value);
@@ -58,7 +88,10 @@ class SecureStorageService {
     await prefs.clear();
   }
 
-  Future<void> saveTokens({required String accessToken, required String refreshToken}) async {
+  Future<void> saveTokens({
+    required String accessToken,
+    required String refreshToken,
+  }) async {
     await write(key: keyAccessToken, value: accessToken);
     await write(key: keyRefreshToken, value: refreshToken);
   }

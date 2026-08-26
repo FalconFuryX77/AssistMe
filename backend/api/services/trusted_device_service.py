@@ -21,6 +21,18 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _is_expired(expires_at: datetime) -> bool:
+    """Compare database timestamps safely across PostgreSQL and SQLite.
+
+    PostgreSQL preserves timezone-aware values while SQLite commonly returns
+    naive values for the same SQLAlchemy column. Normalize both to UTC before
+    comparing so pairing does not fail with a TypeError in production.
+    """
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) > expires_at
+
+
 class TrustedDeviceService:
     """Manages device pairing, trusted-list security, and device identity."""
 
@@ -118,7 +130,7 @@ class TrustedDeviceService:
             )
 
         # 3. Check expiry
-        if datetime.now(timezone.utc).replace(tzinfo=None) > pairing.expires_at:
+        if _is_expired(pairing.expires_at):
             pairing.status = "expired"
             await db.commit()
             raise HTTPException(
@@ -199,7 +211,7 @@ class TrustedDeviceService:
                 detail="Setup code not found",
             )
 
-        if datetime.now(timezone.utc).replace(tzinfo=None) > pairing.expires_at:
+        if _is_expired(pairing.expires_at):
             pairing.status = "expired"
             await db.commit()
             raise HTTPException(
@@ -275,7 +287,7 @@ class TrustedDeviceService:
                 detail="Pending pairing not found",
             )
 
-        if datetime.now(timezone.utc).replace(tzinfo=None) > pairing.expires_at:
+        if _is_expired(pairing.expires_at):
             pairing.status = "expired"
             await db.commit()
             raise HTTPException(
@@ -324,6 +336,7 @@ class TrustedDeviceService:
                     "owner_user_id": row.owner_user_id,
                     "owner_display_name": (owner.display_name if owner else None),
                     "friendly_name": row.friendly_name,
+                    "device_tag": row.id.replace("-", "")[:6].upper(),
                     "since": row.created_at,
                 }
             )

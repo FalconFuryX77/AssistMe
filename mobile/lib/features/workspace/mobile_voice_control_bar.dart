@@ -6,12 +6,14 @@ class MobileVoiceControlBar extends StatefulWidget {
   final String sessionId;
   final ApiClient apiClient;
   final VoidCallback onLeaveSession;
+  final Future<void> Function(bool muted)? onMuteChanged;
 
   const MobileVoiceControlBar({
     Key? key,
     required this.sessionId,
     required this.apiClient,
     required this.onLeaveSession,
+    this.onMuteChanged,
   }) : super(key: key);
 
   @override
@@ -23,14 +25,20 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
 
   Future<void> _toggleMute() async {
     final nextMute = !_isMuted;
-    setState(() => _isMuted = nextMute);
     try {
+      await widget.onMuteChanged?.call(nextMute);
       await widget.apiClient.post(
         '/sessions/${widget.sessionId}/audio/mute',
         body: {'is_muted': nextMute},
       );
+      if (mounted) setState(() => _isMuted = nextMute);
     } catch (e) {
       debugPrint('Mute toggle: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not change microphone state')),
+        );
+      }
     }
   }
 
@@ -43,7 +51,11 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
         borderRadius: BorderRadius.circular(32),
         border: Border.all(color: AppTheme.borderGlass),
         boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 16, offset: Offset(0, 4)),
+          BoxShadow(
+            color: Colors.black54,
+            blurRadius: 16,
+            offset: Offset(0, 4),
+          ),
         ],
       ),
       child: Row(

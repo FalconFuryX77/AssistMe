@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_current_user
 from api.schemas.users import UserResponse, UserUpdateRequest
+from api.services.auth_service import AuthService
 from core.database import get_db
 from models.user import User
 
@@ -27,6 +28,11 @@ async def update_my_profile(
 ) -> User:
     """Update the authenticated user's profile fields."""
     if payload.display_name is not None:
+        await AuthService._ensure_display_name_available(
+            payload.display_name,
+            db,
+            exclude_user_id=current_user.id,
+        )
         current_user.display_name = payload.display_name
 
     await db.commit()

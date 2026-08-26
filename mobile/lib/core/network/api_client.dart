@@ -50,7 +50,10 @@ class ApiClient {
       final data = jsonDecode(resp.body);
       final access = data['access_token'];
       if (access is! String || access.isEmpty) return false;
-      await secureStorage.write(key: SecureStorageService.keyAccessToken, value: access);
+      await secureStorage.write(
+        key: SecureStorageService.keyAccessToken,
+        value: access,
+      );
       return true;
     } catch (_) {
       return false;
@@ -77,7 +80,8 @@ class ApiClient {
 
   Future<http.Response> get(String endpoint, {bool requireAuth = true}) {
     return _send(
-      (headers) => httpClient.get(Uri.parse('$baseUrl$endpoint'), headers: headers),
+      (headers) =>
+          httpClient.get(Uri.parse('$baseUrl$endpoint'), headers: headers),
       requireAuth: requireAuth,
     );
   }
@@ -118,8 +122,10 @@ class ApiClient {
     bool requireAuth = true,
   }) {
     return _send(
-      (headers) => httpClient
-          .delete(Uri.parse('$baseUrl$endpoint').replace(queryParameters: query), headers: headers),
+      (headers) => httpClient.delete(
+        Uri.parse('$baseUrl$endpoint').replace(queryParameters: query),
+        headers: headers,
+      ),
       requireAuth: requireAuth,
     );
   }
@@ -137,7 +143,10 @@ class ApiClient {
   }
 
   Future<http.Response> checkDeviceIdentity(String deviceFingerprint) {
-    return post('/devices/identity', body: {'device_fingerprint': deviceFingerprint});
+    return post(
+      '/devices/identity',
+      body: {'device_fingerprint': deviceFingerprint},
+    );
   }
 
   Future<http.Response> generateSetupCode() {
@@ -150,12 +159,15 @@ class ApiClient {
     String? friendlyName,
     String? devicePlatform,
   }) {
-    return post('/devices/pairing/claim', body: {
-      'setup_code': setupCode,
-      'device_fingerprint': deviceFingerprint,
-      'friendly_name': friendlyName,
-      'device_platform': devicePlatform,
-    });
+    return post(
+      '/devices/pairing/claim',
+      body: {
+        'setup_code': setupCode,
+        'device_fingerprint': deviceFingerprint,
+        'friendly_name': friendlyName,
+        'device_platform': devicePlatform,
+      },
+    );
   }
 
   Future<http.Response> listPendingPairings() {
@@ -196,10 +208,19 @@ class ApiClient {
     required String helperDeviceFingerprint,
     String? message,
   }) {
-    return post('/help/call', body: {
-      'helper_device_fingerprint': helperDeviceFingerprint,
-      'message': message,
-    });
+    return post(
+      '/help/call',
+      body: {
+        'helper_device_fingerprint': helperDeviceFingerprint,
+        'message': message,
+      },
+    );
+  }
+
+  /// Durable call state. The device channel may deliver this faster, but it
+  /// must never be the only way a caller learns that the helper responded.
+  Future<http.Response> getHelpCallStatus(String requestId) {
+    return get('/help/call/$requestId');
   }
 
   /// The helper's address book — people this user has been trusted to help.
@@ -253,10 +274,13 @@ class ApiClient {
     required String helperUserId,
     required String helperDeviceFingerprint,
   }) {
-    return post('/sessions/$sessionId/assistance/request', body: {
-      'helper_user_id': helperUserId,
-      'helper_device_fingerprint': helperDeviceFingerprint,
-    });
+    return post(
+      '/sessions/$sessionId/assistance/request',
+      body: {
+        'helper_user_id': helperUserId,
+        'helper_device_fingerprint': helperDeviceFingerprint,
+      },
+    );
   }
 
   Future<http.Response> respondToHelpRequest({
@@ -265,19 +289,23 @@ class ApiClient {
     required bool accept,
     String? helperDeviceFingerprint,
   }) {
-    return post('/sessions/$sessionId/assistance/request/$requestId/respond', body: {
-      'accept': accept,
-      'helper_device_fingerprint': helperDeviceFingerprint,
-    });
+    return post(
+      '/sessions/$sessionId/assistance/request/$requestId/respond',
+      body: {
+        'accept': accept,
+        'helper_device_fingerprint': helperDeviceFingerprint,
+      },
+    );
   }
 
   Future<http.Response> requestEscalation({
     required String sessionId,
     required List<String> targetCapabilities,
   }) {
-    return post('/sessions/$sessionId/assistance/escalation', body: {
-      'target_capabilities': targetCapabilities,
-    });
+    return post(
+      '/sessions/$sessionId/assistance/escalation',
+      body: {'target_capabilities': targetCapabilities},
+    );
   }
 
   Future<http.Response> getEscalation(String sessionId, String escalationId) {
@@ -290,9 +318,9 @@ class ApiClient {
     required bool accept,
     required bool acceptDisclaimer,
   }) {
-    return post('/sessions/$sessionId/assistance/escalation/$escalationId/respond', body: {
-      'accept': accept,
-      'accept_disclaimer': acceptDisclaimer,
-    });
+    return post(
+      '/sessions/$sessionId/assistance/escalation/$escalationId/respond',
+      body: {'accept': accept, 'accept_disclaimer': acceptDisclaimer},
+    );
   }
 }

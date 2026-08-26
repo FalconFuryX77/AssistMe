@@ -6,6 +6,7 @@ changes.  Full WebRTC signaling is handled in Phase 3.
 """
 
 import json
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.services.session_service import SessionService
 from core.database import async_session_factory
+from core.realtime_bus import listen, publish
 from core.security import decode_access_token
 from models.session_participant import SessionParticipant
 from models.user import User
@@ -26,9 +28,19 @@ router = APIRouter()
 
 # Maps session_id → { user_id: WebSocket }
 _connections: dict[str, dict[str, WebSocket]] = {}
+_pending_signals: dict[str, list[dict]] = {}
+_disconnect_tasks: dict[tuple[str, str], asyncio.Task] = {}
+_DISCONNECT_GRACE_SECONDS = 30
+_session_bus_tasks: dict[str, asyncio.Task] = {}
 
 
-async def _broadcast(session_id: str, message: dict, exclude_user: str | None = None) -> None:
+async def _broadcast(
+    session_id: str,
+    message: dict,
+    exclude_user: str | None = None,
+    *,
+    publish_globally: bool = True,
+) -> None:
     """Send a JSON message to all connected participants in a session."""
     room = _connections.get(session_id, {})
     disconnected = []
@@ -42,6 +54,33 @@ async def _broadcast(session_id: str, message: dict, exclude_user: str | None = 
     # Clean up broken connections
     for uid in disconnected:
         room.pop(uid, None)
+    if publish_globally:
+        await publish(
+            f"assistme:session:{session_id}",
+            {"message": message, "exclude_user": exclude_user},
+        )
+
+
+async def _listen_session_bus(session_id: str) -> None:
+    async def deliver(payload: dict) -> None:
+        message = payload.get("message")
+        if isinstance(message, dict):
+            await _broadcast(
+                session_id,
+                message,
+                payload.get("exclude_user"),
+                publish_globally=False,
+            )
+
+    await listen(f"assistme:session:{session_id}", deliver)
+
+
+def _ensure_session_bus(session_id: str) -> None:
+    task = _session_bus_tasks.get(session_id)
+    if task is None or task.done():
+        _session_bus_tasks[session_id] = asyncio.create_task(
+            _listen_session_bus(session_id)
+        )
 
 
 async def _authenticate_ws(websocket: WebSocket) -> User | None:
@@ -114,6 +153,29 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     if session_id not in _connections:
         _connections[session_id] = {}
     _connections[session_id][user.id] = websocket
+    _ensure_session_bus(session_id)
+    pending_disconnect = _disconnect_tasks.pop((session_id, user.id), None)
+    if pending_disconnect:
+        pending_disconnect.cancel()
+
+    # A caller may publish its offer before the other phone finishes opening
+    # the session socket. Replay buffered signaling immediately on connect.
+    pending_signals = _pending_signals.get(session_id, [])
+    remaining_signals = []
+    for pending in pending_signals:
+        # Never replay a participant's own buffered signal back to them after
+        # a transient reconnect.
+        if pending.get("sender_user_id") == user.id:
+            remaining_signals.append(pending)
+            continue
+        try:
+            await websocket.send_json(pending)
+        except Exception:
+            remaining_signals.append(pending)
+    if remaining_signals:
+        _pending_signals[session_id] = remaining_signals
+    else:
+        _pending_signals.pop(session_id, None)
 
     # If they were disconnected, mark them as reconnected
     if participant.status == "disconnected":
@@ -165,7 +227,11 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
             allowed_types = {
                 "heartbeat", "leave", "signal_offer", "signal_answer",
                 "signal_ice_candidate", "screen_share_start", "screen_share_stop",
-                "audio_mute_toggle", "draw_stroke", "draw_clear",
+                "screen_share_orientation", "screen_share_security_event",
+                "audio_call_start", "audio_call_stop", "audio_mute_toggle",
+                "audio_route_change", "audio_degradation_report",
+                "remote_control_input",
+                "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_clear",
                 "assistance_requested", "assistance_request_responded",
                 "escalation_requested", "escalation_responded",
             }
@@ -207,11 +273,28 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                     if target_ws:
                         await target_ws.send_json(payload)
                     else:
-                        await websocket.send_json(
-                            {"type": "error", "detail": "Target user not connected"}
-                        )
+                        queue = _pending_signals.setdefault(session_id, [])
+                        if len(queue) < 32:
+                            queue.append(payload)
+                    await publish(
+                        f"assistme:session:{session_id}",
+                        {"message": payload, "exclude_user": user.id},
+                    )
                 else:
-                    await _broadcast(session_id, payload, exclude_user=user.id)
+                    # The mobile clients intentionally use room signaling. If
+                    # the peer is between WebSocket connections during a
+                    # reconnect, a plain broadcast would silently drop the
+                    # fresh offer/ICE and leave the viewport blank. Buffer the
+                    # signal until another participant connects; normal live
+                    # signaling remains an immediate broadcast.
+                    room = _connections.get(session_id, {})
+                    recipients = [uid for uid in room if uid != user.id]
+                    if recipients:
+                        await _broadcast(session_id, payload, exclude_user=user.id)
+                    else:
+                        queue = _pending_signals.setdefault(session_id, [])
+                        if len(queue) < 64:
+                            queue.append(payload)
 
             elif msg_type in (
                 "screen_share_start",
@@ -426,7 +509,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 }
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
-            elif msg_type in ("draw_stroke", "draw_clear"):
+            elif msg_type in (
+                "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_clear"
+            ):
                 # Drawing is the default, least-privilege guidance layer.
                 # It never grants touch control and is relayed to both phones.
                 await _broadcast(
@@ -435,6 +520,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                         "type": msg_type,
                         "sender_user_id": user.id,
                         "points": msg.get("points"),
+                        "point": msg.get("point"),
+                        "color": msg.get("color"),
+                        "width": msg.get("width"),
                     },
                     exclude_user=user.id,
                 )
@@ -445,15 +533,19 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 )
 
     except WebSocketDisconnect:
-        # Unexpected disconnect — mark as disconnected for recovery
+        # Android may briefly suspend this socket while the MediaProjection
+        # consent activity is on screen. Keep the session alive while the
+        # client reconnects; only a sustained disconnect ends the call.
         async with async_session_factory() as db:
             await SessionService.mark_disconnected(session_id, user.id, db)
 
         await _broadcast(
             session_id,
-            {"type": "user_disconnected", "user_id": user.id},
+            {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
             exclude_user=user.id,
         )
+        task = asyncio.create_task(_end_after_disconnect(session_id, user.id))
+        _disconnect_tasks[(session_id, user.id)] = task
 
     finally:
         # Remove from connection pool
@@ -461,3 +553,25 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         room.pop(user.id, None)
         if not room:
             _connections.pop(session_id, None)
+            _pending_signals.pop(session_id, None)
+            bus_task = _session_bus_tasks.pop(session_id, None)
+            if bus_task:
+                bus_task.cancel()
+
+
+async def _end_after_disconnect(session_id: str, user_id: str) -> None:
+    """End the call only after the reconnect grace window expires."""
+    try:
+        await asyncio.sleep(_DISCONNECT_GRACE_SECONDS)
+        async with async_session_factory() as db:
+            session = await SessionService.terminate_on_disconnect(session_id, user_id, db)
+        if session is not None:
+            await _broadcast(
+                session_id,
+                {"type": "session_ended", "reason": "participant_disconnected", "user_id": user_id},
+                exclude_user=user_id,
+            )
+    except asyncio.CancelledError:
+        pass
+    finally:
+        _disconnect_tasks.pop((session_id, user_id), None)

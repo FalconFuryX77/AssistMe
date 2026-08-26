@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -10,9 +12,11 @@ class RemoteScreenView extends StatefulWidget {
   final bool isFlagSecureActive;
   final bool isScreenSharing;
   final ValueNotifier<dynamic>? remoteStreamNotifier;
+
   /// Control is opt-in and must only become true after the helpee approves
   /// the plain-language risk screen. Annotation remains available without it.
   final bool allowRemoteControl;
+  final ValueChanged<Map<String, dynamic>>? onRemoteInput;
 
   const RemoteScreenView({
     Key? key,
@@ -22,6 +26,7 @@ class RemoteScreenView extends StatefulWidget {
     this.isScreenSharing = true,
     this.remoteStreamNotifier,
     this.allowRemoteControl = false,
+    this.onRemoteInput,
   }) : super(key: key);
 
   @override
@@ -31,6 +36,7 @@ class RemoteScreenView extends StatefulWidget {
 class _RemoteScreenViewState extends State<RemoteScreenView> {
   Offset? _laserPointer;
   Offset? _dragStartOffset;
+  Offset? _dragCurrentOffset;
   final RTCVideoRenderer _renderer = RTCVideoRenderer();
   bool _rendererInitialized = false;
   dynamic _attachedStream;
@@ -39,11 +45,24 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   void initState() {
     super.initState();
     widget.remoteStreamNotifier?.addListener(_onStreamChanged);
+    _renderer.addListener(_onRendererChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onStreamChanged());
+  }
+
+  void _onRendererChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _onStreamChanged() async {
     final stream = widget.remoteStreamNotifier?.value;
-    if (stream == null || identical(stream, _attachedStream)) return;
+    if (stream == null) {
+      if (_rendererInitialized && _attachedStream != null) {
+        _renderer.srcObject = null;
+        if (mounted) setState(() => _attachedStream = null);
+      }
+      return;
+    }
+    if (identical(stream, _attachedStream)) return;
 
     if (!_rendererInitialized) {
       await _renderer.initialize();
@@ -58,6 +77,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   @override
   void dispose() {
     widget.remoteStreamNotifier?.removeListener(_onStreamChanged);
+    _renderer.removeListener(_onRendererChanged);
     if (_rendererInitialized) {
       _renderer.dispose();
     }
@@ -74,22 +94,51 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   }) async {
     if (!widget.allowRemoteControl) return;
     try {
-      await widget.apiClient.post(
+      final payload = <String, dynamic>{
+        'event_type': eventType,
+        'x': x * 1080,
+        'y': y * 1920,
+        'normalized_x': x,
+        'normalized_y': y,
+        if (endX != null) 'end_x': endX * 1080,
+        if (endY != null) 'end_y': endY * 1920,
+        if (endX != null) 'normalized_end_x': endX,
+        if (endY != null) 'normalized_end_y': endY,
+        if (durationMs != null) 'duration_ms': durationMs,
+      };
+      final response = await widget.apiClient.post(
         '/sessions/${widget.sessionId}/remote-control/input',
-        body: {
-          'event_type': eventType,
-          'x': x * 1080,
-          'y': y * 1920,
-          'normalized_x': x,
-          'normalized_y': y,
-          if (endX != null) 'end_x': endX * 1080,
-          if (endY != null) 'end_y': endY * 1920,
-          if (durationMs != null) 'duration_ms': durationMs,
-        },
+        body: payload,
       );
+      if (response.statusCode == 200) widget.onRemoteInput?.call(payload);
     } catch (e) {
       debugPrint('Remote input dispatch notice: $e');
     }
+  }
+
+  /// Return the normalized coordinate inside the actual `contain` video
+  /// rectangle. The previous implementation used the whole widget bounds,
+  /// which included letterboxing and the helper's app chrome and caused taps
+  /// to land consistently above the visible target on the helpee phone.
+  Offset? _normalizedVideoPoint(Offset point, Size size) {
+    final sourceWidth = _renderer.videoWidth > 0
+        ? _renderer.videoWidth.toDouble()
+        : 9.0;
+    final sourceHeight = _renderer.videoHeight > 0
+        ? _renderer.videoHeight.toDouble()
+        : 16.0;
+    final scale = math.min(
+      size.width / sourceWidth,
+      size.height / sourceHeight,
+    );
+    final videoWidth = sourceWidth * scale;
+    final videoHeight = sourceHeight * scale;
+    final left = (size.width - videoWidth) / 2;
+    final top = (size.height - videoHeight) / 2;
+    final x = (point.dx - left) / videoWidth;
+    final y = (point.dy - top) / videoHeight;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    return Offset(x, y);
   }
 
   @override
@@ -100,46 +149,64 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
         final height = constraints.maxHeight;
 
         return GestureDetector(
-          onTapDown: (details) {
+          onTapUp: (details) {
             if (!widget.allowRemoteControl) return;
-            final x = details.localPosition.dx / width;
-            final y = details.localPosition.dy / height;
+            final point = _normalizedVideoPoint(
+              details.localPosition,
+              Size(width, height),
+            );
+            if (point == null) return;
             setState(() {
               _laserPointer = details.localPosition;
             });
-            _dispatchInput(eventType: 'tap', x: x, y: y);
+            _dispatchInput(eventType: 'tap', x: point.dx, y: point.dy);
           },
           onPanStart: (details) {
             if (!widget.allowRemoteControl) return;
             _dragStartOffset = details.localPosition;
+            _dragCurrentOffset = details.localPosition;
+          },
+          onPanUpdate: (details) {
+            if (!widget.allowRemoteControl) return;
+            _dragCurrentOffset = details.localPosition;
           },
           onPanEnd: (details) {
             if (!widget.allowRemoteControl) return;
             if (_dragStartOffset != null) {
-              final startX = _dragStartOffset!.dx / width;
-              final startY = _dragStartOffset!.dy / height;
-              final currentPointer = _laserPointer ?? _dragStartOffset!;
-              final endX = currentPointer.dx / width;
-              final endY = currentPointer.dy / height;
+              final currentPointer = _dragCurrentOffset ?? _dragStartOffset!;
+              final start = _normalizedVideoPoint(
+                _dragStartOffset!,
+                Size(width, height),
+              );
+              final end = _normalizedVideoPoint(
+                currentPointer,
+                Size(width, height),
+              );
+              _dragStartOffset = null;
+              _dragCurrentOffset = null;
+              if (start == null || end == null) return;
 
               _dispatchInput(
                 eventType: 'drag',
-                x: startX,
-                y: startY,
-                endX: endX,
-                endY: endY,
+                x: start.dx,
+                y: start.dy,
+                endX: end.dx,
+                endY: end.dy,
                 durationMs: 300,
               );
             }
           },
           onLongPressStart: (details) {
             if (!widget.allowRemoteControl) return;
-            final x = details.localPosition.dx / width;
-            final y = details.localPosition.dy / height;
+            final point = _normalizedVideoPoint(
+              details.localPosition,
+              Size(width, height),
+            );
+            if (point == null) return;
             _dispatchInput(
               eventType: 'long_press',
-              x: x,
-              y: y,
+              x: point.dx,
+              y: point.dy,
               durationMs: 600,
             );
           },
@@ -149,10 +216,13 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
               fit: StackFit.expand,
               children: [
                 // Live remote screen stream (WebRTC), fallback placeholder.
-                if (_attachedStream != null && _rendererInitialized)
+                if (_attachedStream != null &&
+                    _rendererInitialized &&
+                    _renderer.renderVideo)
                   RTCVideoView(
                     _renderer,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
+                    objectFit:
+                        RTCVideoViewObjectFit.RTCVideoViewObjectFitContain,
                   )
                 else
                   Center(
@@ -166,9 +236,9 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                         ),
                         child: Center(
                           child: Text(
-                            widget.isScreenSharing
-                                ? 'Mobile WebRTC Remote Viewport Active'
-                                : 'Waiting for screen stream...',
+                            _attachedStream != null
+                                ? 'Connecting to the remote screen…'
+                                : 'Waiting for the other device to share…',
                             style: const TextStyle(
                               color: AppTheme.textSecondary,
                               fontSize: 12,
@@ -187,7 +257,11 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: const [
-                          Icon(Icons.lock, color: AppTheme.accentAmber, size: 48),
+                          Icon(
+                            Icons.lock,
+                            color: AppTheme.accentAmber,
+                            size: 48,
+                          ),
                           SizedBox(height: 12),
                           Text(
                             'Sensitive Content Protected',
@@ -200,7 +274,10 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                           SizedBox(height: 6),
                           Text(
                             'The remote screen opened a FLAG_SECURE window',
-                            style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                            style: TextStyle(
+                              color: AppTheme.textSecondary,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ),
