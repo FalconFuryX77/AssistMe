@@ -174,27 +174,37 @@ class AssistMeAnnotationOverlayService : Service() {
 
         drawButton = Button(this).apply {
             text = "DRAW"
+            textSize = 13f
+            setPadding(18, 8, 18, 8)
             setOnClickListener { setDrawingEnabled(!drawingEnabled) }
         }
         inner.addView(drawButton)
 
         penButton = Button(this).apply {
             text = "✏️"
+            textSize = 16f
+            setPadding(14, 8, 14, 8)
             setOnClickListener { setTool("pen") }
+            setOnLongClickListener { showColorPicker(); true }
         }
         eraserButton = Button(this).apply {
             text = "⌫"
+            textSize = 16f
+            setPadding(14, 8, 14, 8)
             setOnClickListener { setTool("eraser") }
+            setOnLongClickListener { showWidthPicker(); true }
         }
         inner.addView(penButton)
         inner.addView(eraserButton)
         updateToolUI()
 
-        // Color dropdown – single button opening palette dialog (like helper's tune)
+        // Color dropdown – single button opening palette dialog (like helper's tune) – larger touch target
         colorButton = Button(this).apply {
             text = "●"
+            textSize = 18f
             setTextColor(selectedColor)
             setBackgroundColor(Color.argb(60, 255,255,255))
+            setPadding(14, 8, 14, 8)
             setOnClickListener { showColorPicker() }
         }
         inner.addView(colorButton)
@@ -202,17 +212,23 @@ class AssistMeAnnotationOverlayService : Service() {
         // Width button
         inner.addView(Button(this).apply {
             text = "W${selectedWidth.toInt()}"
+            textSize = 13f
+            setPadding(14, 8, 14, 8)
             setOnClickListener { showWidthPicker() }
         })
 
         inner.addView(Button(this).apply {
             text = "↺"
+            textSize = 14f
+            setPadding(14, 8, 14, 8)
             setOnClickListener {
                 AssistMeNativeBridge.channel?.invokeMethod("undo", null)
             }
         })
         inner.addView(Button(this).apply {
             text = "↻"
+            textSize = 14f
+            setPadding(14, 8, 14, 8)
             setOnClickListener {
                 AssistMeNativeBridge.channel?.invokeMethod("redo", null)
             }
@@ -220,6 +236,8 @@ class AssistMeAnnotationOverlayService : Service() {
         // Clear – icon ensures text always visible
         inner.addView(Button(this).apply {
             text = "🗑"
+            textSize = 14f
+            setPadding(14, 8, 14, 8)
             setOnClickListener {
                 clearStrokes()
                 AssistMeNativeBridge.channel?.invokeMethod("clear", null)

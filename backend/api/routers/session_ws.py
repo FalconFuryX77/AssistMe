@@ -351,6 +351,20 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 await _broadcast(session_id, payload, exclude_user=user.id)
 
             elif msg_type == "remote_control_input":
+                # Block helper from tapping helpee's panic/STOP controls (top ~8% of screen where
+                # AssistMeAnnotationOverlayService places its dock). Control must stay with old man.
+                try:
+                    raw = msg.get("event") or {}
+                    ny = raw.get("normalized_y")
+                    ny_end = raw.get("normalized_end_y")
+                    if isinstance(ny, (int, float)) and 0 <= ny < 0.08:
+                        await websocket.send_json({"type": "error", "detail": "Control blocked: helpee controls area"})
+                        continue
+                    if isinstance(ny_end, (int, float)) and 0 <= ny_end < 0.08:
+                        await websocket.send_json({"type": "error", "detail": "Control blocked: helpee controls area"})
+                        continue
+                except Exception:
+                    pass
                 # The WebSocket is a transport optimization, not a second
                 # authorization path. Apply the same active-session,
                 # helper-role, and helpee-granted checks as REST input.

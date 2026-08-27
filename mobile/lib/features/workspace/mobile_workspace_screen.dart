@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background/flutter_background.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
@@ -34,7 +35,7 @@ class MobileWorkspaceScreen extends StatefulWidget {
   State<MobileWorkspaceScreen> createState() => _MobileWorkspaceScreenState();
 }
 
-class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
+class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with WidgetsBindingObserver {
   final _flowCoordinatorKey = GlobalKey<AssistanceFlowCoordinatorState>();
 
   // Live remote media stream, published by the flow coordinator's WebRTC
@@ -55,6 +56,42 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
     offset.dx.clamp(-180.0, 180.0).toDouble(),
     offset.dy.clamp(-320.0, 320.0).toDouble(),
   );
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _enableKeepAlive();
+  }
+
+  Future<void> _enableKeepAlive() async {
+    try {
+      if (!FlutterBackground.isBackgroundExecutionEnabled) {
+        const cfg = FlutterBackgroundAndroidConfig(
+          notificationTitle: 'AssistMe active',
+          notificationText: 'Help session keeps running when screen is off',
+          notificationImportance: AndroidNotificationImportance.normal,
+          notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+        );
+        final ok = await FlutterBackground.initialize(androidConfig: cfg);
+        if (ok) await FlutterBackground.enableBackgroundExecution();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _disableKeepAlive() async {
+    try {
+      if (FlutterBackground.isBackgroundExecutionEnabled) {
+        await FlutterBackground.disableBackgroundExecution();
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Screen off -> paused/inactive should NOT disconnect. Keep WebSocket alive via foreground service.
+    // No action needed - foreground service keeps process alive. Just log.
+  }
 
   Future<void> _handleLeaveSession() async {
     if (_leaving) return;
@@ -350,6 +387,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _disableKeepAlive();
     _remoteStreamNotifier.dispose();
     _remoteControlNotifier.dispose();
     _annotationModeNotifier.dispose();

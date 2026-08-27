@@ -59,6 +59,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _incomingDialogOpen = false;
   Map<String, dynamic>? _activeSession;
 
+  // Inline code handling for first-screen (I need help / I'm helping)
+  String? _myCode;
+  String? _myPairingId;
+  bool _generatingCode = false;
+  Timer? _codePollTimer;
+  final TextEditingController _codeInputController = TextEditingController();
+  bool _submittingCode = false;
+
   bool get _isBusy =>
       _ringingRequestId != null ||
       _showRingPopup ||
@@ -142,6 +150,161 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (_) {
       /* offline: lists stay empty */
+    }
+  }
+
+  Future<void> _generateMyCode() async {
+    if (_generatingCode) return;
+    setState(() => _generatingCode = true);
+    try {
+      final resp = await widget.apiClient.generateSetupCode();
+      if (resp.statusCode == 201) {
+        final data = jsonDecode(resp.body);
+        setState(() {
+          _myCode = data['setup_code'] as String?;
+          _myPairingId = data['pairing_id'] as String?;
+        });
+        _startCodePolling();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_responseDetail(resp.body, fallback: 'Could not create code'))),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Network error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _generatingCode = false);
+    }
+  }
+
+  void _startCodePolling() {
+    _codePollTimer?.cancel();
+    _codePollTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
+      if (_myPairingId == null || !mounted) return;
+      try {
+        final resp = await widget.apiClient.listPendingPairings();
+        if (resp.statusCode != 200) return;
+        final data = jsonDecode(resp.body);
+        final pairings = List<Map<String, dynamic>>.from(data['pairings']);
+        final pairing = pairings.firstWhere((p) => p['pairing_id'] == _myPairingId, orElse: () => {});
+        if (pairing.isEmpty) return;
+        final friendlyName = pairing['friendly_name']?.toString() ?? 'this person';
+        if (!mounted) return;
+        _codePollTimer?.cancel();
+        final allow = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppTheme.bgSecondary,
+            title: const Text('Someone wants to help you'),
+            content: Text('$friendlyName wants to be able to help you when you ask. Do you allow this?', style: const TextStyle(color: AppTheme.textSecondary)),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('No')),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Allow')),
+            ],
+          ),
+        );
+        if (allow == true) {
+          final approveResp = await widget.apiClient.approvePairing(_myPairingId!);
+          if (approveResp.statusCode == 200) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Done! This person can now help you.'), backgroundColor: AppTheme.accentEmerald));
+              setState(() {
+                _myCode = null;
+                _myPairingId = null;
+              });
+              _loadLists();
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not approve: ${_responseDetail(approveResp.body, fallback: 'Failed')}')));
+            }
+            _startCodePolling();
+          }
+        } else {
+          _startCodePolling();
+        }
+      } catch (_) {}
+    });
+  }
+
+  Future<void> _submitCode() async {
+    final code = _codeInputController.text.trim();
+    if (code.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter the 6-digit code')));
+      return;
+    }
+    setState(() => _submittingCode = true);
+    try {
+      final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+      final storedName = (await widget.secureStorage.getDisplayName())?.trim();
+      final resp = await widget.apiClient.claimSetupCode(
+        setupCode: code,
+        deviceFingerprint: fingerprint,
+        friendlyName: storedName == null || storedName.isEmpty ? 'Helper' : storedName,
+        devicePlatform: 'android',
+      );
+      if (resp.statusCode == 200) {
+        if (!mounted) return;
+        _codeInputController.clear();
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppTheme.bgSecondary,
+            title: const Text('Request sent'),
+            content: const Text('The person you want to help has been notified. They just need to tap Allow on their phone. Once approved, this device can help them.', style: TextStyle(color: AppTheme.textSecondary)),
+            actions: [ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Got it'))],
+          ),
+        );
+        _loadLists();
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not send request: ${_responseDetail(resp.body, fallback: 'Failed')}')));
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Network error: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _submittingCode = false);
+    }
+  }
+
+  Future<void> _removeHelping(Map<String, dynamic> entry) async {
+    final name = entry['owner_display_name']?.toString() ?? 'Someone';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Remove from list?'),
+        content: Text('Remove $name from people you help? They will not be notified, just cleaned up for you.', style: const TextStyle(color: AppTheme.textSecondary)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    // The backend currently only allows owner to delete, so we try both: if helper is owner of the trusted entry, it will be deleted via the same endpoint.
+    // For now, we attempt to delete via the trusted entry id; if 403, we just remove locally for UI cleanup.
+    final id = entry['id']?.toString() ?? entry['device_id']?.toString();
+    if (id != null) {
+      try {
+        final resp = await widget.apiClient.revokeDevice(id);
+        if (resp.statusCode == 204 || resp.statusCode == 200) {
+          _loadLists();
+          return;
+        }
+      } catch (_) {}
+    }
+    // Fallback: just remove from local list for UI cleanup without notifying
+    setState(() => _iHelp.removeWhere((e) => e['id'] == entry['id']));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Removed $name from your list (local cleanup)')));
     }
   }
 
@@ -680,84 +843,97 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _needHelpTab() {
-    if (_myHelpers.isEmpty) {
-      return _emptyState(
-        icon: Icons.person_add_alt_1,
-        text:
-            'No trusted helpers yet.\nOpen "Trusted people" to add someone — '
-            'they just type your code once.',
-      );
-    }
     return RefreshIndicator(
       onRefresh: _loadLists,
-      child: ListView.separated(
+      child: ListView(
         padding: const EdgeInsets.all(20),
-        itemCount: _myHelpers.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 14),
-        itemBuilder: (ctx, i) {
-          final d = _myHelpers[i];
-          final name =
-              (d['helper_display_name'] as String?) ??
-              (d['friendly_name'] as String?) ??
-              'Helper';
-          final tag = d['device_tag']?.toString();
-          final platform = d['device_platform']?.toString();
-          final identity = [
-            if (platform != null && platform.isNotEmpty) platform,
-            if (tag != null && tag.isNotEmpty) '#$tag',
-          ].join(' · ');
-          return SizedBox(
-            height: 84,
-            child: ElevatedButton.icon(
-              onPressed: _isBusy ? null : () => _ringHelper(d),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.bgSecondary,
-                foregroundColor: AppTheme.textPrimary,
-                elevation: 0,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  side: BorderSide(
-                    color: AppTheme.accentEmerald.withOpacity(0.5),
-                  ),
-                ),
-                alignment: Alignment.centerLeft,
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-              ),
-              icon: CircleAvatar(
-                backgroundColor: AppTheme.accentEmerald,
-                child: Text(
-                  name.isNotEmpty ? name[0].toUpperCase() : '?',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-              label: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w700,
+        children: [
+          // Inline Show my code (was separate Trusted people screen)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppTheme.bgSecondary,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppTheme.borderGlass),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Your code', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text('Show this to your helper. They enter it in their I am helping tab.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                const SizedBox(height: 12),
+                if (_myCode != null) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.bgPrimary,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppTheme.accentPrimary, width: 2),
                     ),
+                    child: Text(_myCode!, textAlign: TextAlign.center, style: const TextStyle(fontSize: 36, letterSpacing: 8, fontWeight: FontWeight.w800, color: AppTheme.accentPrimary)),
                   ),
-                  Text(
-                    identity.isEmpty
-                        ? 'Tap to ask for help'
-                        : 'Tap to ask for help · $identity',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
+                  const SizedBox(height: 8),
+                  const Text('Waiting for them to enter it… Tap Allow when asked.', textAlign: TextAlign.center, style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  OutlinedButton(onPressed: () => setState(() { _myCode = null; _myPairingId = null; _codePollTimer?.cancel(); }), child: const Text('Hide code')),
+                ] else ...[
+                  ElevatedButton.icon(
+                    icon: _generatingCode ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.qr_code),
+                    label: Text(_generatingCode ? 'Creating...' : 'Show my code'),
+                    style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentEmerald, foregroundColor: Colors.white),
+                    onPressed: _generatingCode ? null : _generateMyCode,
                   ),
                 ],
-              ),
+              ],
             ),
-          );
-        },
+          ),
+          const SizedBox(height: 16),
+          if (_myHelpers.isEmpty)
+            _emptyState(
+              icon: Icons.person_add_alt_1,
+              text: 'No trusted helpers yet. Show your code above and have your helper enter it in their I am helping tab.',
+            )
+          else ...[
+            const Text('Tap a trusted helper to ask for help', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 10),
+            ..._myHelpers.map((d) {
+              final name = (d['helper_display_name'] as String?) ?? (d['friendly_name'] as String?) ?? 'Helper';
+              final tag = d['device_tag']?.toString();
+              final platform = d['device_platform']?.toString();
+              final identity = [if (platform != null && platform.isNotEmpty) platform, if (tag != null && tag.isNotEmpty) '#$tag'].join(' · ');
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: SizedBox(
+                  height: 84,
+                  child: ElevatedButton.icon(
+                    onPressed: _isBusy ? null : () => _ringHelper(d),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.bgSecondary,
+                      foregroundColor: AppTheme.textPrimary,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: AppTheme.accentEmerald.withOpacity(0.5))),
+                      alignment: Alignment.centerLeft,
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                    ),
+                    icon: CircleAvatar(
+                      backgroundColor: AppTheme.accentEmerald,
+                      child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800)),
+                    ),
+                    label: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w700)),
+                        Text(identity.isEmpty ? 'Tap to ask for help' : 'Tap to ask for help · $identity', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ],
+        ],
       ),
     );
   }
@@ -825,66 +1001,77 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _helpingTab() {
-    if (_iHelp.isEmpty) {
-      return _emptyState(
-        icon: Icons.favorite_border,
-        text:
-            'You are not set up as a helper yet.\nAsk your family member to '
-            'show you their code, then add it under "Trusted people".',
-      );
-    }
     return RefreshIndicator(
       onRefresh: _loadLists,
-      child: ListView.separated(
+      child: ListView(
         padding: const EdgeInsets.all(20),
-        itemCount: _iHelp.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
-        itemBuilder: (ctx, i) {
-          final e = _iHelp[i];
-          final name = (e['owner_display_name'] as String?) ?? 'Someone';
-          return Container(
-            padding: const EdgeInsets.all(16),
+        children: [
+          Container(
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: AppTheme.bgSecondary,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppTheme.borderGlass),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                CircleAvatar(
-                  backgroundColor: AppTheme.accentPrimary,
-                  child: Text(
-                    name.isNotEmpty ? name[0].toUpperCase() : '?',
-                    style: const TextStyle(color: Colors.white),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textPrimary,
-                        ),
+                const Text('Add someone you help', style: TextStyle(color: AppTheme.textPrimary, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 6),
+                const Text('Ask them to show their code in their I need help tab and enter it here.', style: TextStyle(color: AppTheme.textSecondary, fontSize: 12)),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _codeInputController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(letterSpacing: 6, fontSize: 18, fontWeight: FontWeight.w700, color: AppTheme.textPrimary),
+                        decoration: const InputDecoration(hintText: '6-digit code', border: OutlineInputBorder()),
+                        maxLength: 6,
                       ),
-                      Text(
-                        'They can ring you any time',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: _submittingCode ? null : _submitCode,
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentPrimary, foregroundColor: Colors.white),
+                      child: _submittingCode ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Add'),
+                    ),
+                  ],
                 ),
               ],
             ),
-          );
-        },
+          ),
+          const SizedBox(height: 16),
+          if (_iHelp.isEmpty)
+            _emptyState(icon: Icons.favorite_border, text: 'No one yet. Add them with the code above.')
+          else ...[
+            const Text('People you help', style: TextStyle(color: AppTheme.textSecondary, fontSize: 13, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            ..._iHelp.map((e) {
+              final name = (e['owner_display_name'] as String?) ?? 'Someone';
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(color: AppTheme.bgSecondary, borderRadius: BorderRadius.circular(14), border: Border.all(color: AppTheme.borderGlass)),
+                child: Row(
+                  children: [
+                    CircleAvatar(backgroundColor: AppTheme.accentPrimary, child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: const TextStyle(color: Colors.white))),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppTheme.textPrimary)),
+                        const Text('They can ring you any time', style: TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                      ]),
+                    ),
+                    IconButton(icon: const Icon(Icons.delete_outline, color: AppTheme.accentRose), tooltip: 'Remove', onPressed: () => _removeHelping(e)),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ],
       ),
     );
   }
@@ -1040,6 +1227,8 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _ringStatusTimer?.cancel();
+    _codePollTimer?.cancel();
+    _codeInputController.dispose();
     _channelSub?.cancel();
     _channel?.dispose();
     super.dispose();
