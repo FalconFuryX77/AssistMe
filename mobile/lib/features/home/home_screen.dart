@@ -63,7 +63,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _ringingRequestId != null ||
       _showRingPopup ||
       _incomingCall != null ||
-      _incomingDialogOpen;
+      _incomingDialogOpen ||
+      _activeSession != null;
 
   @override
   void initState() {
@@ -247,6 +248,15 @@ class _HomeScreenState extends State<HomeScreen> {
   // -------------------------------------------------------------------------
 
   Future<void> _ringHelper(Map<String, dynamic> device) async {
+    // Prevent nested sessions – if already in a live help session, don't start another.
+    if (_activeSession != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You are already in a help session. Leave it first.')),
+        );
+      }
+      return;
+    }
     if (_isBusy) return;
 
     final message = await _askForMessage(device);

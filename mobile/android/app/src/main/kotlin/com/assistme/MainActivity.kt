@@ -2,12 +2,14 @@ package com.assistme
 
 import android.content.ComponentName
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import com.assistme.service.AssistMeAccessibilityService
 import com.assistme.service.AssistMeAnnotationOverlayService
+import com.assistme.service.AssistMeMediaProjectionService
 
 object AssistMeNativeBridge {
     var channel: MethodChannel? = null
@@ -71,6 +73,37 @@ class MainActivity : FlutterActivity() {
                 "stop" -> {
                     AssistMeAnnotationOverlayService.stop(this)
                     result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        val mediaProjectionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.assistme/media_projection"
+        )
+        mediaProjectionChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startForeground" -> {
+                    try {
+                        val intent = Intent(this, AssistMeMediaProjectionService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("START_FAILED", e.message, null)
+                    }
+                }
+                "stopForeground" -> {
+                    try {
+                        stopService(Intent(this, AssistMeMediaProjectionService::class.java))
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.error("STOP_FAILED", e.message, null)
+                    }
                 }
                 else -> result.notImplemented()
             }

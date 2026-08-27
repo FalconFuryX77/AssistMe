@@ -1216,12 +1216,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Helpee manual start button when auto-start missed
-        if (widget.isHelpee && _mediaReady && !_screenShareStarted)
-          Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
+        // Helpee permanent Start Sharing – always visible until sharing succeeds, never hidden behind banner.
+        // Banner is at top 12, so button is centered to avoid overlap. Disabled when media not ready.
+        if (widget.isHelpee && !_screenShareStarted)
+          Positioned.fill(
             child: Center(
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.screen_share),
@@ -1241,11 +1239,15 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             ),
           ),
 
-        // Drawing overlay (renders guidance strokes on top of the viewport)
-        if (_strokes.isNotEmpty || _draftStroke != null)
+        // Drawing overlay – for helper, only show the in-progress draft for low-latency
+        // feedback. Completed strokes are already visible via the helpee's captured
+        // overlay video (now not FLAG_SECURE so screenshots work), so showing them
+        // again here would duplicate. For helpee, no Flutter overlay needed – native
+        // canvas shows everything.
+        if (!widget.isHelpee && _draftStroke != null)
           Positioned.fill(
             child: DrawingOverlay(
-              strokes: [..._strokes, if (_draftStroke != null) _draftStroke!],
+              strokes: [_draftStroke!],
               contentAspectRatio: 9 / 16,
             ),
           ),

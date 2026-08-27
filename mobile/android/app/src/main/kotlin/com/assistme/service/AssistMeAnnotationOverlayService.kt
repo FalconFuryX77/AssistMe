@@ -346,7 +346,6 @@ class AssistMeAnnotationOverlayService : Service() {
     private fun canvasFlags(): Int = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
         WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-        WindowManager.LayoutParams.FLAG_SECURE or
         (if (!drawingEnabled) WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE else 0)
 
     private fun canvasLayout() = WindowManager.LayoutParams(
@@ -362,10 +361,7 @@ class AssistMeAnnotationOverlayService : Service() {
         WindowManager.LayoutParams.WRAP_CONTENT,
         overlayType(),
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-            // Keep helpee-only controls out of the helper's MediaProjection
-            // view.  They remain visible and touchable on the helpee phone.
-            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
         PixelFormat.TRANSLUCENT
     ).apply {
         gravity = Gravity.TOP or Gravity.START

@@ -11,6 +11,7 @@
 ///    `signal_answer`, `signal_ice_candidate`).
 library;
 
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter_background/flutter_background.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -24,6 +25,7 @@ enum WebRTCEngineState {
 }
 
 class WebRTCEngine {
+  static const _mediaProjectionChannel = MethodChannel('com.assistme/media_projection');
   WebRTCEngineState _state = WebRTCEngineState.uninitialized;
   bool _isScreenSharing = false;
   bool _isAudioMuted = false;
@@ -166,61 +168,76 @@ class WebRTCEngine {
     }
     await _ensurePermissions();
 
-    // Android requires a foreground execution grant while MediaProjection is
-    // active. Without this, newer Samsung/Android builds can terminate the
-    // app immediately after the user approves the system capture dialog.
-    if (WebRTC.platformIsAndroid &&
-        !FlutterBackground.isBackgroundExecutionEnabled) {
-      const config = FlutterBackgroundAndroidConfig(
-        notificationTitle: 'AssistMe screen sharing',
-        notificationText: 'Your screen is being shared with your helper.',
-        notificationImportance: AndroidNotificationImportance.normal,
-        notificationIcon: AndroidResource(
-          name: 'ic_launcher',
-          defType: 'mipmap',
-        ),
-      );
-      final initialized = await FlutterBackground.initialize(
-        androidConfig: config,
-      );
-      if (!initialized) {
-        throw StateError('Android could not prepare screen sharing');
+    // Android requires a foreground service of type mediaProjection while capturing.
+    // On Android 14+ getDisplayMedia will throw
+    // "Media projections require a foreground service of type MEDIA_PROJECTION"
+    // if no such service is active. We use FlutterBackground for the main
+    // keep-alive, but also start our own AssistMeMediaProjectionService as
+    // fallback with the correct type.
+    Future<void> ensureForeground() async {
+      try {
+        await _mediaProjectionChannel.invokeMethod('startForeground');
+      } catch (_) {}
+      // Also ensure FlutterBackground is enabled as secondary keep-alive
+      if (WebRTC.platformIsAndroid && !FlutterBackground.isBackgroundExecutionEnabled) {
+        try {
+          const config = FlutterBackgroundAndroidConfig(
+            notificationTitle: 'AssistMe screen sharing',
+            notificationText: 'Your screen is being shared with your helper.',
+            notificationImportance: AndroidNotificationImportance.normal,
+            notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
+          );
+          await FlutterBackground.initialize(androidConfig: config);
+          await FlutterBackground.enableBackgroundExecution();
+          _backgroundServiceActive = true;
+        } catch (_) {}
       }
-
-      // Android 14+ requires the user to grant MediaProjection before a
-      // mediaProjection foreground service is started. Calling
-      // enableBackgroundExecution() first is exactly what made the old flow
-      // crash after the system consent sheet was accepted. flutter_webrtc
-      // stores this consent result, so the service can be started safely
-      // between the permission step and getDisplayMedia().
-      final granted = await Helper.requestCapturePermission(
-        fullScreenOnly: true,
-      );
-      if (!granted) {
-        throw StateError('Screen capture permission was not granted');
-      }
-
-      final enabled = await FlutterBackground.enableBackgroundExecution();
-      if (!enabled) {
-        throw StateError(
-          'Android could not start the screen-sharing foreground service',
-        );
-      }
-      _backgroundServiceActive = true;
     }
 
-    final screen = await navigator.mediaDevices.getDisplayMedia({
-      // A bounded capture profile keeps guidance responsive on mobile data.
-      // The renderer still scales this to the full helper viewport.
-      'video': {
-        'width': {'ideal': 720, 'max': 1080},
-        'height': {'ideal': 1280, 'max': 1920},
-        'frameRate': {'ideal': 15, 'max': 24},
-      },
-      // System/internal audio capture is only reliable on Android 10+ and is
-      // not needed while the mic carries the elderly person's voice.
-      'audio': false,
-    });
+    bool captureGranted = false;
+    if (WebRTC.platformIsAndroid) {
+      // Request system MediaProjection permission first (stores consent)
+      captureGranted = await Helper.requestCapturePermission(fullScreenOnly: true);
+      if (!captureGranted) {
+        throw StateError('Screen capture permission was not granted');
+      }
+      // Now start foreground service(s) BEFORE getDisplayMedia (Android 14 requirement)
+      await ensureForeground();
+      // Small delay to let service enter foreground
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    } else {
+      await _ensurePermissions();
+    }
+
+    MediaStream? screen;
+    try {
+      screen = await navigator.mediaDevices.getDisplayMedia({
+        'video': {
+          'width': {'ideal': 720, 'max': 1080},
+          'height': {'ideal': 1280, 'max': 1920},
+          'frameRate': {'ideal': 15, 'max': 24},
+        },
+        'audio': false,
+      });
+    } catch (e) {
+      // Android 14 foreground service race – retry once after ensuring service
+      final msg = e.toString();
+      if (msg.contains('FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION') || msg.contains('getDisplayMedia')) {
+        await ensureForeground();
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+        screen = await navigator.mediaDevices.getDisplayMedia({
+          'video': {
+            'width': {'ideal': 720, 'max': 1080},
+            'height': {'ideal': 1280, 'max': 1920},
+            'frameRate': {'ideal': 15, 'max': 24},
+          },
+          'audio': false,
+        });
+      } else {
+        rethrow;
+      }
+    }
+    if (screen == null) throw StateError('Failed to obtain display media');
     _screenStream = screen;
 
     for (final track in screen.getVideoTracks()) {
@@ -288,9 +305,10 @@ class WebRTCEngine {
     }
     _isScreenSharing = false;
     if (WebRTC.platformIsAndroid && _backgroundServiceActive) {
-      await FlutterBackground.disableBackgroundExecution();
+      try { await FlutterBackground.disableBackgroundExecution(); } catch (_) {}
       _backgroundServiceActive = false;
     }
+    try { await _mediaProjectionChannel.invokeMethod('stopForeground'); } catch (_) {}
   }
 
   Future<void> toggleAudioMute(bool mute) async {

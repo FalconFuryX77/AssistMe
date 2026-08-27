@@ -125,34 +125,43 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          // Remote Screen Viewport – bounded, not fullscreen
-                          ValueListenableBuilder<bool>(
-                            valueListenable: _remoteControlNotifier,
-                            builder: (context, allowRemoteControl, _) =>
-                                ValueListenableBuilder<bool>(
-                                  valueListenable: _annotationModeNotifier,
-                                  builder: (context, annotationMode, _) => RemoteScreenView(
-                                    sessionId: widget.sessionId,
-                                    apiClient: widget.apiClient,
-                                    remoteStreamNotifier: _remoteStreamNotifier,
-                                    allowRemoteControl:
-                                        allowRemoteControl &&
-                                        !annotationMode &&
-                                        !widget.isHelpee,
-                                    onRemoteInput: (event) {
-                                      _flowCoordinatorKey.currentState?.sendRemoteInput(
-                                        event,
-                                      );
-                                    },
+                          // Remote viewport is ONLY for helper (who views helpee screen).
+                          // Helpee sees their own sharing status, not a remote video placeholder.
+                          if (!widget.isHelpee)
+                            ValueListenableBuilder<bool>(
+                              valueListenable: _remoteControlNotifier,
+                              builder: (context, allowRemoteControl, _) =>
+                                  ValueListenableBuilder<bool>(
+                                    valueListenable: _annotationModeNotifier,
+                                    builder: (context, annotationMode, _) => RemoteScreenView(
+                                      sessionId: widget.sessionId,
+                                      apiClient: widget.apiClient,
+                                      remoteStreamNotifier: _remoteStreamNotifier,
+                                      allowRemoteControl:
+                                          allowRemoteControl &&
+                                          !annotationMode &&
+                                          !widget.isHelpee,
+                                      onRemoteInput: (event) {
+                                        _flowCoordinatorKey.currentState?.sendRemoteInput(
+                                          event,
+                                        );
+                                      },
+                                    ),
                                   ),
+                            )
+                          else
+                            // Helpee: show sharing status, not remote video. The banner + permanent Start Sharing button are provided by coordinator.
+                            Container(
+                              color: AppTheme.bgPrimary,
+                              child: Center(
+                                child: ValueListenableBuilder<dynamic>(
+                                  valueListenable: _remoteStreamNotifier,
+                                  builder: (context, stream, _) => _helpeeSharingPlaceholder(stream != null),
                                 ),
-                          ),
+                              ),
+                            ),
 
-                          // Assistance flow coordinator – its Stack is now
-                          // constrained to this bounded viewport, so drawing
-                          // coordinates map exactly to the video rect (no
-                          // full-screen mismatch). Coordinator still owns
-                          // realtime + popups + overlay routing.
+                          // Assistance flow coordinator – constrained to this viewport.
                           Positioned.fill(
                             child: AssistanceFlowCoordinator(
                               key: _flowCoordinatorKey,
@@ -174,13 +183,12 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
                           // It now lives in the bottom bar near Request control (see _helperAnnotationRow).
                           // Only the annotation dock (pen/eraser/color) remains floating.
 
-                          // Status banner for helpee – always visible, never
-                          // obscurable by drawing per VISION §6.
+                          // Status banner for helpee – positioned below Start Sharing button to avoid overlap.
                           if (widget.isHelpee)
                             Positioned(
-                              top: 8,
-                              left: 8,
-                              right: 8,
+                              top: 12,
+                              left: 12,
+                              right: 12,
                               child: ValueListenableBuilder<dynamic>(
                                 valueListenable: _remoteStreamNotifier,
                                 builder: (context, stream, _) => _helpeeStatusBanner(stream != null),
@@ -250,6 +258,33 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> {
               style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _helpeeSharingPlaceholder(bool sharing) {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(sharing ? Icons.check_circle : Icons.screen_share, size: 48, color: sharing ? AppTheme.accentEmerald : AppTheme.textSecondary),
+          const SizedBox(height: 16),
+          Text(
+            sharing ? 'Your screen is live' : 'Ready to help',
+            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            sharing
+                ? 'Helper can see your screen and guide you. Use the overlay DRAW to annotate, STOP to end.'
+                : 'Tap the green Start Sharing button below to begin. You will be asked to allow screen capture.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+          ),
+          const SizedBox(height: 16),
+          // Permanent Start Sharing button is provided by coordinator when needed – this placeholder just explains.
         ],
       ),
     );
