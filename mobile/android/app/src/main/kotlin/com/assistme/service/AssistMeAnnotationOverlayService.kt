@@ -183,15 +183,7 @@ class AssistMeAnnotationOverlayService : Service() {
             setOnClickListener { setTool("pen") }
         }
         eraserButton = Button(this).apply {
-            text = ""
-            // Use the provided eraser PNG (white outline) as drawable – matches helper
-            try {
-                val d = resources.getDrawable(R.drawable.eraser, null)
-                setCompoundDrawablesWithIntrinsicBounds(d, null, null, null)
-                compoundDrawablePadding = 0
-            } catch (_: Exception) {
-                text = "Eraser"
-            }
+            text = "⌫"
             setOnClickListener { setTool("eraser") }
         }
         inner.addView(penButton)

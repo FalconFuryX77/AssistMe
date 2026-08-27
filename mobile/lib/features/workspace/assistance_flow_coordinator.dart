@@ -1362,14 +1362,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               color: _annotationTool == AnnotationTool.eraser
                   ? AppTheme.accentRose
                   : AppTheme.textSecondary,
-              icon: Image.asset(
-                'assets/icons/eraser.png',
-                width: 22,
-                height: 22,
-                color: _annotationTool == AnnotationTool.eraser
-                    ? AppTheme.accentRose
-                    : AppTheme.textSecondary,
-              ),
+              icon: const Icon(Icons.auto_fix_normal),
               onPressed: () => _selectAnnotationTool(AnnotationTool.eraser),
             ),
             IconButton(

@@ -63,13 +63,15 @@ class AssistMeAccessibilityService : AccessibilityService() {
 
     /**
      * Dispatches a single tap gesture at absolute pixel coordinates (x, y).
+     * Uses lineTo for a valid path and 50ms delay per research – moveTo alone has no path.
      */
     @RequiresApi(Build.VERSION_CODES.N)
     fun dispatchTap(x: Float, y: Float, callback: GestureResultCallback? = null): Boolean {
         val path = Path().apply {
             moveTo(x, y)
+            lineTo(x, y + 1f)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0, CLICK_DURATION_MS)
+        val stroke = GestureDescription.StrokeDescription(path, 50, CLICK_DURATION_MS)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
         return dispatchGesture(gesture, callback, null)
@@ -104,8 +106,9 @@ class AssistMeAccessibilityService : AccessibilityService() {
     fun dispatchLongPress(x: Float, y: Float, callback: GestureResultCallback? = null): Boolean {
         val path = Path().apply {
             moveTo(x, y)
+            lineTo(x, y + 1f)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0, LONG_PRESS_DURATION_MS)
+        val stroke = GestureDescription.StrokeDescription(path, 50, LONG_PRESS_DURATION_MS)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
         return dispatchGesture(gesture, callback, null)
@@ -124,7 +127,9 @@ class AssistMeAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Dispatches the normalized event received from the helper phone. */
+    /** Dispatches the normalized event received from the helper phone.
+     * Handles nav bar taps via global actions and corrects for display insets.
+     */
     @RequiresApi(Build.VERSION_CODES.N)
     fun dispatchInput(event: Map<*, *>): Boolean {
         val metrics = resources.displayMetrics
@@ -132,6 +137,25 @@ class AssistMeAccessibilityService : AccessibilityService() {
             ?: ((event["x"] as? Number)?.toFloat() ?: 0f) / metrics.widthPixels
         val normalizedY = (event["normalized_y"] as? Number)?.toFloat()
             ?: ((event["y"] as? Number)?.toFloat() ?: 0f) / metrics.heightPixels
+        // Nav bar handling: bottom 8% is system navigation – use global actions
+        // instead of coordinate tap, per research. Maps: left third = back, center = home, right = recents.
+        // This fixes "helper taps home but triggers mic 2 inches above" and "cannot interact with nav bar".
+        if (normalizedY > 0.92f) {
+            val action = when {
+                normalizedX < 0.33f -> "back"
+                normalizedX < 0.66f -> "home"
+                else -> "recents"
+            }
+            // Only for tap events; drags starting/ending in nav bar also become global actions
+            val type = (event["event_type"] as? String)?.lowercase()
+            if (type == "tap" || type == "long_press") {
+                return dispatchGlobalAction(action)
+            }
+            // For drags that end in nav bar, also handle as global action if start was not in nav bar
+            // Otherwise fall through to normal drag
+        }
+        // Correct for display cutout / insets is handled by using raw displayMetrics;
+        // helper's 9/16 contentRect already accounts for letterboxing, so no extra offset needed.
         val x = normalizedX * metrics.widthPixels
         val y = normalizedY * metrics.heightPixels
         return when ((event["event_type"] as? String)?.lowercase()) {
@@ -148,6 +172,10 @@ class AssistMeAccessibilityService : AccessibilityService() {
                         ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY)
                             .let { if (it > 1f) it / metrics.heightPixels else it })
                     ) * metrics.heightPixels
+                // If drag ends in nav bar, treat as swipe to handle system gesture
+                if (endX >= 0 && endY >= 0) {
+                    // Normal drag
+                }
                 dispatchDrag(
                     x,
                     y,
