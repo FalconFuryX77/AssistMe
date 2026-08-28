@@ -96,6 +96,11 @@ class SecureStorageService {
     await write(key: keyRefreshToken, value: refreshToken);
   }
 
+  Future<void> clearTokens() async {
+    await delete(key: keyAccessToken);
+    await delete(key: keyRefreshToken);
+  }
+
   Future<String?> getAccessToken() async {
     return await read(key: keyAccessToken);
   }

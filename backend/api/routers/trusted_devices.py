@@ -87,9 +87,27 @@ async def list_pending_pairings(
         owner_user_id=current_user.id,
         db=db,
     )
+    res_pairings = []
+    for p in pairings:
+        helper = (
+            await db.get(User, p.claimed_by_user_id)
+            if p.claimed_by_user_id
+            else None
+        )
+        h_name = helper.display_name if helper else None
+        res_pairings.append(
+            PendingPairingResponse(
+                pairing_id=p.id,
+                device_fingerprint=p.device_fingerprint,
+                friendly_name=p.friendly_name or h_name,
+                device_platform=p.device_platform,
+                expires_at=p.expires_at,
+                created_at=p.created_at,
+            )
+        )
     return {
         "total": len(pairings),
-        "pairings": [PendingPairingResponse.from_pairing(p) for p in pairings],
+        "pairings": res_pairings,
     }
 
 

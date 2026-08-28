@@ -61,7 +61,12 @@ class ApiClient {
         },
         body: jsonEncode({'refresh_token': refreshToken}),
       );
-      if (resp.statusCode != 200) return false;
+      if (resp.statusCode != 200) {
+        if (resp.statusCode == 401 || resp.statusCode == 404) {
+          await secureStorage.clearTokens();
+        }
+        return false;
+      }
       final data = jsonDecode(resp.body);
       final access = data['access_token'];
       if (access is! String || access.isEmpty) return false;

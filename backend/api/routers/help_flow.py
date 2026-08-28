@@ -59,33 +59,55 @@ async def place_help_call(
     Idempotent while ringing: if a request for this pair is already pending,
     we return it instead of erroring — tapping again just keeps calling.
     """
-    # 1. Resolve the helper from MY trusted list (security gate).
+    # 1. Resolve the relationship from trusted list (security gate).
+    # Either current_user is the owner (helpee calling a helper), or helper calling an owner.
     result = await db.execute(
         select(TrustedDevice).where(
-            TrustedDevice.owner_user_id == current_user.id,
-            TrustedDevice.device_fingerprint == payload.helper_device_fingerprint,
+            (
+                (TrustedDevice.owner_user_id == current_user.id)
+                & (
+                    (TrustedDevice.device_fingerprint == payload.helper_device_fingerprint)
+                    | (TrustedDevice.helper_user_id == payload.helper_device_fingerprint)
+                    | (TrustedDevice.id == payload.helper_device_fingerprint)
+                )
+            )
+            | (
+                (TrustedDevice.helper_user_id == current_user.id)
+                & (
+                    (TrustedDevice.owner_user_id == payload.helper_device_fingerprint)
+                    | (TrustedDevice.device_fingerprint == payload.helper_device_fingerprint)
+                    | (TrustedDevice.id == payload.helper_device_fingerprint)
+                )
+            ),
             TrustedDevice.status == "accepted",
         )
     )
     trust = result.scalar_one_or_none()
-    if trust is None or not trust.helper_user_id:
+    if trust is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="That device is not in your trusted list",
         )
 
-    helper_user_id = trust.helper_user_id
+    if current_user.id == trust.owner_user_id:
+        helpee_id = current_user.id
+        helper_id = trust.helper_user_id or current_user.id
+        target_user_id = helper_id
+    else:
+        helpee_id = trust.owner_user_id
+        helper_id = current_user.id
+        target_user_id = helpee_id
 
     await SessionService.ensure_helper_available(
-        helpee_id=current_user.id,
-        helper_id=helper_user_id,
+        helpee_id=helpee_id,
+        helper_id=helper_id,
         db=db,
     )
 
     # 2. Find-or-create the pair session (no codes involved).
     session = await SessionService.get_or_create_pair_session(
-        helpee_id=current_user.id,
-        helper_id=helper_user_id,
+        helpee_id=helpee_id,
+        helper_id=helper_id,
         db=db,
     )
 
@@ -104,16 +126,16 @@ async def place_help_call(
         # 3b. Create the assistance request (reuses all security checks).
         request = await AssistanceRequestService.request_help(
             session_id=session.id,
-            helpee_user_id=current_user.id,
-            helper_user_id=helper_user_id,
-            helper_device_fingerprint=payload.helper_device_fingerprint,
+            helpee_user_id=helpee_id,
+            helper_user_id=helper_id,
+            helper_device_fingerprint=trust.device_fingerprint,
             message=payload.message,
             db=db,
         )
 
-    # 4. Ring every live device of the helper (also covers re-rings).
+    # 4. Ring every live device of the recipient (also covers re-rings).
     helper_online = await push_to_user(
-        helper_user_id,
+        target_user_id,
         {
             "type": "incoming_call",
             "request_id": request.id,
@@ -124,11 +146,9 @@ async def place_help_call(
         },
     )
 
-    # 5. Send FCM as well as the live channel. Android does not show a
-    # notification automatically when the app is foregrounded, so the app
-    # also turns this payload into a local heads-up notification.
+    # 5. Send FCM as well as the live channel.
     await _send_fcm_ring(
-        helper_user_id,
+        target_user_id,
         from_name=current_user.display_name or "Someone you help",
         message=payload.message,
         request_id=request.id,
@@ -136,15 +156,15 @@ async def place_help_call(
         db=db,
     )
 
-    helper = await db.get(User, helper_user_id)
-    helper_name = (helper.display_name if helper else None) or trust.friendly_name or "your helper"
+    target_user = await db.get(User, target_user_id)
+    target_name = (target_user.display_name if target_user else None) or trust.friendly_name or "your contact"
 
     return {
         "request_id": request.id,
         "session_id": session.id,
         "status": "ringing",
         "helper_online": helper_online,
-        "helper_name": helper_name,
+        "helper_name": target_name,
     }
 
 

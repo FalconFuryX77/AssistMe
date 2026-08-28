@@ -528,12 +528,12 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
-      final fingerprint = await DeviceIdentity.getFingerprint(
-        widget.secureStorage,
-      );
+      final targetId = (device['device_fingerprint'] as String?) ??
+          (device['helper_user_id'] as String?) ??
+          (device['owner_user_id'] as String?) ??
+          (device['device_id'] as String?);
       final resp = await widget.apiClient.placeHelpCall(
-        helperDeviceFingerprint:
-            (device['device_fingerprint'] as String?) ?? fingerprint,
+        helperDeviceFingerprint: targetId ?? '',
         message: message.isEmpty ? null : message,
       );
       if (resp.statusCode == 200) {

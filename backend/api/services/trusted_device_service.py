@@ -295,15 +295,30 @@ class TrustedDeviceService:
                 detail="Pairing has expired",
             )
 
-        device = TrustedDevice(
-            owner_user_id=owner_user_id,
-            device_fingerprint=pairing.device_fingerprint,
-            helper_user_id=pairing.claimed_by_user_id,
-            friendly_name=pairing.friendly_name,
-            device_platform=pairing.device_platform,
-            status="accepted",
+        # Check if an existing TrustedDevice row exists for (owner_user_id, pairing.device_fingerprint)
+        res_existing = await db.execute(
+            select(TrustedDevice).where(
+                TrustedDevice.owner_user_id == owner_user_id,
+                TrustedDevice.device_fingerprint == pairing.device_fingerprint,
+            )
         )
-        db.add(device)
+        device = res_existing.scalar_one_or_none()
+        if device is not None:
+            device.helper_user_id = pairing.claimed_by_user_id
+            device.friendly_name = pairing.friendly_name
+            device.device_platform = pairing.device_platform
+            device.status = "accepted"
+        else:
+            device = TrustedDevice(
+                owner_user_id=owner_user_id,
+                device_fingerprint=pairing.device_fingerprint,
+                helper_user_id=pairing.claimed_by_user_id,
+                friendly_name=pairing.friendly_name,
+                device_platform=pairing.device_platform,
+                status="accepted",
+            )
+            db.add(device)
+
         pairing.status = "confirmed"
         await db.commit()
         await db.refresh(device)
@@ -334,6 +349,8 @@ class TrustedDeviceService:
                 {
                     "device_id": row.id,
                     "owner_user_id": row.owner_user_id,
+                    "helper_user_id": row.helper_user_id,
+                    "device_fingerprint": row.device_fingerprint,
                     "owner_display_name": (owner.display_name if owner else None),
                     "friendly_name": row.friendly_name,
                     "device_tag": row.id.replace("-", "")[:6].upper(),
