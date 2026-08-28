@@ -62,8 +62,29 @@ class AssistMeAccessibilityService : AccessibilityService() {
     }
 
     /**
+     * Obtains the real physical display dimensions of the screen (in pixels).
+     * This matches the coordinate system of MediaProjection screen capture and dispatchGesture.
+     */
+    private fun getRealScreenSize(): android.graphics.Point {
+        val windowManager = getSystemService(android.content.Context.WINDOW_SERVICE) as? android.view.WindowManager
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && windowManager != null) {
+            val bounds = windowManager.currentWindowMetrics.bounds
+            android.graphics.Point(bounds.width(), bounds.height())
+        } else {
+            val point = android.graphics.Point()
+            @Suppress("DEPRECATION")
+            windowManager?.defaultDisplay?.getRealSize(point)
+            if (point.x == 0 || point.y == 0) {
+                point.x = resources.displayMetrics.widthPixels
+                point.y = resources.displayMetrics.heightPixels
+            }
+            point
+        }
+    }
+
+    /**
      * Dispatches a single tap gesture at absolute pixel coordinates (x, y).
-     * Uses lineTo for a valid path and 50ms delay per research – moveTo alone has no path.
+     * Uses lineTo for a valid path and 50ms delay.
      */
     @RequiresApi(Build.VERSION_CODES.N)
     fun dispatchTap(x: Float, y: Float, callback: GestureResultCallback? = null): Boolean {
@@ -71,7 +92,7 @@ class AssistMeAccessibilityService : AccessibilityService() {
             moveTo(x, y)
             lineTo(x, y + 1f)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 50, CLICK_DURATION_MS)
+        val stroke = GestureDescription.StrokeDescription(path, 0, CLICK_DURATION_MS)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
         return dispatchGesture(gesture, callback, null)
@@ -108,7 +129,7 @@ class AssistMeAccessibilityService : AccessibilityService() {
             moveTo(x, y)
             lineTo(x, y + 1f)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 50, LONG_PRESS_DURATION_MS)
+        val stroke = GestureDescription.StrokeDescription(path, 0, LONG_PRESS_DURATION_MS)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
         return dispatchGesture(gesture, callback, null)
@@ -128,54 +149,34 @@ class AssistMeAccessibilityService : AccessibilityService() {
     }
 
     /** Dispatches the normalized event received from the helper phone.
-     * Handles nav bar taps via global actions and corrects for display insets.
+     * Accurately scales normalized coordinates to the real physical display dimensions.
      */
     @RequiresApi(Build.VERSION_CODES.N)
     fun dispatchInput(event: Map<*, *>): Boolean {
-        val metrics = resources.displayMetrics
+        val realSize = getRealScreenSize()
+        val screenW = realSize.x.toFloat()
+        val screenH = realSize.y.toFloat()
+
         val normalizedX = (event["normalized_x"] as? Number)?.toFloat()
-            ?: ((event["x"] as? Number)?.toFloat() ?: 0f) / metrics.widthPixels
+            ?: (((event["x"] as? Number)?.toFloat() ?: 0f).let { if (it > 1f) it / screenW else it })
         val normalizedY = (event["normalized_y"] as? Number)?.toFloat()
-            ?: ((event["y"] as? Number)?.toFloat() ?: 0f) / metrics.heightPixels
-        // Nav bar handling: bottom 8% is system navigation – use global actions
-        // instead of coordinate tap, per research. Maps: left third = back, center = home, right = recents.
-        // This fixes "helper taps home but triggers mic 2 inches above" and "cannot interact with nav bar".
-        if (normalizedY > 0.92f) {
-            val action = when {
-                normalizedX < 0.33f -> "back"
-                normalizedX < 0.66f -> "home"
-                else -> "recents"
-            }
-            // Only for tap events; drags starting/ending in nav bar also become global actions
-            val type = (event["event_type"] as? String)?.lowercase()
-            if (type == "tap" || type == "long_press") {
-                return dispatchGlobalAction(action)
-            }
-            // For drags that end in nav bar, also handle as global action if start was not in nav bar
-            // Otherwise fall through to normal drag
-        }
-        // Correct for display cutout / insets is handled by using raw displayMetrics;
-        // helper's 9/16 contentRect already accounts for letterboxing, so no extra offset needed.
-        val x = normalizedX * metrics.widthPixels
-        val y = normalizedY * metrics.heightPixels
+            ?: (((event["y"] as? Number)?.toFloat() ?: 0f).let { if (it > 1f) it / screenH else it })
+
+        val x = (normalizedX * screenW).coerceIn(0f, screenW - 1f)
+        val y = (normalizedY * screenH).coerceIn(0f, screenH - 1f)
+
         return when ((event["event_type"] as? String)?.lowercase()) {
             "tap" -> dispatchTap(x, y)
             "long_press" -> dispatchLongPress(x, y)
             "drag" -> {
-                val endX = (
-                    (event["normalized_end_x"] as? Number)?.toFloat()
-                        ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX)
-                            .let { if (it > 1f) it / metrics.widthPixels else it })
-                    ) * metrics.widthPixels
-                val endY = (
-                    (event["normalized_end_y"] as? Number)?.toFloat()
-                        ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY)
-                            .let { if (it > 1f) it / metrics.heightPixels else it })
-                    ) * metrics.heightPixels
-                // If drag ends in nav bar, treat as swipe to handle system gesture
-                if (endX >= 0 && endY >= 0) {
-                    // Normal drag
-                }
+                val normEndX = (event["normalized_end_x"] as? Number)?.toFloat()
+                    ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
+                val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
+                    ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
+
+                val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
+                val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
+
                 dispatchDrag(
                     x,
                     y,

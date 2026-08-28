@@ -43,6 +43,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
   final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(null);
   final ValueNotifier<bool> _remoteControlNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _annotationModeNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<double> _aspectRatioNotifier = ValueNotifier<double>(9 / 16);
   bool _leaving = false;
   bool _allowPop = false;
   Offset _voiceBarOffset = Offset.zero;
@@ -173,6 +174,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                                           allowRemoteControl &&
                                           !annotationMode &&
                                           !widget.isHelpee,
+                                      onAspectRatioChanged: (aspect) {
+                                        _aspectRatioNotifier.value = aspect;
+                                      },
                                       onRemoteInput: (event) {
                                         _flowCoordinatorKey.currentState?.sendRemoteInput(
                                           event,
@@ -207,6 +211,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               remoteStreamSink: _remoteStreamNotifier,
                               remoteControlSink: _remoteControlNotifier,
                               annotationModeSink: _annotationModeNotifier,
+                              contentAspectRatioNotifier: _aspectRatioNotifier,
                             ),
                           ),
 

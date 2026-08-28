@@ -17,6 +17,7 @@ class RemoteScreenView extends StatefulWidget {
   /// the plain-language risk screen. Annotation remains available without it.
   final bool allowRemoteControl;
   final ValueChanged<Map<String, dynamic>>? onRemoteInput;
+  final ValueChanged<double>? onAspectRatioChanged;
 
   const RemoteScreenView({
     super.key,
@@ -27,6 +28,7 @@ class RemoteScreenView extends StatefulWidget {
     this.remoteStreamNotifier,
     this.allowRemoteControl = false,
     this.onRemoteInput,
+    this.onAspectRatioChanged,
   });
 
   @override
@@ -40,6 +42,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   final RTCVideoRenderer _renderer = RTCVideoRenderer();
   bool _rendererInitialized = false;
   dynamic _attachedStream;
+  double _videoAspectRatio = 9 / 16;
 
   @override
   void initState() {
@@ -50,6 +53,13 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   }
 
   void _onRendererChanged() {
+    if (_renderer.videoWidth > 0 && _renderer.videoHeight > 0) {
+      final newAspect = _renderer.videoWidth / _renderer.videoHeight;
+      if ((newAspect - _videoAspectRatio).abs() > 0.001) {
+        _videoAspectRatio = newAspect;
+        widget.onAspectRatioChanged?.call(newAspect);
+      }
+    }
     if (mounted) setState(() {});
   }
 
@@ -96,16 +106,16 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     try {
       final payload = <String, dynamic>{
         'event_type': eventType,
-        'x': x * 1080,
-        'y': y * 1920,
+        'x': x,
+        'y': y,
         'normalized_x': x,
         'normalized_y': y,
         if (endX != null) ...{
-          'end_x': endX * 1080,
+          'end_x': endX,
           'normalized_end_x': endX,
         },
         if (endY != null) ...{
-          'end_y': endY * 1920,
+          'end_y': endY,
           'normalized_end_y': endY,
         },
         ...?durationMs == null ? null : {'duration_ms': durationMs},
@@ -120,20 +130,22 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     }
   }
 
-  /// Normalized point inside the bounded 9/16 video rect – must match
-  /// DrawingOverlay's contentRect so helper taps and annotations land at the
-  /// same spot on the helpee phone. Using fixed 9/16 (capture is 720x1280)
-  /// avoids the 2-3mm bottom-bar offset seen when sourceWidth/Height drifted
-  /// from the viewport's letterbox.
+  /// Normalized point inside the bounded video rect that matches RTCVideoView's
+  /// actual rendered letterbox/pillarbox area.
   Offset? _normalizedVideoPoint(Offset point, Size size) {
-    const aspect = 9 / 16;
+    final aspect = _videoAspectRatio;
     final contentHeight = math.min(size.height, size.width / aspect);
     final contentWidth = contentHeight * aspect;
     final left = (size.width - contentWidth) / 2;
     final top = (size.height - contentHeight) / 2;
-    final x = (point.dx - left) / contentWidth;
-    final y = (point.dy - top) / contentHeight;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+
+    if (point.dx < left || point.dx > left + contentWidth ||
+        point.dy < top || point.dy > top + contentHeight) {
+      return null;
+    }
+
+    final x = ((point.dx - left) / contentWidth).clamp(0.0, 1.0);
+    final y = ((point.dy - top) / contentHeight).clamp(0.0, 1.0);
     return Offset(x, y);
   }
 

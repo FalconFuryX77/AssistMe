@@ -44,6 +44,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
   final ValueNotifier<dynamic>? remoteStreamSink;
   final ValueNotifier<bool>? remoteControlSink;
   final ValueNotifier<bool>? annotationModeSink;
+  final ValueNotifier<double>? contentAspectRatioNotifier;
 
   const AssistanceFlowCoordinator({
     super.key,
@@ -58,6 +59,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
     this.remoteStreamSink,
     this.remoteControlSink,
     this.annotationModeSink,
+    this.contentAspectRatioNotifier,
   });
 
   @override
@@ -1245,10 +1247,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // again here would duplicate. For helpee, no Flutter overlay needed – native
         // canvas shows everything.
         if (!widget.isHelpee && _draftStroke != null)
-          Positioned.fill(
-            child: DrawingOverlay(
-              strokes: [_draftStroke!],
-              contentAspectRatio: 9 / 16,
+          ValueListenableBuilder<double>(
+            valueListenable: widget.contentAspectRatioNotifier ?? ValueNotifier<double>(9 / 16),
+            builder: (context, aspect, _) => Positioned.fill(
+              child: DrawingOverlay(
+                strokes: [_draftStroke!],
+                contentAspectRatio: aspect,
+              ),
             ),
           ),
 
@@ -1258,13 +1263,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             valueListenable: remoteStreamNotifier,
             builder: (context, stream, _) {
               if (stream == null) return const SizedBox.shrink();
-              return Positioned.fill(
-                child: DrawingInputOverlay(
-                  onStroke: _sendDrawStroke,
-                  onStrokeUpdate: _sendDrawPreview,
-                  onErase: _eraseAt,
-                  tool: _annotationTool,
-                  contentAspectRatio: 9 / 16,
+              return ValueListenableBuilder<double>(
+                valueListenable: widget.contentAspectRatioNotifier ?? ValueNotifier<double>(9 / 16),
+                builder: (context, aspect, _) => Positioned.fill(
+                  child: DrawingInputOverlay(
+                    onStroke: _sendDrawStroke,
+                    onStrokeUpdate: _sendDrawPreview,
+                    onErase: _eraseAt,
+                    tool: _annotationTool,
+                    contentAspectRatio: aspect,
+                  ),
                 ),
               );
             },
