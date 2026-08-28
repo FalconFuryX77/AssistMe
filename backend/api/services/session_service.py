@@ -103,6 +103,17 @@ class SessionService:
         for session in result.scalars().all():
             user_ids = {p.user_id for p in session.participants}
             if helpee_id in user_ids and helper_id in user_ids:
+                for p in session.participants:
+                    if p.user_id == helpee_id:
+                        p.role = "helpee"
+                        p.status = "connected"
+                    elif p.user_id == helper_id:
+                        p.role = "helper"
+                        p.status = "connected"
+                if session.status == "waiting":
+                    session.status = "active"
+                await db.commit()
+                await db.refresh(session)
                 return session
 
         # 2. Otherwise create one (creator = helper per the role model) and
