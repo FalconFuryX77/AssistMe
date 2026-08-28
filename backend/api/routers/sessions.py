@@ -51,8 +51,8 @@ async def join_session(payload: SessionJoinRequest, current_user: User = Depends
 
 
 @router.get("/", response_model=list[SessionListItem])
-async def list_sessions(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
-    return await SessionService.list_sessions(user_id=current_user.id, status_filter=None, db=db)
+async def list_sessions(status: str | None = None, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
+    return await SessionService.list_sessions(user_id=current_user.id, status_filter=status, db=db)
 
 
 @router.get("/{session_id}", response_model=SessionResponse)

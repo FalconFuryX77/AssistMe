@@ -1,126 +1,120 @@
-"""Comprehensive tests for the authentication API.
+"""Comprehensive tests for the device-first authentication API.
 
-Covers: registration, login, token refresh, logout, edge cases, and security.
+Covers:
+  - Device bootstrap: creates identity + recovery code on first call
+  - Silent login: returns existing identity on subsequent calls
+  - Display name customization & updates
+  - Identity reclamation via recovery code
+  - Refresh token rotation
+  - Rate limiting & security validation
 """
 
 import pytest
 from httpx import AsyncClient
 
 
-# ---------------------------------------------------------------------------
-# Registration Tests
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_register_success(client: AsyncClient) -> None:
-    """Registration with valid data returns 201 with tokens."""
-    response = await client.post(
-        "/auth/register",
-        json={
-            "email": "newuser@example.com",
-            "password": "SecureP1",
-            "display_name": "New User",
-        },
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["token_type"] == "bearer"
-    assert data["access_token"]
-    assert data["refresh_token"]
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_register_duplicate_email(client: AsyncClient) -> None:
-    """Registering with an already-used email returns 400."""
-    payload = {"email": "duplicate@example.com", "password": "SecureP1"}
-    await client.post("/auth/register", json=payload)
-    response = await client.post("/auth/register", json=payload)
-    assert response.status_code == 400
-    assert "already registered" in response.json()["detail"].lower()
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_register_invalid_email(client: AsyncClient) -> None:
-    """Registration with a malformed email returns 422."""
-    response = await client.post(
-        "/auth/register",
-        json={"email": "not-an-email", "password": "SecureP1"},
-    )
-    assert response.status_code == 422
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_register_weak_password_too_short(client: AsyncClient) -> None:
-    """Password shorter than 8 characters is rejected."""
-    response = await client.post(
-        "/auth/register",
-        json={"email": "weak1@example.com", "password": "Ab1"},
-    )
-    assert response.status_code == 422
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_register_weak_password_no_uppercase(client: AsyncClient) -> None:
-    """Password without uppercase letter is rejected."""
-    response = await client.post(
-        "/auth/register",
-        json={"email": "weak2@example.com", "password": "alllower1"},
-    )
-    assert response.status_code == 422
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_register_weak_password_no_digit(client: AsyncClient) -> None:
-    """Password without a digit is rejected."""
-    response = await client.post(
-        "/auth/register",
-        json={"email": "weak3@example.com", "password": "NoDigits"},
-    )
-    assert response.status_code == 422
+FP_1 = "assistme-device-fp-auth-test-000001"
+FP_2 = "assistme-device-fp-auth-test-000002"
+FP_3 = "assistme-device-fp-auth-test-000003"
 
 
 # ---------------------------------------------------------------------------
-# Login Tests
+# Device Bootstrap Tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_login_success(client: AsyncClient, registered_user: dict) -> None:
-    """Login with correct credentials returns tokens."""
-    response = await client.post(
-        "/auth/login",
-        json={
-            "email": registered_user["email"],
-            "password": registered_user["password"],
-        },
+async def test_device_bootstrap_first_call_creates_identity(client: AsyncClient) -> None:
+    """First bootstrap call creates the invisible account + one-time recovery code."""
+    resp = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": FP_1, "display_name": "Grandma Helen"},
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["created"] is True
+    assert data["display_name"] == "Grandma Helen"
+    assert data["recovery_code"] is not None
+    assert len(data["recovery_code"]) == 12
     assert data["access_token"]
     assert data["refresh_token"]
     assert data["token_type"] == "bearer"
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_login_wrong_password(client: AsyncClient, registered_user: dict) -> None:
-    """Login with wrong password returns 401."""
-    response = await client.post(
-        "/auth/login",
-        json={"email": registered_user["email"], "password": "WrongPass1"},
+async def test_device_bootstrap_subsequent_call_silent_login(client: AsyncClient) -> None:
+    """Subsequent bootstrap with same fingerprint logs in without creating a new user or exposing code."""
+    first = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": FP_2, "display_name": "Dad"},
     )
-    assert response.status_code == 401
-    assert "invalid" in response.json()["detail"].lower()
+    assert first.status_code == 201
+    first_data = first.json()
+
+    second = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": FP_2},
+    )
+    assert second.status_code == 201
+    second_data = second.json()
+    assert second_data["created"] is False
+    assert second_data["recovery_code"] is None
+    assert second_data["user_id"] == first_data["user_id"]
+    assert second_data["display_name"] == "Dad"
+    assert second_data["access_token"]
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_login_nonexistent_user(client: AsyncClient) -> None:
-    """Login with unregistered email returns 401."""
-    response = await client.post(
-        "/auth/login",
-        json={"email": "noone@example.com", "password": "SecureP1"},
+async def test_device_bootstrap_short_fingerprint_rejected(client: AsyncClient) -> None:
+    """Fingerprints shorter than 16 characters are rejected with 422."""
+    resp = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": "too-short"},
     )
-    assert response.status_code == 401
+    assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Identity Reclamation Tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_device_reclaim_success(client: AsyncClient) -> None:
+    """Reclaiming an identity with valid recovery code binds the new device fingerprint."""
+    # 1. Old device creates identity
+    old_boot = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": "assistme-old-device-fp-00000100", "display_name": "Mom"},
+    )
+    assert old_boot.status_code == 201
+    recovery_code = old_boot.json()["recovery_code"]
+    user_id = old_boot.json()["user_id"]
+
+    # 2. New device reclaims identity with recovery code
+    new_fp = "assistme-new-device-fp-00000200"
+    reclaim_resp = await client.post(
+        "/auth/device/reclaim",
+        json={"device_fingerprint": new_fp, "recovery_code": recovery_code},
+    )
+    assert reclaim_resp.status_code == 200
+    reclaim_data = reclaim_resp.json()
+    assert reclaim_data["user_id"] == user_id
+    assert reclaim_data["display_name"] == "Mom"
+    assert reclaim_data["access_token"]
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_device_reclaim_invalid_code_rejected(client: AsyncClient) -> None:
+    """Reclaiming with an invalid recovery code returns 401/404."""
+    resp = await client.post(
+        "/auth/device/reclaim",
+        json={
+            "device_fingerprint": "assistme-device-fp-invalid-reclaim-1",
+            "recovery_code": "nonexistentcode",
+        },
+    )
+    assert resp.status_code in (401, 404)
 
 
 # ---------------------------------------------------------------------------
@@ -129,91 +123,52 @@ async def test_login_nonexistent_user(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_refresh_token_success(client: AsyncClient, registered_user: dict) -> None:
-    """Valid refresh token returns a new access token."""
-    response = await client.post(
-        "/auth/refresh",
-        json={"refresh_token": registered_user["refresh_token"]},
+async def test_refresh_token_success(client: AsyncClient) -> None:
+    """Valid refresh token issues a fresh access token."""
+    boot = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": FP_3, "display_name": "Alex"},
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert boot.status_code == 201
+    refresh_token = boot.json()["refresh_token"]
+
+    resp = await client.post(
+        "/auth/refresh",
+        json={"refresh_token": refresh_token},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
     assert data["access_token"]
     assert data["token_type"] == "bearer"
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_refresh_token_invalid(client: AsyncClient) -> None:
-    """Invalid refresh token returns 401."""
-    response = await client.post(
+async def test_refresh_token_invalid_rejected(client: AsyncClient) -> None:
+    """Malformed or invalid refresh token returns 401."""
+    resp = await client.post(
         "/auth/refresh",
-        json={"refresh_token": "totally-invalid-token"},
+        json={"refresh_token": "totally-invalid-refresh-token"},
     )
-    assert response.status_code == 401
+    assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
-# Logout Tests
+# Security & Protected Routes
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_logout_success(client: AsyncClient) -> None:
-    """Logout revokes the refresh token."""
-    # Register a fresh user for this test
-    reg = await client.post(
-        "/auth/register",
-        json={"email": "logouttest@example.com", "password": "SecureP1"},
-    )
-    tokens = reg.json()
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-
-    response = await client.post(
-        "/auth/logout",
-        json={"refresh_token": tokens["refresh_token"]},
-        headers=headers,
-    )
-    assert response.status_code == 200
-    assert "logged out" in response.json()["detail"].lower()
-
-    # Verify the refresh token is now revoked
-    refresh_resp = await client.post(
-        "/auth/refresh",
-        json={"refresh_token": tokens["refresh_token"]},
-    )
-    assert refresh_resp.status_code == 401
-
-
-# ---------------------------------------------------------------------------
-# Security Tests
-# ---------------------------------------------------------------------------
+async def test_protected_route_without_token_rejected(client: AsyncClient) -> None:
+    """Accessing protected routes without Authorization header returns 401/403."""
+    resp = await client.get("/users/me")
+    assert resp.status_code in (401, 403)
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_invalid_jwt_rejected(client: AsyncClient) -> None:
-    """A crafted/invalid JWT is rejected by protected endpoints."""
-    response = await client.get(
+async def test_protected_route_with_invalid_token_rejected(client: AsyncClient) -> None:
+    """Accessing protected routes with forged token returns 401/403."""
+    resp = await client.get(
         "/users/me",
-        headers={"Authorization": "Bearer invalid.jwt.token"},
+        headers={"Authorization": "Bearer fake.invalid.jwt.token"},
     )
-    assert response.status_code in (401, 403)
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_missing_auth_header_rejected(client: AsyncClient) -> None:
-    """Protected endpoints without Authorization header return 401/403."""
-    response = await client.get("/users/me")
-    assert response.status_code in (401, 403)
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_sql_injection_in_login(client: AsyncClient) -> None:
-    """SQL injection attempt in email field doesn't cause server error."""
-    response = await client.post(
-        "/auth/login",
-        json={
-            "email": "' OR 1=1 --@example.com",
-            "password": "anything",
-        },
-    )
-    # Should be 401 (not found) or 422 (validation), NOT 500
-    assert response.status_code in (401, 422)
+    assert resp.status_code in (401, 403)

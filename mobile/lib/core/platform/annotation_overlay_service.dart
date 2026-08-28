@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/services.dart';
 
 /// Controls the helpee's always-on-top annotation layer. The native canvas is

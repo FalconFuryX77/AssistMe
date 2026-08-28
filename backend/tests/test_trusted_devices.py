@@ -1,7 +1,7 @@
 """Tests for the trusted-device pairing and security-focused assistance flow.
 
-Covers: device pairing (initiate/confirm with password gate), trusted-list
-management (password-protected revoke), device identity verification, the
+Covers: setup-code generation, claim by helper, pending listing, one-tap approval,
+trusted-list management (one-tap revoke), device identity verification, the
 one-click help request flow (only trusted devices can assist), default
 overlay-only acceptance, and escalation gated by explicit disclaimer acceptance.
 """
@@ -15,153 +15,7 @@ DEVICE_FP = "device-fingerprint-abc123def4567890"
 
 
 # ---------------------------------------------------------------------------
-# Trusted device pairing
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_initiate_pairing_returns_code(client: AsyncClient) -> None:
-    """Initiating pairing returns a 6-digit code + expiry."""
-    user = await _register(client)
-    resp = await client.post(
-        "/devices/pairing/initiate",
-        json={
-            "device_fingerprint": DEVICE_FP,
-            "friendly_name": "Dad's Phone",
-            "device_platform": "android",
-        },
-        headers=user["headers"],
-    )
-    assert resp.status_code == 201
-    data = resp.json()
-    assert len(data["pairing_code"]) == 6
-    assert data["pairing_code"].isdigit()
-    assert data["expires_at"]
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_confirm_pairing_requires_password(client: AsyncClient) -> None:
-    """Confirming pairing fails without the correct password."""
-    user = await _register(client)
-    await client.post(
-        "/devices/pairing/initiate",
-        json={"device_fingerprint": DEVICE_FP, "friendly_name": "Dad's Phone"},
-        headers=user["headers"],
-    )
-    resp = await client.post(
-        "/devices/pairing/confirm",
-        json={"pairing_code": "000000", "password": "WrongPass9"},
-        headers=user["headers"],
-    )
-    assert resp.status_code == 401
-    assert "password" in resp.json()["detail"].lower()
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_confirm_pairing_success_flow(client: AsyncClient) -> None:
-    """Full pairing flow: initiate → confirm with password → device trusted."""
-    user = await _register(client)
-    init = await client.post(
-        "/devices/pairing/initiate",
-        json={
-            "device_fingerprint": DEVICE_FP,
-            "friendly_name": "Dad's Phone",
-            "device_platform": "android",
-        },
-        headers=user["headers"],
-    )
-    code = init.json()["pairing_code"]
-
-    confirm = await client.post(
-        "/devices/pairing/confirm",
-        json={"pairing_code": code, "password": "SecureP1"},
-        headers=user["headers"],
-    )
-    assert confirm.status_code == 200
-    assert confirm.json()["status"] == "accepted"
-
-    listing = await client.get("/devices/", headers=user["headers"])
-    assert listing.status_code == 200
-    assert listing.json()["total"] == 1
-    assert listing.json()["devices"][0]["device_fingerprint"] == DEVICE_FP
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_confirm_pairing_wrong_code(client: AsyncClient) -> None:
-    """A wrong pairing code is rejected even with the correct password."""
-    user = await _register(client)
-    await client.post(
-        "/devices/pairing/initiate",
-        json={"device_fingerprint": DEVICE_FP},
-        headers=user["headers"],
-    )
-    resp = await client.post(
-        "/devices/pairing/confirm",
-        json={"pairing_code": "999999", "password": "SecureP1"},
-        headers=user["headers"],
-    )
-    assert resp.status_code == 404
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_revoke_device_one_tap(client: AsyncClient) -> None:
-    """Revoking a trusted device is a one-tap action (no password)."""
-    user = await _register(client)
-    init = await client.post(
-        "/devices/pairing/initiate",
-        json={"device_fingerprint": DEVICE_FP},
-        headers=user["headers"],
-    )
-    await client.post(
-        "/devices/pairing/confirm",
-        json={"pairing_code": init.json()["pairing_code"], "password": "SecureP1"},
-        headers=user["headers"],
-    )
-    listing = await client.get("/devices/", headers=user["headers"])
-    device_id = listing.json()["devices"][0]["id"]
-
-    resp = await client.delete(
-        f"/devices/{device_id}",
-        headers=user["headers"],
-    )
-    assert resp.status_code == 204
-    listing = await client.get("/devices/", headers=user["headers"])
-    assert listing.json()["total"] == 0
-
-
-@pytest.mark.asyncio(loop_scope="session")
-async def test_device_identity_verification(client: AsyncClient) -> None:
-    """Device identity endpoint reflects trusted status."""
-    user = await _register(client)
-    resp = await client.post(
-        "/devices/identity",
-        json={"device_fingerprint": DEVICE_FP},
-        headers=user["headers"],
-    )
-    assert resp.status_code == 200
-    assert resp.json()["is_trusted"] is False
-
-    init = await client.post(
-        "/devices/pairing/initiate",
-        json={"device_fingerprint": DEVICE_FP},
-        headers=user["headers"],
-    )
-    await client.post(
-        "/devices/pairing/confirm",
-        json={"pairing_code": init.json()["pairing_code"], "password": "SecureP1"},
-        headers=user["headers"],
-    )
-    resp = await client.post(
-        "/devices/identity",
-        json={"device_fingerprint": DEVICE_FP},
-        headers=user["headers"],
-    )
-    assert resp.json()["is_trusted"] is True
-    assert resp.json()["status"] == "accepted"
-
-
-# ---------------------------------------------------------------------------
-# Helper-driven setup code flow (no password on the owner's side)
+# Helper-driven setup code pairing flow
 # ---------------------------------------------------------------------------
 
 
@@ -292,6 +146,75 @@ async def test_setup_code_approve_wrong_owner(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="session")
+async def test_revoke_device_one_tap(client: AsyncClient) -> None:
+    """Revoking a trusted device is a one-tap action (no password)."""
+    owner = await _register(client)
+    helper = await _register(client)
+
+    code = (
+        await client.post("/devices/pairing/setup-code", json={}, headers=owner["headers"])
+    ).json()["setup_code"]
+    claim = await client.post(
+        "/devices/pairing/claim",
+        json={"setup_code": code, "device_fingerprint": DEVICE_FP},
+        headers=helper["headers"],
+    )
+    await client.post(
+        "/devices/pairing/approve",
+        json={"pairing_id": claim.json()["pairing_id"]},
+        headers=owner["headers"],
+    )
+
+    listing = await client.get("/devices/", headers=owner["headers"])
+    device_id = listing.json()["devices"][0]["id"]
+
+    resp = await client.delete(
+        f"/devices/{device_id}",
+        headers=owner["headers"],
+    )
+    assert resp.status_code == 204
+    listing = await client.get("/devices/", headers=owner["headers"])
+    assert listing.json()["total"] == 0
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_device_identity_verification(client: AsyncClient) -> None:
+    """Device identity endpoint reflects trusted status."""
+    owner = await _register(client)
+    helper = await _register(client)
+
+    resp = await client.post(
+        "/devices/identity",
+        json={"device_fingerprint": DEVICE_FP},
+        headers=owner["headers"],
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_trusted"] is False
+
+    code = (
+        await client.post("/devices/pairing/setup-code", json={}, headers=owner["headers"])
+    ).json()["setup_code"]
+    claim = await client.post(
+        "/devices/pairing/claim",
+        json={"setup_code": code, "device_fingerprint": DEVICE_FP},
+        headers=helper["headers"],
+    )
+    await client.post(
+        "/devices/pairing/approve",
+        json={"pairing_id": claim.json()["pairing_id"]},
+        headers=owner["headers"],
+    )
+
+    resp = await client.post(
+        "/devices/identity",
+        json={"device_fingerprint": DEVICE_FP},
+        headers=owner["headers"],
+    )
+    assert resp.json()["is_trusted"] is True
+    assert resp.json()["status"] == "accepted"
+
+
+@pytest.mark.asyncio(loop_scope="session")
 async def test_full_helper_driven_setup_flow(client: AsyncClient) -> None:
     """End-to-end: code → claim → pending → approve → identity trusted."""
     owner = await _register(client)
@@ -343,17 +266,24 @@ async def test_full_helper_driven_setup_flow(client: AsyncClient) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _trusted_helpee_pairing(client: AsyncClient, helpee_headers: dict) -> None:
-    """Pair the helper's device fingerprint into the helpee's trusted list."""
-    init = await client.post(
-        "/devices/pairing/initiate",
-        json={"device_fingerprint": DEVICE_FP, "friendly_name": "Helper Phone"},
-        headers=helpee_headers,
+async def _pair_helper_to_helpee(client: AsyncClient, helper: dict, helpee: dict) -> None:
+    """Helper enters helpee's setup code; helpee approves."""
+    code = (
+        await client.post("/devices/pairing/setup-code", json={}, headers=helpee["headers"])
+    ).json()["setup_code"]
+    claim = await client.post(
+        "/devices/pairing/claim",
+        json={
+            "setup_code": code,
+            "device_fingerprint": DEVICE_FP,
+            "friendly_name": "Helper Phone",
+        },
+        headers=helper["headers"],
     )
     await client.post(
-        "/devices/pairing/confirm",
-        json={"pairing_code": init.json()["pairing_code"], "password": "SecureP1"},
-        headers=helpee_headers,
+        "/devices/pairing/approve",
+        json={"pairing_id": claim.json()["pairing_id"]},
+        headers=helpee["headers"],
     )
 
 
@@ -394,7 +324,7 @@ async def test_request_help_flow_full(client: AsyncClient) -> None:
     """Trusted helper: request → pending → accept grants overlay-only."""
     helper = await _register(client)
     helpee = await _register(client)
-    await _trusted_helpee_pairing(client, helpee["headers"])
+    await _pair_helper_to_helpee(client, helper, helpee)
     session = await _setup_session_with_helpee(client, helper, helpee)
 
     resp = await client.post(
@@ -425,7 +355,7 @@ async def test_request_help_can_be_denied(client: AsyncClient) -> None:
     """Helper can deny an assistance request."""
     helper = await _register(client)
     helpee = await _register(client)
-    await _trusted_helpee_pairing(client, helpee["headers"])
+    await _pair_helper_to_helpee(client, helper, helpee)
     session = await _setup_session_with_helpee(client, helper, helpee)
 
     resp = await client.post(
@@ -451,7 +381,7 @@ async def test_duplicate_pending_request_conflict(client: AsyncClient) -> None:
     """A second pending request for the same session is a 409."""
     helper = await _register(client)
     helpee = await _register(client)
-    await _trusted_helpee_pairing(client, helpee["headers"])
+    await _pair_helper_to_helpee(client, helper, helpee)
     session = await _setup_session_with_helpee(client, helper, helpee)
 
     payload = {
@@ -476,7 +406,7 @@ async def test_duplicate_pending_request_conflict(client: AsyncClient) -> None:
 
 async def _accepted_request(client: AsyncClient, helper: dict, helpee: dict) -> dict:
     """Set up an accepted assistance request."""
-    await _trusted_helpee_pairing(client, helpee["headers"])
+    await _pair_helper_to_helpee(client, helper, helpee)
     session = await _setup_session_with_helpee(client, helper, helpee)
     resp = await client.post(
         f"/sessions/{session['id']}/assistance/request",

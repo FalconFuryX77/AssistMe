@@ -19,7 +19,7 @@ class MobileWorkspaceScreen extends StatefulWidget {
   final Future<void> Function()? onSessionEnded;
 
   const MobileWorkspaceScreen({
-    Key? key,
+    super.key,
     required this.sessionId,
     required this.sessionCode,
     required this.apiClient,
@@ -29,7 +29,7 @@ class MobileWorkspaceScreen extends StatefulWidget {
     this.peerName = 'your contact',
     this.onSessionClosed,
     this.onSessionEnded,
-  }) : super(key: key);
+  });
 
   @override
   State<MobileWorkspaceScreen> createState() => _MobileWorkspaceScreenState();
@@ -40,16 +40,11 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
 
   // Live remote media stream, published by the flow coordinator's WebRTC
   // engine and consumed by the remote viewport.
-  final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(
-    null,
-  );
+  final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(null);
   final ValueNotifier<bool> _remoteControlNotifier = ValueNotifier<bool>(false);
-  final ValueNotifier<bool> _annotationModeNotifier = ValueNotifier<bool>(
-    false,
-  );
+  final ValueNotifier<bool> _annotationModeNotifier = ValueNotifier<bool>(false);
   bool _leaving = false;
   bool _allowPop = false;
-  Offset _modeSwitcherOffset = Offset.zero;
   Offset _voiceBarOffset = Offset.zero;
 
   Offset _boundedOffset(Offset offset) => Offset(
@@ -89,8 +84,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Screen off -> paused/inactive should NOT disconnect. Keep WebSocket alive via foreground service.
-    // No action needed - foreground service keeps process alive. Just log.
+    // Process kept alive by Android foreground service
   }
 
   Future<void> _handleLeaveSession() async {
@@ -99,16 +93,20 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.bgSecondary,
-        title: const Text('Leave help session?'),
-        content: const Text('The call will end for both of you.'),
+        title: const Text('Leave Help Session?'),
+        content: const Text(
+          'Ending this call will end the assistance session for both of you.',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Stay'),
+            child: const Text('Stay in call', style: TextStyle(fontSize: 16)),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRose),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Leave'),
+            child: const Text('End Call'),
           ),
         ],
       ),
@@ -139,31 +137,28 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
         if (!didPop) _handleLeaveSession();
       },
       child: Scaffold(
-        // VISION §12.6: helper workspace must remain inside the app. No immersive
-        // fullscreen – viewport is bounded, controls stay visible.
         backgroundColor: AppTheme.bgPrimary,
         appBar: AppBar(
-          title: Text('Help session · ${widget.peerName}'),
+          title: Text(
+            widget.isHelpee ? 'Help from ${widget.peerName}' : 'Helping ${widget.peerName}',
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          ),
           backgroundColor: AppTheme.bgSecondary,
         ),
         body: SafeArea(
           child: Column(
             children: [
-              // ── Bounded remote viewport (VISION §12.6) ──
-              // Helper sees live helpee screen at useful bounded size, not
-              // consuming entire screen. Black letterbox keeps aspect correct.
+              // Bounded remote viewport (VISION §12.6)
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(20),
                     child: Container(
                       color: Colors.black,
                       child: Stack(
                         fit: StackFit.expand,
                         children: [
-                          // Remote viewport is ONLY for helper (who views helpee screen).
-                          // Helpee sees their own sharing status, not a remote video placeholder.
                           if (!widget.isHelpee)
                             ValueListenableBuilder<bool>(
                               valueListenable: _remoteControlNotifier,
@@ -187,7 +182,6 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                                   ),
                             )
                           else
-                            // Helpee: show sharing status, not remote video. The banner + permanent Start Sharing button are provided by coordinator.
                             Container(
                               color: AppTheme.bgPrimary,
                               child: Center(
@@ -198,7 +192,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               ),
                             ),
 
-                          // Assistance flow coordinator – constrained to this viewport.
+                          // Assistance flow coordinator
                           Positioned.fill(
                             child: AssistanceFlowCoordinator(
                               key: _flowCoordinatorKey,
@@ -216,16 +210,12 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                             ),
                           ),
 
-                          // NOTE: Control/Guide switch removed from floating position per user request.
-                          // It now lives in the bottom bar near Request control (see _helperAnnotationRow).
-                          // Only the annotation dock (pen/eraser/color) remains floating.
-
-                          // Status banner for helpee – positioned below Start Sharing button to avoid overlap.
+                          // Status banner for helpee
                           if (widget.isHelpee)
                             Positioned(
-                              top: 12,
-                              left: 12,
-                              right: 12,
+                              top: 14,
+                              left: 14,
+                              right: 14,
                               child: ValueListenableBuilder<dynamic>(
                                 valueListenable: _remoteStreamNotifier,
                                 builder: (context, stream, _) => _helpeeStatusBanner(stream != null),
@@ -238,12 +228,10 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                 ),
               ),
 
-              // ── Helper annotation toolbar BELOW viewport (VISION §12.6) ──
-              // Always visible, not hidden. Helper can also drag it via handle;
-              // viewport remains bounded so toolbar never needs to cover video.
+              // Helper annotation toolbar BELOW viewport
               if (!widget.isHelpee) _helperAnnotationRow(),
 
-              // ── Voice controls – always visible, movable via handle ──
+              // Voice controls
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: Center(
@@ -279,20 +267,20 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
 
   Widget _helpeeStatusBanner(bool sharing) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: sharing ? AppTheme.accentEmerald.withValues(alpha: 0.92) : AppTheme.accentAmber.withValues(alpha: 0.95),
-        borderRadius: BorderRadius.circular(12),
+        color: sharing ? AppTheme.accentEmerald.withValues(alpha: 0.95) : AppTheme.accentAmber.withValues(alpha: 0.95),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))],
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(sharing ? Icons.videocam : Icons.videocam_off, size: 16, color: Colors.white),
-          const SizedBox(width: 8),
+          Icon(sharing ? Icons.videocam : Icons.videocam_off, size: 20, color: Colors.white),
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
-              sharing ? 'Sharing your screen — helper can see it' : 'Tap Start Sharing to let helper see your screen',
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700),
+              sharing ? 'Your screen is live — helper can see and guide you' : 'Tap Start Sharing below to begin',
+              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
             ),
           ),
         ],
@@ -302,123 +290,87 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
 
   Widget _helpeeSharingPlaceholder(bool sharing) {
     return Padding(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(28),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(sharing ? Icons.check_circle : Icons.screen_share, size: 48, color: sharing ? AppTheme.accentEmerald : AppTheme.textSecondary),
-          const SizedBox(height: 16),
-          Text(
-            sharing ? 'Your screen is live' : 'Ready to help',
-            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w800),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: (sharing ? AppTheme.accentEmerald : AppTheme.accentAmber).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              sharing ? Icons.check_circle : Icons.screen_share,
+              size: 56,
+              color: sharing ? AppTheme.accentEmerald : AppTheme.accentAmber,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 20),
+          Text(
+            sharing ? 'Screen Sharing Active' : 'Ready to Start',
+            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 10),
           Text(
             sharing
-                ? 'Helper can see your screen and guide you. Use the overlay DRAW to annotate, STOP to end.'
-                : 'Tap the green Start Sharing button below to begin. You will be asked to allow screen capture.',
+                ? 'Your helper can see your screen. You can use your phone normally.\nUse DRAW to point, and STOP to end.'
+                : 'Tap the green Start Sharing button to let your helper see your screen.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 15, height: 1.4),
           ),
-          const SizedBox(height: 16),
-          // Permanent Start Sharing button is provided by coordinator when needed – this placeholder just explains.
         ],
       ),
     );
   }
 
   Widget _helperAnnotationRow() {
-    // Bottom bar: View/Guide status + Control/Guide switch + Request control – all non-floating per user request.
-    // Only the annotation dock (pen/eraser/color inside viewport) remains floating.
     return ValueListenableBuilder<bool>(
       valueListenable: _remoteControlNotifier,
       builder: (context, granted, _) => ValueListenableBuilder<bool>(
         valueListenable: _annotationModeNotifier,
         builder: (context, annotationMode, _) => Container(
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: AppTheme.bgSecondary.withValues(alpha: 0.97),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppTheme.borderGlass),
+            color: AppTheme.bgSecondary.withValues(alpha: 0.98),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.borderGlassStrong),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               if (!granted) ...[
-                const Icon(Icons.edit, size: 16, color: AppTheme.accentEmerald),
-                const SizedBox(width: 6),
-                const Text('View', style: TextStyle(color: AppTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w700)),
-                const SizedBox(width: 10),
+                const Icon(Icons.visibility, size: 18, color: AppTheme.accentEmerald),
+                const SizedBox(width: 8),
+                const Text('Viewing Screen', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
+                const SizedBox(width: 14),
                 ElevatedButton.icon(
-                  icon: const Icon(Icons.open_in_full, size: 14),
-                  label: const Text('Request control', style: TextStyle(fontSize: 11)),
+                  icon: const Icon(Icons.touch_app, size: 16),
+                  label: const Text('Request Control', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.accentPrimary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                   onPressed: () => _flowCoordinatorKey.currentState?.requestControl(),
                 ),
               ] else ...[
-                // When control granted, show Control/Guide toggle right here at bottom near Request control position
                 _modeButton(
-                  label: 'Control',
+                  label: 'Touch Control',
                   icon: Icons.touch_app,
                   selected: !annotationMode,
                   onPressed: () => _annotationModeNotifier.value = false,
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 8),
                 _modeButton(
-                  label: 'Guide',
+                  label: 'Draw / Guide',
                   icon: Icons.edit,
                   selected: annotationMode,
                   onPressed: () => _annotationModeNotifier.value = true,
                 ),
               ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _disableKeepAlive();
-    _remoteStreamNotifier.dispose();
-    _remoteControlNotifier.dispose();
-    _annotationModeNotifier.dispose();
-    super.dispose();
-  }
-
-  Widget _phaseModeSwitcher() {
-    return ValueListenableBuilder<bool>(
-      valueListenable: _annotationModeNotifier,
-      builder: (context, annotationMode, _) => Material(
-        color: AppTheme.bgSecondary.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(18),
-        elevation: 8,
-        child: Padding(
-          padding: const EdgeInsets.all(4),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _modeButton(
-                label: 'Control',
-                icon: Icons.touch_app,
-                selected: !annotationMode,
-                onPressed: () => _annotationModeNotifier.value = false,
-              ),
-              _modeButton(
-                label: 'Guide',
-                icon: Icons.edit,
-                selected: annotationMode,
-                onPressed: () => _annotationModeNotifier.value = true,
-              ),
             ],
           ),
         ),
@@ -432,19 +384,27 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     required bool selected,
     required VoidCallback onPressed,
   }) {
-    return TextButton.icon(
+    return ElevatedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 17),
+      icon: Icon(icon, size: 18),
       label: Text(label),
-      style: TextButton.styleFrom(
-        foregroundColor: selected
-            ? AppTheme.accentEmerald
-            : AppTheme.textSecondary,
-        backgroundColor: selected
-            ? AppTheme.accentEmerald.withValues(alpha: 0.16)
-            : null,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      style: ElevatedButton.styleFrom(
+        foregroundColor: selected ? Colors.white : AppTheme.textSecondary,
+        backgroundColor: selected ? AppTheme.accentEmerald : AppTheme.bgCard,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        minimumSize: Size.zero,
+        elevation: selected ? 2 : 0,
       ),
     );
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _disableKeepAlive();
+    _remoteStreamNotifier.dispose();
+    _remoteControlNotifier.dispose();
+    _annotationModeNotifier.dispose();
+    super.dispose();
   }
 }

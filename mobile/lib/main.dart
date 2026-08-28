@@ -60,11 +60,11 @@ class AssistMeMobileApp extends StatelessWidget {
   final String initialRoute;
 
   const AssistMeMobileApp({
-    Key? key,
+    super.key,
     required this.apiClient,
     required this.secureStorage,
     required this.initialRoute,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

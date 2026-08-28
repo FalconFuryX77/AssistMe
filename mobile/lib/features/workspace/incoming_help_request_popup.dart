@@ -14,11 +14,11 @@ class IncomingHelpRequestPopup extends StatelessWidget {
   final VoidCallback onDeny;
 
   const IncomingHelpRequestPopup({
-    Key? key,
+    super.key,
     required this.helperDeviceFingerprint,
     required this.onAccept,
     required this.onDeny,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

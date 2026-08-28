@@ -17,10 +17,9 @@ async def test_get_profile_success(
     response = await client.get("/users/me", headers=auth_headers)
     assert response.status_code == 200
     data = response.json()
-    assert data["email"] == registered_user["email"]
-    assert data["display_name"] == "Test User"
-    assert data["is_active"] is True
     assert "id" in data
+    assert data["display_name"] == registered_user.get("display_name", "Test User")
+    assert data["is_active"] is True
     assert "created_at" in data
 
 

@@ -15,11 +15,11 @@ class RiskDisclaimerModal extends StatelessWidget {
   final VoidCallback onDecline;
 
   const RiskDisclaimerModal({
-    Key? key,
+    super.key,
     required this.disclaimerText,
     required this.onAccept,
     required this.onDecline,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

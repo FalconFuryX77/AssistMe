@@ -6,6 +6,8 @@ Covers: create, list, accept/reject, delete, and edge cases.
 import pytest
 from httpx import AsyncClient
 
+from tests.test_sessions import _register
+
 
 # ---------------------------------------------------------------------------
 # Helper: register a user pair and create a contact between them
@@ -16,42 +18,14 @@ async def _setup_contact_pair(client: AsyncClient) -> tuple[dict, dict, dict]:
     """Register two users and return (user_a_data, user_b_data, contact_data).
 
     user_a sends a contact request to user_b.
-    Each data dict contains 'access_token', 'email', and 'headers'.
     """
-    import secrets
+    a_data = await _register(client)
+    b_data = await _register(client)
 
-    suffix = secrets.token_hex(4)
-
-    # Register user A
-    resp_a = await client.post(
-        "/auth/register",
-        json={
-            "email": f"usera_{suffix}@example.com",
-            "password": "SecureP1",
-            "display_name": "User A",
-        },
-    )
-    a_data = resp_a.json()
-    a_data["email"] = f"usera_{suffix}@example.com"
-    a_data["headers"] = {"Authorization": f"Bearer {a_data['access_token']}"}
-
-    # Register user B
-    resp_b = await client.post(
-        "/auth/register",
-        json={
-            "email": f"userb_{suffix}@example.com",
-            "password": "SecureP1",
-            "display_name": "User B",
-        },
-    )
-    b_data = resp_b.json()
-    b_data["email"] = f"userb_{suffix}@example.com"
-    b_data["headers"] = {"Authorization": f"Bearer {b_data['access_token']}"}
-
-    # A sends contact request to B
+    # A sends contact request to B using user email
     contact_resp = await client.post(
         "/contacts/",
-        json={"contact_email": b_data["email"]},
+        json={"contact_email": b_data["user"]["email"]},
         headers=a_data["headers"],
     )
     contact_data = contact_resp.json()
@@ -69,29 +43,17 @@ async def test_create_contact_success(client: AsyncClient) -> None:
     """Sending a contact request to another user returns 201."""
     a_data, b_data, contact_data = await _setup_contact_pair(client)
     assert contact_data["status"] == "pending"
-    assert contact_data["contact_user_id"]
+    assert contact_data["contact_user_id"] == b_data["user"]["id"]
 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_create_contact_self_add(client: AsyncClient) -> None:
     """Adding yourself as a contact returns 400."""
-    import secrets
-
-    suffix = secrets.token_hex(4)
-    resp = await client.post(
-        "/auth/register",
-        json={
-            "email": f"selfadd_{suffix}@example.com",
-            "password": "SecureP1",
-        },
-    )
-    tokens = resp.json()
-    headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-
+    user = await _register(client)
     response = await client.post(
         "/contacts/",
-        json={"contact_email": f"selfadd_{suffix}@example.com"},
-        headers=headers,
+        json={"contact_email": user["user"]["email"]},
+        headers=user["headers"],
     )
     assert response.status_code == 400
     assert "yourself" in response.json()["detail"].lower()
@@ -102,10 +64,9 @@ async def test_create_contact_duplicate(client: AsyncClient) -> None:
     """Sending a duplicate contact request returns 400."""
     a_data, b_data, _ = await _setup_contact_pair(client)
 
-    # Try to send the same request again
     response = await client.post(
         "/contacts/",
-        json={"contact_email": b_data["email"]},
+        json={"contact_email": b_data["user"]["email"]},
         headers=a_data["headers"],
     )
     assert response.status_code == 400
@@ -115,22 +76,11 @@ async def test_create_contact_duplicate(client: AsyncClient) -> None:
 @pytest.mark.asyncio(loop_scope="session")
 async def test_create_contact_nonexistent_user(client: AsyncClient) -> None:
     """Sending a contact request to a non-existent email returns 404."""
-    import secrets
-
-    suffix = secrets.token_hex(4)
-    resp = await client.post(
-        "/auth/register",
-        json={
-            "email": f"sender_{suffix}@example.com",
-            "password": "SecureP1",
-        },
-    )
-    headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
-
+    user = await _register(client)
     response = await client.post(
         "/contacts/",
         json={"contact_email": "nobody_ever@example.com"},
-        headers=headers,
+        headers=user["headers"],
     )
     assert response.status_code == 404
 
@@ -176,7 +126,6 @@ async def test_accept_contact(client: AsyncClient) -> None:
     a_data, b_data, contact_data = await _setup_contact_pair(client)
     contact_id = contact_data["id"]
 
-    # B accepts the request
     response = await client.patch(
         f"/contacts/{contact_id}",
         json={"status": "accepted"},
@@ -250,21 +199,10 @@ async def test_delete_contact(client: AsyncClient) -> None:
 @pytest.mark.asyncio(loop_scope="session")
 async def test_delete_contact_not_found(client: AsyncClient) -> None:
     """Deleting a non-existent contact returns 404."""
-    import secrets
-
-    suffix = secrets.token_hex(4)
-    resp = await client.post(
-        "/auth/register",
-        json={
-            "email": f"delnf_{suffix}@example.com",
-            "password": "SecureP1",
-        },
-    )
-    headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
-
+    user = await _register(client)
     response = await client.delete(
-        "/contacts/nonexistent-id",
-        headers=headers,
+        "/contacts/00000000-0000-0000-0000-000000000000",
+        headers=user["headers"],
     )
     assert response.status_code == 404
 

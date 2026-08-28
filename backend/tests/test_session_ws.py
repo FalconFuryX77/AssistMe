@@ -12,21 +12,7 @@ from httpx import AsyncClient
 # ---------------------------------------------------------------------------
 
 
-async def _register_ws(client: AsyncClient) -> dict:
-    """Register a user and return data with token."""
-    import secrets
-
-    suffix = secrets.token_hex(4)
-    resp = await client.post(
-        "/auth/register",
-        json={
-            "email": f"ws_{suffix}@example.com",
-            "password": "SecureP1",
-        },
-    )
-    data = resp.json()
-    data["headers"] = {"Authorization": f"Bearer {data['access_token']}"}
-    return data
+from tests.test_sessions import _register
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +32,7 @@ async def test_ws_endpoint_exists(client: AsyncClient) -> None:
 @pytest.mark.asyncio(loop_scope="session")
 async def test_session_has_ws_compatible_structure(client: AsyncClient) -> None:
     """Sessions have all fields needed for WebSocket connectivity."""
-    user = await _register_ws(client)
+    user = await _register(client)
     resp = await client.post(
         "/sessions/",
         json={"title": "WS Test Session"},

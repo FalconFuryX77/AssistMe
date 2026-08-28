@@ -46,7 +46,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
   final ValueNotifier<bool>? annotationModeSink;
 
   const AssistanceFlowCoordinator({
-    Key? key,
+    super.key,
     required this.sessionId,
     required this.apiClient,
     required this.secureStorage,
@@ -58,7 +58,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
     this.remoteStreamSink,
     this.remoteControlSink,
     this.annotationModeSink,
-  }) : super(key: key);
+  });
 
   @override
   State<AssistanceFlowCoordinator> createState() =>
@@ -67,7 +67,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
 
 class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   RealtimeService? _realtime;
-  List<DrawStroke> _strokes = [];
+  final List<DrawStroke> _strokes = [];
   final List<DrawStroke> _redoStrokes = [];
   AnnotationTool _annotationTool = AnnotationTool.pen;
   Color _annotationColor = const Color(0xFFFF3B30);
@@ -143,7 +143,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _realtime?.send({
         'type': 'draw_preview',
         'points': latest.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
-        'color': _annotationColor.value,
+        'color': _annotationColor.toARGB32(),
         'width': _annotationWidth,
       });
     });
@@ -165,7 +165,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _realtime?.send({
       'type': 'draw_stroke',
       'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
-      'color': color.value,
+      'color': color.toARGB32(),
       'width': width,
     });
     _pushOverlay();
@@ -263,7 +263,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           'points': stroke.points
               .map((point) => {'x': point.dx, 'y': point.dy})
               .toList(),
-          'color': stroke.color.value,
+          'color': stroke.color.toARGB32(),
           'width': stroke.width,
         },
       )
@@ -951,7 +951,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppTheme.accentRose.withOpacity(0.12),
+                    color: AppTheme.accentRose.withValues(alpha: 0.12),
                     border: Border.all(color: AppTheme.accentRose),
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -1277,7 +1277,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             left: _helperDockOffset.dx,
             top: _helperDockOffset.dy,
             child: Material(
-              color: AppTheme.bgSecondary.withOpacity(0.96),
+              color: AppTheme.bgSecondary.withValues(alpha: 0.96),
               borderRadius: BorderRadius.circular(14),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1342,7 +1342,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   Widget _annotationToolbar() {
     return Material(
-      color: AppTheme.bgSecondary.withOpacity(0.94),
+      color: AppTheme.bgSecondary.withValues(alpha: 0.94),
       borderRadius: BorderRadius.circular(14),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),

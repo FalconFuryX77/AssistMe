@@ -17,20 +17,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 
 async def _register(client: AsyncClient, suffix: str | None = None) -> dict:
-    """Register a fresh user and return data with headers and user profile."""
-    suffix = suffix or secrets.token_hex(4)
-    email = f"session_{suffix}@example.com"
+    """Register a fresh user via device bootstrap and return data with headers and user profile."""
+    suffix = suffix or secrets.token_hex(8)
+    fp = f"assistme-test-fp-{suffix}"
     resp = await client.post(
-        "/auth/register",
+        "/auth/device",
         json={
-            "email": email,
-            "password": "SecureP1",
+            "device_fingerprint": fp,
             "display_name": f"User {suffix}",
         },
     )
     data = resp.json()
     data["headers"] = {"Authorization": f"Bearer {data['access_token']}"}
-    data["email"] = email
     me_resp = await client.get("/users/me", headers=data["headers"])
     if me_resp.status_code == 200:
         data["user"] = me_resp.json()
@@ -202,7 +200,7 @@ async def test_join_ended_session(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_leave_session_helpee(client: AsyncClient) -> None:
-    """Helpee leaving marks them as 'left' but session stays active."""
+    """Helpee leaving ends the session symmetrically per VISION §12.10."""
     helper = await _register(client)
     helpee = await _register(client)
 
@@ -223,8 +221,8 @@ async def test_leave_session_helpee(client: AsyncClient) -> None:
     helpee_p = next(p for p in data["participants"] if p["role"] == "helpee")
     assert helpee_p["status"] == "left"
 
-    # Session should NOT end when helpee leaves
-    assert data["status"] != "ended"
+    # VISION §12.10: Explicit Leave Session terminates the assistance session cleanly
+    assert data["status"] == "ended"
 
 
 @pytest.mark.asyncio(loop_scope="session")
@@ -495,7 +493,7 @@ async def test_heartbeat_success(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_rejoin_after_leaving(client: AsyncClient) -> None:
-    """A user who left can rejoin via the session code."""
+    """A session ended by leaving cannot be rejoined with 200 (returns 400)."""
     helper = await _register(client)
     helpee = await _register(client)
 
@@ -508,20 +506,17 @@ async def test_rejoin_after_leaving(client: AsyncClient) -> None:
         headers=helpee["headers"],
     )
 
-    # Leave
+    # Leave terminates session
     await client.post(
         f"/sessions/{session['id']}/leave",
         headers=helpee["headers"],
     )
 
-    # Rejoin
+    # Rejoin is rejected because session is ended
     resp = await client.post(
         "/sessions/join",
         json={"session_code": session["session_code"]},
         headers=helpee["headers"],
     )
-    assert resp.status_code == 200
-    helpee_p = next(
-        p for p in resp.json()["participants"] if p["role"] == "helpee"
-    )
-    assert helpee_p["status"] == "connected"
+    assert resp.status_code == 400
+    assert "ended" in resp.json()["detail"].lower()

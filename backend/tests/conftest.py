@@ -33,6 +33,20 @@ test_session_factory = async_sessionmaker(
 @pytest_asyncio.fixture(autouse=True)
 async def setup_database():
     """Create all tables for each test and drop after."""
+    from core.rate_limiter import (
+        bootstrap_rate_limiter,
+        global_rate_limiter,
+        help_call_rate_limiter,
+        pairing_rate_limiter,
+        reclaim_rate_limiter,
+    )
+
+    global_rate_limiter.requests.clear()
+    pairing_rate_limiter.requests.clear()
+    reclaim_rate_limiter.requests.clear()
+    bootstrap_rate_limiter.requests.clear()
+    help_call_rate_limiter.requests.clear()
+
     import models  # noqa: F401
 
     async with test_engine.begin() as conn:
@@ -73,18 +87,15 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
 
 @pytest_asyncio.fixture
 async def registered_user(client: AsyncClient) -> dict:
-    """Register a test user and return the response data (tokens + email)."""
+    """Register a test user and return the response data (tokens + display_name)."""
     response = await client.post(
-        "/auth/register",
+        "/auth/device",
         json={
-            "email": "testuser@example.com",
-            "password": "TestPass1",
+            "device_fingerprint": "assistme-test-device-fp-fixture-01",
             "display_name": "Test User",
         },
     )
     data = response.json()
-    data["email"] = "testuser@example.com"
-    data["password"] = "TestPass1"
     return data
 
 
@@ -98,14 +109,12 @@ async def auth_headers(registered_user: dict) -> dict[str, str]:
 async def second_user(client: AsyncClient) -> dict:
     """Register a second test user for contact testing."""
     response = await client.post(
-        "/auth/register",
+        "/auth/device",
         json={
-            "email": "seconduser@example.com",
-            "password": "TestPass2",
+            "device_fingerprint": "assistme-test-device-fp-fixture-02",
             "display_name": "Second User",
         },
     )
     data = response.json()
-    data["email"] = "seconduser@example.com"
     return data
 

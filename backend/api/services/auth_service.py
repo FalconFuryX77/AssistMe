@@ -122,21 +122,11 @@ class AuthService:
         *,
         exclude_user_id: str | None = None,
     ) -> None:
-        """Reserve the human-facing device username case-insensitively."""
-        if not display_name:
+        """Validate the human-facing display name."""
+        if not display_name or not display_name.strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Choose a unique name for this device",
-            )
-        normalized = display_name.strip().casefold()
-        query = select(User).where(func.lower(User.display_name) == normalized)
-        if exclude_user_id is not None:
-            query = query.where(User.id != exclude_user_id)
-        result = await db.execute(query)
-        if result.scalar_one_or_none() is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="That name is already in use. Choose a different name.",
+                detail="Please enter your name",
             )
 
     @staticmethod

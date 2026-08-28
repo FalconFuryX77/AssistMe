@@ -9,12 +9,12 @@ class MobileVoiceControlBar extends StatefulWidget {
   final Future<void> Function(bool muted)? onMuteChanged;
 
   const MobileVoiceControlBar({
-    Key? key,
+    super.key,
     required this.sessionId,
     required this.apiClient,
     required this.onLeaveSession,
     this.onMuteChanged,
-  }) : super(key: key);
+  });
 
   @override
   State<MobileVoiceControlBar> createState() => _MobileVoiceControlBarState();
@@ -47,7 +47,7 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: BoxDecoration(
-        color: AppTheme.bgSecondary.withOpacity(0.95),
+        color: AppTheme.bgSecondary.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(32),
         border: Border.all(color: AppTheme.borderGlass),
         boxShadow: const [

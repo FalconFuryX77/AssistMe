@@ -38,12 +38,7 @@ class User(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        # Display name is the human-facing username in the device-first flow.
-        # Case-insensitive uniqueness prevents confusing identities such as
-        # "Dad" and "dad" while still allowing legacy nullable accounts.
-        Index("uq_users_display_name_ci", func.lower(display_name), unique=True),
-    )
+
 
     # Relationships
     refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")

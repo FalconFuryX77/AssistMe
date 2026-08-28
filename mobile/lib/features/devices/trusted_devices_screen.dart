@@ -39,10 +39,10 @@ class TrustedDevicesScreen extends StatefulWidget {
   final SecureStorageService secureStorage;
 
   const TrustedDevicesScreen({
-    Key? key,
+    super.key,
     required this.apiClient,
     required this.secureStorage,
-  }) : super(key: key);
+  });
 
   @override
   State<TrustedDevicesScreen> createState() => _TrustedDevicesScreenState();
@@ -317,7 +317,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: AppTheme.accentRose.withOpacity(0.15),
+                    color: AppTheme.accentRose.withValues(alpha: 0.15),
                     border: Border.all(color: AppTheme.accentRose),
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -427,7 +427,7 @@ class _FlowCard extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 18,
-                backgroundColor: iconColor.withOpacity(0.15),
+                backgroundColor: iconColor.withValues(alpha: 0.15),
                 child: Icon(icon, color: iconColor, size: 20),
               ),
               const SizedBox(width: 12),

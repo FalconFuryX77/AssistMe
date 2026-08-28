@@ -19,7 +19,7 @@ class RemoteScreenView extends StatefulWidget {
   final ValueChanged<Map<String, dynamic>>? onRemoteInput;
 
   const RemoteScreenView({
-    Key? key,
+    super.key,
     required this.sessionId,
     required this.apiClient,
     this.isFlagSecureActive = false,
@@ -27,7 +27,7 @@ class RemoteScreenView extends StatefulWidget {
     this.remoteStreamNotifier,
     this.allowRemoteControl = false,
     this.onRemoteInput,
-  }) : super(key: key);
+  });
 
   @override
   State<RemoteScreenView> createState() => _RemoteScreenViewState();
@@ -100,11 +100,15 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
         'y': y * 1920,
         'normalized_x': x,
         'normalized_y': y,
-        if (endX != null) 'end_x': endX * 1080,
-        if (endY != null) 'end_y': endY * 1920,
-        if (endX != null) 'normalized_end_x': endX,
-        if (endY != null) 'normalized_end_y': endY,
-        if (durationMs != null) 'duration_ms': durationMs,
+        if (endX != null) ...{
+          'end_x': endX * 1080,
+          'normalized_end_x': endX,
+        },
+        if (endY != null) ...{
+          'end_y': endY * 1920,
+          'normalized_end_y': endY,
+        },
+        ...?durationMs == null ? null : {'duration_ms': durationMs},
       };
       final response = await widget.apiClient.post(
         '/sessions/${widget.sessionId}/remote-control/input',
@@ -276,10 +280,9 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                     ),
                   ),
 
-                // FLAG_SECURE Overlay
                 if (widget.isFlagSecureActive)
                   Container(
-                    color: Colors.black.withOpacity(0.92),
+                    color: Colors.black.withValues(alpha: 0.92),
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -321,11 +324,11 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                       height: 24,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: AppTheme.accentRose.withOpacity(0.75),
+                        color: AppTheme.accentRose.withValues(alpha: 0.75),
                         border: Border.all(color: Colors.white, width: 2),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.accentRose.withOpacity(0.5),
+                            color: AppTheme.accentRose.withValues(alpha: 0.5),
                             blurRadius: 10,
                             spreadRadius: 2,
                           ),

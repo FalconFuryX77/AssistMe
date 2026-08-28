@@ -34,13 +34,13 @@ class DrawingInputOverlay extends StatefulWidget {
   final double contentAspectRatio;
 
   const DrawingInputOverlay({
-    Key? key,
+    super.key,
     required this.onStroke,
     this.onStrokeUpdate,
     this.onErase,
     this.tool = AnnotationTool.pen,
     this.contentAspectRatio = 9 / 16,
-  }) : super(key: key);
+  });
 
   @override
   State<DrawingInputOverlay> createState() => _DrawingInputOverlayState();
@@ -117,10 +117,10 @@ class DrawingOverlay extends StatefulWidget {
   final double contentAspectRatio;
 
   const DrawingOverlay({
-    Key? key,
+    super.key,
     required this.strokes,
     this.contentAspectRatio = 9 / 16,
-  }) : super(key: key);
+  });
 
   @override
   State<DrawingOverlay> createState() => _DrawingOverlayState();

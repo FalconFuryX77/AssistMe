@@ -148,6 +148,7 @@ async def test_dispatch_input_event_drag(client: AsyncClient) -> None:
     )
     await client.post(
         f"/sessions/{session['id']}/remote-control/grant",
+        json={"platform": "android_accessibility"},
         headers=helpee["headers"],
     )
 
@@ -183,6 +184,7 @@ async def test_dispatch_input_event_key_event(client: AsyncClient) -> None:
     )
     await client.post(
         f"/sessions/{session['id']}/remote-control/grant",
+        json={"platform": "android_accessibility"},
         headers=helpee["headers"],
     )
 
@@ -209,6 +211,7 @@ async def test_revoke_remote_control(client: AsyncClient) -> None:
     )
     await client.post(
         f"/sessions/{session['id']}/remote-control/grant",
+        json={"platform": "android_accessibility"},
         headers=helpee["headers"],
     )
 

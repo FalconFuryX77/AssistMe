@@ -1,4 +1,6 @@
 /// Mobile API Client with Automatic JWT Bearer Token Injection & Token Refresh.
+library;
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../security/secure_storage_service.dart';
@@ -217,7 +219,7 @@ class ApiClient {
       '/auth/device',
       body: {
         'device_fingerprint': deviceFingerprint,
-        if (displayName != null) 'display_name': displayName,
+        ...?displayName == null ? null : {'display_name': displayName},
       },
       requireAuth: requireAuth,
     );
@@ -263,8 +265,7 @@ class ApiClient {
       '/sessions/$sessionId/assistance/request/$requestId/respond',
       body: {
         'accept': accept,
-        if (helperDeviceFingerprint != null)
-          'helper_device_fingerprint': helperDeviceFingerprint,
+        ...?helperDeviceFingerprint == null ? null : {'helper_device_fingerprint': helperDeviceFingerprint},
       },
     );
   }
