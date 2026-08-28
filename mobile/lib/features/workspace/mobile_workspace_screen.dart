@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_background/flutter_background.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
@@ -57,30 +56,6 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _enableKeepAlive();
-  }
-
-  Future<void> _enableKeepAlive() async {
-    try {
-      if (!FlutterBackground.isBackgroundExecutionEnabled) {
-        const cfg = FlutterBackgroundAndroidConfig(
-          notificationTitle: 'AssistMe active',
-          notificationText: 'Help session keeps running when screen is off',
-          notificationImportance: AndroidNotificationImportance.normal,
-          notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
-        );
-        final ok = await FlutterBackground.initialize(androidConfig: cfg);
-        if (ok) await FlutterBackground.enableBackgroundExecution();
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _disableKeepAlive() async {
-    try {
-      if (FlutterBackground.isBackgroundExecutionEnabled) {
-        await FlutterBackground.disableBackgroundExecution();
-      }
-    } catch (_) {}
   }
 
   @override
@@ -406,7 +381,6 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _disableKeepAlive();
     _remoteStreamNotifier.dispose();
     _remoteControlNotifier.dispose();
     _annotationModeNotifier.dispose();

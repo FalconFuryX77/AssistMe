@@ -60,16 +60,6 @@
             android:foregroundServiceType="mediaProjection"
             android:exported="false" />
 
-        <!-- flutter_background keeps the Flutter/WebRTC process alive while
-             Android shows the MediaProjection consent sheet and while the
-             capture is active. This declaration is required by the plugin;
-             without it Android can stop the app immediately after consent. -->
-        <service
-            android:name="de.julianassmann.flutter_background.IsolateHolderService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection|microphone" />
-
         <service
             android:name=".service.AssistMeAnnotationOverlayService"
             android:exported="false"

@@ -13,7 +13,6 @@ library;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:flutter_background/flutter_background.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 enum WebRTCEngineState {
@@ -29,7 +28,6 @@ class WebRTCEngine {
   WebRTCEngineState _state = WebRTCEngineState.uninitialized;
   bool _isScreenSharing = false;
   bool _isAudioMuted = false;
-  bool _backgroundServiceActive = false;
   List<Map<String, dynamic>> _iceServers = const [];
 
   RTCPeerConnection? _pc;
@@ -171,27 +169,11 @@ class WebRTCEngine {
     // Android requires a foreground service of type mediaProjection while capturing.
     // On Android 14+ getDisplayMedia will throw
     // "Media projections require a foreground service of type MEDIA_PROJECTION"
-    // if no such service is active. We use FlutterBackground for the main
-    // keep-alive, but also start our own AssistMeMediaProjectionService as
-    // fallback with the correct type.
+    // if no such service is active.
     Future<void> ensureForeground() async {
       try {
         await _mediaProjectionChannel.invokeMethod('startForeground');
       } catch (_) {}
-      // Also ensure FlutterBackground is enabled as secondary keep-alive
-      if (WebRTC.platformIsAndroid && !FlutterBackground.isBackgroundExecutionEnabled) {
-        try {
-          const config = FlutterBackgroundAndroidConfig(
-            notificationTitle: 'AssistMe screen sharing',
-            notificationText: 'Your screen is being shared with your helper.',
-            notificationImportance: AndroidNotificationImportance.normal,
-            notificationIcon: AndroidResource(name: 'ic_launcher', defType: 'mipmap'),
-          );
-          await FlutterBackground.initialize(androidConfig: config);
-          await FlutterBackground.enableBackgroundExecution();
-          _backgroundServiceActive = true;
-        } catch (_) {}
-      }
     }
 
     bool captureGranted = false;
@@ -303,10 +285,6 @@ class WebRTCEngine {
       _screenStream = null;
     }
     _isScreenSharing = false;
-    if (WebRTC.platformIsAndroid && _backgroundServiceActive) {
-      try { await FlutterBackground.disableBackgroundExecution(); } catch (_) {}
-      _backgroundServiceActive = false;
-    }
     try { await _mediaProjectionChannel.invokeMethod('stopForeground'); } catch (_) {}
   }
 
@@ -395,7 +373,6 @@ class WebRTCEngine {
     } finally {
       _isScreenSharing = false;
       _isAudioMuted = false;
-      _backgroundServiceActive = false;
       _setState(WebRTCEngineState.disconnected);
     }
   }
