@@ -376,6 +376,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   /// user asked for: "shutting down the meeting just shut down everything for
   /// the other guy".
   Future<void> _panicStop() async {
+    _sendRealtimeOrP2P({'type': 'session_ended'});
+    _sendRealtimeOrP2P({'type': 'draw_clear'});
     try {
       await widget.apiClient.post('/sessions/${widget.sessionId}/leave');
     } catch (_) {}
@@ -386,12 +388,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     try { await AnnotationOverlayService.stop(); } catch (_) {}
     _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
-    // Ensure helper sees session_ended immediately (leave already broadcasts,
-    // but also send explicit clear for overlay docs).
-    _realtime?.send({'type': 'draw_clear'});
     await widget.onSessionEnded?.call();
     await widget.onSessionClosed?.call();
   }
+
+  Future<void> leave() => _panicStop();
 
   Future<void> _bootstrap() async {
     final fingerprint = await DeviceIdentity.getFingerprint(
@@ -880,11 +881,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       case 'screen_share_stop':
         if (!widget.isHelpee) remoteStreamNotifier.value = null;
         break;
+      case 'user_left':
       case 'session_ended':
+      case 'session_closed':
         // VISION: either side shutting down must clear everything for the other – annotations, overlay, control.
         _clearDrawings(notifyOverlay: true);
         stopScreenShare();
-        AnnotationOverlayService.stop();
+        try { await AnnotationOverlayService.stop(); } catch (_) {}
         _remoteControlGranted = false;
         widget.remoteControlSink?.value = false;
         remoteStreamNotifier.value = null;
@@ -895,6 +898,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               content: Text(
                 'Help session ended.',
               ),
+              duration: Duration(seconds: 2),
             ),
           );
           widget.onSessionEnded?.call();

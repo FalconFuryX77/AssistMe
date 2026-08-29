@@ -82,27 +82,53 @@ class AssistMeAnnotationOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
+    private fun dp(value: Float): Int = (value * resources.displayMetrics.density).toInt()
+
+    private fun createPillDrawable(
+        bgColor: Int,
+        cornerRadiusDp: Float = 16f,
+        strokeColor: Int = Color.TRANSPARENT,
+        strokeWidthDp: Float = 0f
+    ): android.graphics.drawable.GradientDrawable {
+        val density = resources.displayMetrics.density
+        return android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+            cornerRadius = cornerRadiusDp * density
+            setColor(bgColor)
+            if (strokeWidthDp > 0f) {
+                setStroke((strokeWidthDp * density).toInt(), strokeColor)
+            }
+        }
+    }
+
     private fun addOverlayViews() {
         canvasView = AnnotationCanvasView(this)
         windowManager.addView(canvasView, canvasLayout())
 
-        // Outer container: handle + scrollable buttons + fixed STOP
+        // Modern Material 3 floating pill container
         val outer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(6, 6, 6, 6)
-            setBackgroundColor(Color.argb(235, 22, 27, 34))
-            // Rounded? use background drawable simulation via padding
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8f), dp(6f), dp(8f), dp(6f))
+            background = createPillDrawable(
+                bgColor = Color.argb(240, 19, 23, 32),
+                cornerRadiusDp = 22f,
+                strokeColor = Color.argb(45, 255, 255, 255),
+                strokeWidthDp = 1.2f
+            )
+            elevation = 16f
         }
 
-        // Drag handle – dedicated, obvious, per VISION §12.7 (large 36dp, ≡ icon)
+        // Drag handle – sleek vertical indicator
         val handle = Button(this).apply {
-            text = "≡"
-            textSize = 18f
-            setPadding(4,0,4,0)
+            text = "⋮⋮"
+            textSize = 17f
+            setTextColor(Color.argb(170, 255, 255, 255))
+            setPadding(0, 0, 0, 0)
             minimumWidth = 0
             minWidth = 0
-            layoutParams = LinearLayout.LayoutParams(36, LinearLayout.LayoutParams.MATCH_PARENT).apply { setMargins(0,0,8,0) }
-            setBackgroundColor(Color.argb(70, 255, 255, 255))
+            background = createPillDrawable(Color.argb(30, 255, 255, 255), cornerRadiusDp = 12f)
+            layoutParams = LinearLayout.LayoutParams(dp(26f), dp(38f)).apply { setMargins(0, 0, dp(6f), 0) }
             setOnTouchListener { _, event ->
                 val params = outer.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
                 when (event.actionMasked) {
@@ -132,65 +158,63 @@ class AssistMeAnnotationOverlayService : Service() {
             }
         }
         outer.addView(handle)
-        // Also allow dragging by touching empty background of outer (not buttons)
-        outer.setOnTouchListener { _, event ->
-            // Only handle if touch is on outer background, not on a child button – we check if event hit handle area via y
-            // For simplicity, allow outer background drag with larger threshold, but let buttons consume clicks
-            val params = outer.layoutParams as? WindowManager.LayoutParams ?: return@setOnTouchListener false
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    initialLayoutX = params.x
-                    initialLayoutY = params.y
-                    isDragging = false
-                    // Return false so child buttons still get click, but we monitor move
-                    false
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    val dx = (event.rawX - initialTouchX).toInt()
-                    val dy = (event.rawY - initialTouchY).toInt()
-                    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) isDragging = true
-                    if (isDragging) {
-                        params.x = initialLayoutX + dx
-                        params.y = initialLayoutY + dy
-                        windowManager.updateViewLayout(outer, params)
-                        return@setOnTouchListener true
-                    }
-                    false
-                }
-                else -> false
-            }
-        }
 
-        // Scrollable middle area for pen/eraser/color/etc – ensures STOP always reachable
+        // Scrollable middle area for drawing tools
         val scrollView = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         }
         val inner = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
 
+        // DRAW Mode Toggle Pill
         drawButton = Button(this).apply {
-            text = "DRAW"
+            text = "✏️ Draw"
             textSize = 13f
-            setPadding(18, 8, 18, 8)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.argb(230, 255, 255, 255))
+            background = createPillDrawable(Color.argb(50, 255, 255, 255), cornerRadiusDp = 14f)
+            setPadding(dp(12f), 0, dp(12f), 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(38f)).apply {
+                setMargins(0, 0, dp(5f), 0)
+            }
             setOnClickListener { setDrawingEnabled(!drawingEnabled) }
         }
         inner.addView(drawButton)
 
+        // Pen tool button
         penButton = Button(this).apply {
             text = "✏️"
-            textSize = 16f
-            setPadding(14, 8, 14, 8)
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            background = createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+                setMargins(0, 0, dp(4f), 0)
+            }
             setOnClickListener { setTool("pen") }
             setOnLongClickListener { showColorPicker(); true }
         }
+
+        // High-contrast Eraser tool button
         eraserButton = Button(this).apply {
-            text = "⌫"
-            textSize = 16f
-            setPadding(14, 8, 14, 8)
+            text = "🧹"
+            textSize = 15f
+            setTextColor(Color.rgb(255, 107, 107))
+            background = createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+                setMargins(0, 0, dp(4f), 0)
+            }
             setOnClickListener { setTool("eraser") }
             setOnLongClickListener { showWidthPicker(); true }
         }
@@ -198,46 +222,73 @@ class AssistMeAnnotationOverlayService : Service() {
         inner.addView(eraserButton)
         updateToolUI()
 
-        // Color dropdown – single button opening palette dialog (like helper's tune) – larger touch target
+        // Color badge button
         colorButton = Button(this).apply {
             text = "●"
-            textSize = 18f
+            textSize = 20f
             setTextColor(selectedColor)
-            setBackgroundColor(Color.argb(60, 255,255,255))
-            setPadding(14, 8, 14, 8)
+            background = createPillDrawable(
+                bgColor = Color.argb(55, 255, 255, 255),
+                cornerRadiusDp = 12f,
+                strokeColor = Color.argb(120, 255, 255, 255),
+                strokeWidthDp = 1.5f
+            )
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+                setMargins(0, 0, dp(4f), 0)
+            }
             setOnClickListener { showColorPicker() }
         }
         inner.addView(colorButton)
 
-        // Width button
+        // Undo button
         inner.addView(Button(this).apply {
-            text = "W${selectedWidth.toInt()}"
-            textSize = 13f
-            setPadding(14, 8, 14, 8)
-            setOnClickListener { showWidthPicker() }
-        })
-
-        inner.addView(Button(this).apply {
-            text = "↺"
-            textSize = 14f
-            setPadding(14, 8, 14, 8)
+            text = "↩"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            background = createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+                setMargins(0, 0, dp(4f), 0)
+            }
             setOnClickListener {
                 AssistMeNativeBridge.channel?.invokeMethod("undo", null)
             }
         })
+
+        // Redo button
         inner.addView(Button(this).apply {
-            text = "↻"
-            textSize = 14f
-            setPadding(14, 8, 14, 8)
+            text = "↪"
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            background = createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+                setMargins(0, 0, dp(4f), 0)
+            }
             setOnClickListener {
                 AssistMeNativeBridge.channel?.invokeMethod("redo", null)
             }
         })
-        // Clear – icon ensures text always visible
+
+        // Clear button
         inner.addView(Button(this).apply {
             text = "🗑"
-            textSize = 14f
-            setPadding(14, 8, 14, 8)
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            background = createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(dp(38f), dp(38f)).apply {
+                setMargins(0, 0, dp(4f), 0)
+            }
             setOnClickListener {
                 clearStrokes()
                 AssistMeNativeBridge.channel?.invokeMethod("clear", null)
@@ -247,12 +298,19 @@ class AssistMeAnnotationOverlayService : Service() {
         scrollView.addView(inner)
         outer.addView(scrollView)
 
-        // STOP – fixed outside scroll, always visible, high contrast
+        // STOP – prominent high-contrast crimson red pill
         outer.addView(Button(this).apply {
             text = "STOP"
+            textSize = 13f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(210, 45, 75))
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(8,0,0,0) }
+            background = createPillDrawable(Color.rgb(255, 59, 48), cornerRadiusDp = 14f)
+            setPadding(dp(14f), 0, dp(14f), 0)
+            minimumWidth = 0
+            minWidth = 0
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(38f)).apply {
+                setMargins(dp(6f), 0, 0, 0)
+            }
             setOnClickListener {
                 AssistMeNativeBridge.channel?.invokeMethod("panic", null)
                 stopSelf()
@@ -271,10 +329,33 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     private fun updateToolUI() {
-        penButton?.alpha = if (selectedTool == "pen") 1f else 0.45f
-        eraserButton?.alpha = if (selectedTool == "eraser") 1f else 0.45f
-        penButton?.setBackgroundColor(if (selectedTool == "pen") Color.argb(50, 52,199,89) else Color.TRANSPARENT)
-        eraserButton?.setBackgroundColor(if (selectedTool == "eraser") Color.argb(50, 255,59,48) else Color.TRANSPARENT)
+        val isPen = selectedTool == "pen"
+        val isEraser = selectedTool == "eraser"
+
+        penButton?.alpha = if (isPen) 1f else 0.75f
+        eraserButton?.alpha = if (isEraser) 1f else 0.75f
+
+        penButton?.background = if (isPen) {
+            createPillDrawable(
+                bgColor = Color.argb(80, 52, 199, 89),
+                cornerRadiusDp = 12f,
+                strokeColor = Color.rgb(52, 199, 89),
+                strokeWidthDp = 1.5f
+            )
+        } else {
+            createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+        }
+
+        eraserButton?.background = if (isEraser) {
+            createPillDrawable(
+                bgColor = Color.argb(90, 255, 59, 48),
+                cornerRadiusDp = 12f,
+                strokeColor = Color.rgb(255, 107, 107),
+                strokeWidthDp = 1.5f
+            )
+        } else {
+            createPillDrawable(Color.argb(45, 255, 255, 255), cornerRadiusDp = 12f)
+        }
     }
 
     private fun showColorPicker() {
@@ -326,7 +407,6 @@ class AssistMeAnnotationOverlayService : Service() {
     private fun setSelectedColor(color: Int) {
         selectedColor = color
         colorButton?.setTextColor(color)
-        // also update active drawing preview
         canvasView?.invalidate()
     }
 
@@ -492,7 +572,7 @@ class AssistMeAnnotationOverlayService : Service() {
             canvas.drawPath(path, paint)
         }
 
-        private fun isStrokeNear(stroke: Map<*, *>, x: Float, y: Float, radius: Float = 0.035f): Boolean {
+        private fun isStrokeNear(stroke: Map<*, *>, x: Float, y: Float, radius: Float = 0.055f): Boolean {
             val points = stroke["points"] as? List<*> ?: return false
             for (raw in points) {
                 val p = raw as? Map<*, *> ?: continue

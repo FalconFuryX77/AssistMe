@@ -90,6 +90,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     if (confirm != true) return;
     _leaving = true;
     try {
+      await _flowCoordinatorKey.currentState?.leave();
+    } catch (_) {}
+    try {
       await widget.apiClient.post('/sessions/${widget.sessionId}/leave');
     } catch (_) {}
     await widget.secureStorage.clearActiveSession();

@@ -78,11 +78,19 @@ class WebRTCEngine {
 
   Future<void> _createPeerConnection() async {
     _pc = await createPeerConnection(
-      {'iceServers': _iceServers, 'sdpSemantics': 'unified-plan'},
+      {
+        'iceServers': _iceServers,
+        'sdpSemantics': 'unified-plan',
+        'bundlePolicy': 'max-bundle',
+        'rtcpMuxPolicy': 'require',
+      },
       {
         'mandatory': {},
         'optional': [
           {'DtlsSrtpKeyAgreement': true},
+          {'googCpuOveruseDetection': true},
+          {'googHighpassFilter': true},
+          {'googEchoCancellation': true},
         ],
       },
     );
@@ -211,9 +219,9 @@ class WebRTCEngine {
     try {
       screen = await navigator.mediaDevices.getDisplayMedia({
         'video': {
-          'width': {'ideal': 720, 'max': 1080},
-          'height': {'ideal': 1280, 'max': 1920},
-          'frameRate': {'ideal': 15, 'max': 24},
+          'width': {'ideal': 720, 'max': 720},
+          'height': {'ideal': 1280, 'max': 1280},
+          'frameRate': {'ideal': 30, 'max': 30},
         },
         'audio': false,
       });
@@ -225,9 +233,9 @@ class WebRTCEngine {
         await Future<void>.delayed(const Duration(milliseconds: 600));
         screen = await navigator.mediaDevices.getDisplayMedia({
           'video': {
-            'width': {'ideal': 720, 'max': 1080},
-            'height': {'ideal': 1280, 'max': 1920},
-            'frameRate': {'ideal': 15, 'max': 24},
+            'width': {'ideal': 720, 'max': 720},
+            'height': {'ideal': 1280, 'max': 1280},
+            'frameRate': {'ideal': 30, 'max': 30},
           },
           'audio': false,
         });
@@ -267,20 +275,20 @@ class WebRTCEngine {
     }
   }
 
-  /// Prefer a stable frame cadence for guidance over an unnecessarily large
-  /// bitrate. Dropping frames creates a laggy control experience; keeping the
-  /// capture at a bounded 15 fps makes the remote viewport react sooner on
-  /// both LAN and mobile networks.
+  /// Low-latency real-time video sender tuning: maintain smooth 30fps cadence
+  /// with bounded bitrate to avoid jitter buffer bloat and queue lag during remote control.
   Future<void> _tuneVideoSender(MediaStreamTrack track) async {
     try {
-      final sender = (await _pc?.getSenders() ?? const <RTCRtpSender>[])
-          .firstWhere((candidate) => candidate.track?.id == track.id);
+      final senders = await _pc?.getSenders() ?? const <RTCRtpSender>[];
+      final sender = senders.firstWhere((candidate) => candidate.track?.id == track.id);
       final parameters = sender.parameters;
       final encodings = parameters.encodings ?? [RTCRtpEncoding()];
       for (final encoding in encodings) {
-        encoding.maxBitrate = 1200000;
-        encoding.maxFramerate = 15;
+        encoding.maxBitrate = 2500000;
+        encoding.minBitrate = 500000;
+        encoding.maxFramerate = 30;
         encoding.scaleResolutionDownBy = 1.0;
+        encoding.active = true;
       }
       parameters.encodings = encodings;
       parameters.degradationPreference =

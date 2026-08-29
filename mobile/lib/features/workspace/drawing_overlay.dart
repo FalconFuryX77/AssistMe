@@ -80,23 +80,27 @@ class _DrawingInputOverlayState extends State<DrawingInputOverlay> {
         onPanStart: (details) {
           final point = _normalizedPoint(details.localPosition, size);
           _points.clear();
-          if (point != null) _points.add(point);
-          if (widget.tool != AnnotationTool.eraser) {
-            widget.onStrokeUpdate?.call(List<Offset>.from(_points));
+          if (point != null) {
+            _points.add(point);
+            if (widget.tool == AnnotationTool.eraser) {
+              widget.onErase?.call(point);
+            } else {
+              widget.onStrokeUpdate?.call(List<Offset>.from(_points));
+            }
           }
         },
         onPanUpdate: (details) {
           final point = _normalizedPoint(details.localPosition, size);
           if (point == null) return;
           _points.add(point);
-          if (widget.tool != AnnotationTool.eraser) {
+          if (widget.tool == AnnotationTool.eraser) {
+            widget.onErase?.call(point);
+          } else {
             widget.onStrokeUpdate?.call(List<Offset>.from(_points));
           }
         },
         onPanEnd: (_) {
-          if (widget.tool == AnnotationTool.eraser) {
-            if (_points.isNotEmpty) widget.onErase?.call(_points.last);
-          } else if (_points.isNotEmpty) {
+          if (widget.tool != AnnotationTool.eraser && _points.isNotEmpty) {
             // Ensure single-tap dot is visible – duplicate point if needed
             final out = _points.length == 1
                 ? [ _points.first, Offset((_points.first.dx+0.001).clamp(0.0,1.0), _points.first.dy) ]
