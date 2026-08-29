@@ -39,6 +39,8 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   Offset? _laserPointer;
   Offset? _dragStartOffset;
   Offset? _dragCurrentOffset;
+  DateTime? _touchStartTime;
+  bool _isLongPress = false;
   final RTCVideoRenderer _renderer = RTCVideoRenderer();
   bool _rendererInitialized = false;
   dynamic _attachedStream;
@@ -94,40 +96,41 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     super.dispose();
   }
 
-  Future<void> _dispatchInput({
+  void _dispatchInput({
     required String eventType,
     required double x,
     required double y,
     double? endX,
     double? endY,
     int? durationMs,
-  }) async {
+  }) {
     if (!widget.allowRemoteControl) return;
+    final payload = <String, dynamic>{
+      'event_type': eventType,
+      'x': double.parse(x.toStringAsFixed(4)),
+      'y': double.parse(y.toStringAsFixed(4)),
+      'normalized_x': double.parse(x.toStringAsFixed(4)),
+      'normalized_y': double.parse(y.toStringAsFixed(4)),
+      if (endX != null) ...{
+        'end_x': double.parse(endX.toStringAsFixed(4)),
+        'normalized_end_x': double.parse(endX.toStringAsFixed(4)),
+      },
+      if (endY != null) ...{
+        'end_y': double.parse(endY.toStringAsFixed(4)),
+        'normalized_end_y': double.parse(endY.toStringAsFixed(4)),
+      },
+      ...?durationMs == null ? null : {'duration_ms': durationMs},
+    };
+    // 1. Instantly dispatch over WebRTC DataChannel (UDP, sub-15ms latency)
+    widget.onRemoteInput?.call(payload);
+
+    // 2. Asynchronously fire HTTP logging in background
     try {
-      final payload = <String, dynamic>{
-        'event_type': eventType,
-        'x': x,
-        'y': y,
-        'normalized_x': x,
-        'normalized_y': y,
-        if (endX != null) ...{
-          'end_x': endX,
-          'normalized_end_x': endX,
-        },
-        if (endY != null) ...{
-          'end_y': endY,
-          'normalized_end_y': endY,
-        },
-        ...?durationMs == null ? null : {'duration_ms': durationMs},
-      };
-      final response = await widget.apiClient.post(
+      widget.apiClient.post(
         '/sessions/${widget.sessionId}/remote-control/input',
         body: payload,
       );
-      if (response.statusCode == 200) widget.onRemoteInput?.call(payload);
-    } catch (e) {
-      debugPrint('Remote input dispatch notice: $e');
-    }
+    } catch (_) {}
   }
 
   /// Normalized point inside the bounded video rect that matches RTCVideoView's
@@ -157,6 +160,13 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
         final height = constraints.maxHeight;
 
         return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapDown: (details) {
+            _dragStartOffset = details.localPosition;
+            _dragCurrentOffset = details.localPosition;
+            _touchStartTime = DateTime.now();
+            _isLongPress = false;
+          },
           onTapUp: (details) {
             if (!widget.allowRemoteControl) return;
             final point = _normalizedVideoPoint(
@@ -169,54 +179,98 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
             });
             _dispatchInput(eventType: 'tap', x: point.dx, y: point.dy);
           },
-          onPanStart: (details) {
+          onLongPressStart: (details) {
             if (!widget.allowRemoteControl) return;
+            _isLongPress = true;
             _dragStartOffset = details.localPosition;
             _dragCurrentOffset = details.localPosition;
+            _touchStartTime = DateTime.now();
           },
-          onPanUpdate: (details) {
+          onLongPressMoveUpdate: (details) {
             if (!widget.allowRemoteControl) return;
             _dragCurrentOffset = details.localPosition;
           },
-          onPanEnd: (details) {
+          onLongPressEnd: (details) {
             if (!widget.allowRemoteControl) return;
             if (_dragStartOffset != null) {
-              final currentPointer = _dragCurrentOffset ?? _dragStartOffset!;
               final start = _normalizedVideoPoint(
                 _dragStartOffset!,
                 Size(width, height),
               );
               final end = _normalizedVideoPoint(
-                currentPointer,
+                _dragCurrentOffset ?? details.localPosition,
                 Size(width, height),
               );
               _dragStartOffset = null;
               _dragCurrentOffset = null;
-              if (start == null || end == null) return;
-
-              _dispatchInput(
-                eventType: 'drag',
-                x: start.dx,
-                y: start.dy,
-                endX: end.dx,
-                endY: end.dy,
-                durationMs: 300,
-              );
+              _isLongPress = false;
+              if (start == null) return;
+              if (end == null || (start - end).distance < 0.015) {
+                // Stationary long-press
+                _dispatchInput(
+                  eventType: 'long_press',
+                  x: start.dx,
+                  y: start.dy,
+                  durationMs: 600,
+                );
+              } else {
+                // Long press + drag (Drag & Drop widgets/icons)
+                _dispatchInput(
+                  eventType: 'drag',
+                  x: start.dx,
+                  y: start.dy,
+                  endX: end.dx,
+                  endY: end.dy,
+                  durationMs: 800,
+                );
+              }
             }
           },
-          onLongPressStart: (details) {
-            if (!widget.allowRemoteControl) return;
-            final point = _normalizedVideoPoint(
-              details.localPosition,
-              Size(width, height),
-            );
-            if (point == null) return;
-            _dispatchInput(
-              eventType: 'long_press',
-              x: point.dx,
-              y: point.dy,
-              durationMs: 600,
-            );
+          onPanStart: (details) {
+            if (!widget.allowRemoteControl || _isLongPress) return;
+            _dragStartOffset = details.localPosition;
+            _dragCurrentOffset = details.localPosition;
+            _touchStartTime = DateTime.now();
+          },
+          onPanUpdate: (details) {
+            if (!widget.allowRemoteControl || _isLongPress) return;
+            _dragCurrentOffset = details.localPosition;
+          },
+          onPanEnd: (details) {
+            if (!widget.allowRemoteControl || _isLongPress) return;
+            if (_dragStartOffset != null) {
+              final start = _normalizedVideoPoint(
+                _dragStartOffset!,
+                Size(width, height),
+              );
+              final end = _normalizedVideoPoint(
+                _dragCurrentOffset ?? _dragStartOffset!,
+                Size(width, height),
+              );
+              final elapsedMs = _touchStartTime != null
+                  ? DateTime.now().difference(_touchStartTime!).inMilliseconds
+                  : 180;
+              _dragStartOffset = null;
+              _dragCurrentOffset = null;
+              _touchStartTime = null;
+
+              if (start == null || end == null) return;
+              final dist = (start - end).distance;
+              if (dist < 0.008) {
+                // Minimal movement -> Tap
+                _dispatchInput(eventType: 'tap', x: start.dx, y: start.dy);
+              } else {
+                // Single-finger swipe / scroll
+                _dispatchInput(
+                  eventType: 'drag',
+                  x: start.dx,
+                  y: start.dy,
+                  endX: end.dx,
+                  endY: end.dy,
+                  durationMs: elapsedMs.clamp(120, 260),
+                );
+              }
+            }
           },
           child: Container(
             color: Colors.black,

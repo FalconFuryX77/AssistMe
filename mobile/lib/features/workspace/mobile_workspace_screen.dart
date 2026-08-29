@@ -311,44 +311,53 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
         valueListenable: _annotationModeNotifier,
         builder: (context, annotationMode, _) => Container(
           margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
             color: AppTheme.bgSecondary.withValues(alpha: 0.98),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppTheme.borderGlassStrong),
           ),
           child: Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               if (!granted) ...[
                 const Icon(Icons.visibility, size: 18, color: AppTheme.accentEmerald),
                 const SizedBox(width: 8),
-                const Text('Viewing Screen', style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700)),
-                const SizedBox(width: 14),
+                const Expanded(
+                  child: Text(
+                    'Viewing Screen',
+                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.touch_app, size: 16),
                   label: const Text('Request Control', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.accentPrimary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     minimumSize: Size.zero,
                   ),
                   onPressed: () => _flowCoordinatorKey.currentState?.requestControl(),
                 ),
               ] else ...[
-                _modeButton(
-                  label: 'Touch Control',
-                  icon: Icons.touch_app,
-                  selected: !annotationMode,
-                  onPressed: () => _annotationModeNotifier.value = false,
+                Expanded(
+                  child: _modeButton(
+                    label: 'Touch Control',
+                    icon: Icons.touch_app,
+                    selected: !annotationMode,
+                    onPressed: () => _annotationModeNotifier.value = false,
+                  ),
                 ),
                 const SizedBox(width: 8),
-                _modeButton(
-                  label: 'Draw / Guide',
-                  icon: Icons.edit,
-                  selected: annotationMode,
-                  onPressed: () => _annotationModeNotifier.value = true,
+                Expanded(
+                  child: _modeButton(
+                    label: 'Draw / Guide',
+                    icon: Icons.edit,
+                    selected: annotationMode,
+                    onPressed: () => _annotationModeNotifier.value = true,
+                  ),
                 ),
               ],
             ],
@@ -366,12 +375,16 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
   }) {
     return ElevatedButton.icon(
       onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
+      icon: Icon(icon, size: 16),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        overflow: TextOverflow.ellipsis,
+      ),
       style: ElevatedButton.styleFrom(
         foregroundColor: selected ? Colors.white : AppTheme.textSecondary,
         backgroundColor: selected ? AppTheme.accentEmerald : AppTheme.bgCard,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
         minimumSize: Size.zero,
         elevation: selected ? 2 : 0,
       ),

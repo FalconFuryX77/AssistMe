@@ -100,6 +100,7 @@ class AssistMeAccessibilityService : AccessibilityService() {
 
     /**
      * Dispatches a drag/swipe gesture from (startX, startY) to (endX, endY).
+     * Automatically handles drag-and-drop (holding down before moving) when durationMs >= 450ms.
      */
     @RequiresApi(Build.VERSION_CODES.N)
     fun dispatchDrag(
@@ -107,16 +108,33 @@ class AssistMeAccessibilityService : AccessibilityService() {
         startY: Float,
         endX: Float,
         endY: Float,
-        durationMs: Long = 300L,
+        durationMs: Long = 180L,
         callback: GestureResultCallback? = null
     ): Boolean {
-        val path = Path().apply {
-            moveTo(startX, startY)
-            lineTo(endX, endY)
+        val builder = GestureDescription.Builder()
+        if (durationMs >= 450L && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Drag and drop: Dwell at start position for 450ms to grab/lift icon or widget before moving
+            val holdPath = Path().apply {
+                moveTo(startX, startY)
+                lineTo(startX, startY + 1f)
+            }
+            val holdStroke = GestureDescription.StrokeDescription(holdPath, 0, 450L, true)
+            val movePath = Path().apply {
+                moveTo(startX, startY + 1f)
+                lineTo(endX, endY)
+            }
+            val moveStroke = holdStroke.continueStroke(movePath, 0, (durationMs - 450L).coerceAtLeast(200L), false)
+            builder.addStroke(holdStroke)
+            builder.addStroke(moveStroke)
+        } else {
+            val path = Path().apply {
+                moveTo(startX, startY)
+                lineTo(endX, endY)
+            }
+            val stroke = GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(100L, 1000L))
+            builder.addStroke(stroke)
         }
-        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
-        val gesture = GestureDescription.Builder().addStroke(stroke).build()
-
+        val gesture = builder.build()
         return dispatchGesture(gesture, callback, null)
     }
 
@@ -182,7 +200,7 @@ class AssistMeAccessibilityService : AccessibilityService() {
                     y,
                     endX,
                     endY,
-                    (event["duration_ms"] as? Number)?.toLong() ?: 300L
+                    (event["duration_ms"] as? Number)?.toLong() ?: 180L
                 )
             }
             "key_event" -> dispatchGlobalAction(event["key_code"] as? String ?: "")

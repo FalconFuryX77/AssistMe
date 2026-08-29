@@ -1344,13 +1344,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                     ),
                   ),
                   _annotationToolbar(),
-                  if (!_remoteControlGranted)
-                    IconButton(
-                      tooltip: 'Request touch control',
-                      color: AppTheme.accentSecondary,
-                      icon: const Icon(Icons.open_in_full),
-                      onPressed: _requestEscalation,
-                    ),
                 ],
               ),
             ),
