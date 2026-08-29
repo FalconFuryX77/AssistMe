@@ -584,18 +584,21 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                     {"type": "error", "detail": f"Unknown message type: {msg_type}"}
                 )
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
         # Android may briefly suspend this socket while the MediaProjection
         # consent activity is on screen. Keep the session alive while the
         # client reconnects; only a sustained disconnect ends the call.
-        async with async_session_factory() as db:
-            await SessionService.mark_disconnected(session_id, user.id, db)
+        try:
+            async with async_session_factory() as db:
+                await SessionService.mark_disconnected(session_id, user.id, db)
 
-        await _broadcast(
-            session_id,
-            {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
-            exclude_user=user.id,
-        )
+            await _broadcast(
+                session_id,
+                {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
+                exclude_user=user.id,
+            )
+        except Exception:
+            pass
         task = asyncio.create_task(_end_after_disconnect(session_id, user.id))
         _disconnect_tasks[(session_id, user.id)] = task
 
