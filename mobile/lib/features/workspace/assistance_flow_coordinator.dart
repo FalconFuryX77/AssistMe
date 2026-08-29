@@ -127,6 +127,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     setState(() => _annotationTool = tool);
   }
 
+  void _sendRealtimeOrP2P(Map<String, dynamic> payload) {
+    // Send over sub-15ms P2P WebRTC DataChannel first; fallback to WebSocket
+    final sentP2P = _engine.sendData(payload);
+    if (!sentP2P) {
+      _realtime?.send(payload);
+    }
+  }
+
   void _sendDrawPreview(List<Offset> points) {
     if (points.isEmpty) return;
     final draft = DrawStroke(
@@ -137,14 +145,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     setState(() => _draftStroke = draft);
     _pendingPreviewPoints = points;
     if (_previewTimer?.isActive == true) return;
-    _previewTimer = Timer(const Duration(milliseconds: 32), () {
+    _previewTimer = Timer(const Duration(milliseconds: 16), () {
       _previewTimer = null;
       final latest = _pendingPreviewPoints;
       _pendingPreviewPoints = null;
       if (latest == null || latest.isEmpty) return;
-      _realtime?.send({
+      _sendRealtimeOrP2P({
         'type': 'draw_preview',
-        'points': latest.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
+        'points': latest
+            .map((p) => {
+                  'x': double.parse(p.dx.toStringAsFixed(4)),
+                  'y': double.parse(p.dy.toStringAsFixed(4)),
+                })
+            .toList(),
         'color': _annotationColor.toARGB32(),
         'width': _annotationWidth,
       });
@@ -164,9 +177,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _redoStrokes.clear();
       _strokes.add(DrawStroke(points: points, color: color, width: width));
     });
-    _realtime?.send({
+    _sendRealtimeOrP2P({
       'type': 'draw_stroke',
-      'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
+      'points': points
+          .map((p) => {
+                'x': double.parse(p.dx.toStringAsFixed(4)),
+                'y': double.parse(p.dy.toStringAsFixed(4)),
+              })
+          .toList(),
       'color': color.toARGB32(),
       'width': width,
     });
@@ -178,10 +196,31 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       () => _strokes.removeWhere((stroke) => strokeNearPoint(stroke, point)),
     );
     _redoStrokes.clear();
-    _realtime?.send({
+    _sendRealtimeOrP2P({
       'type': 'draw_erase',
-      'point': {'x': point.dx, 'y': point.dy},
+      'point': {
+        'x': double.parse(point.dx.toStringAsFixed(4)),
+        'y': double.parse(point.dy.toStringAsFixed(4)),
+      },
     });
+    _pushOverlay();
+  }
+
+  void _undoDrawing() {
+    if (_strokes.isEmpty) return;
+    setState(() {
+      _redoStrokes.add(_strokes.removeLast());
+    });
+    _sendRealtimeOrP2P({'type': 'draw_undo'});
+    _pushOverlay();
+  }
+
+  void _redoDrawing() {
+    if (_redoStrokes.isEmpty) return;
+    setState(() {
+      _strokes.add(_redoStrokes.removeLast());
+    });
+    _sendRealtimeOrP2P({'type': 'draw_redo'});
     _pushOverlay();
   }
 
@@ -196,7 +235,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _strokes.clear();
       _redoStrokes.clear();
     });
-    _realtime?.send({'type': 'draw_clear'});
+    _sendRealtimeOrP2P({'type': 'draw_clear'});
     if (notifyOverlay) {
       try {
         await AnnotationOverlayService.clear();
@@ -237,9 +276,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _redoStrokes.clear();
       _strokes.add(DrawStroke(points: points, color: color, width: width));
     });
-    _realtime?.send({
+    _sendRealtimeOrP2P({
       'type': 'draw_stroke',
-      'points': points.map((p) => {'x': p.dx, 'y': p.dy}).toList(),
+      'points': points
+          .map((p) => {
+                'x': double.parse(p.dx.toStringAsFixed(4)),
+                'y': double.parse(p.dy.toStringAsFixed(4)),
+              })
+          .toList(),
       'color': colorValue,
       'width': width,
     });
@@ -250,12 +294,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   Future<void> toggleAudioMute(bool mute) async {
     await _engine.toggleAudioMute(mute);
-    _realtime?.send({'type': 'audio_mute_toggle', 'is_muted': mute});
+    _sendRealtimeOrP2P({'type': 'audio_mute_toggle', 'is_muted': mute});
   }
 
   Future<void> sendRemoteInput(Map<String, dynamic> event) async {
     if (!_remoteControlGranted || widget.isHelpee) return;
-    _realtime?.send({'type': 'remote_control_input', 'event': event});
+    _sendRealtimeOrP2P({'type': 'remote_control_input', 'event': event});
   }
 
   List<Map<String, dynamic>> _overlayPayload() => _strokes
@@ -278,15 +322,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     } catch (e) {
       debugPrint('Annotation overlay update failed: $e');
     }
-  }
-
-  void _scheduleOverlayPush() {
-    if (!widget.isHelpee || !_helpeeOverlayRunning) return;
-    if (_overlayTimer?.isActive == true) return;
-    _overlayTimer = Timer(const Duration(milliseconds: 32), () {
-      _overlayTimer = null;
-      _pushOverlay();
-    });
   }
 
   Future<void> _startHelpeeOverlay() async {
@@ -480,6 +515,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           'candidate': candidate,
         });
       };
+      _engine.onDataChannelMessage = (data) {
+        final type = data['type'] as String?;
+        if (type != null) {
+          _onEvent(RealtimeEvent(type, data));
+        }
+      };
       _engine.onRemoteStream = (stream) {
         // The helpee publishes screen video and mic audio as separate
         // streams; keep whichever carries video for the viewport (remote
@@ -672,7 +713,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               width: width is num ? width.toDouble() : 4,
             ),
           );
-          _scheduleOverlayPush();
+          _pushOverlay();
         }
         break;
 
@@ -1397,20 +1438,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         ),
       ),
     );
-  }
-
-  void _undoDrawing() {
-    if (_strokes.isEmpty) return;
-    setState(() => _redoStrokes.add(_strokes.removeLast()));
-    _realtime?.send({'type': 'draw_undo'});
-    _pushOverlay();
-  }
-
-  void _redoDrawing() {
-    if (_redoStrokes.isEmpty) return;
-    setState(() => _strokes.add(_redoStrokes.removeLast()));
-    _realtime?.send({'type': 'draw_redo'});
-    _pushOverlay();
   }
 
   Future<void> _showAnnotationOptions() async {

@@ -11,6 +11,8 @@
 ///    `signal_answer`, `signal_ice_candidate`).
 library;
 
+import 'dart:convert';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -31,6 +33,7 @@ class WebRTCEngine {
   List<Map<String, dynamic>> _iceServers = const [];
 
   RTCPeerConnection? _pc;
+  RTCDataChannel? _dataChannel;
   MediaStream? _micStream;
   MediaStream? _screenStream;
 
@@ -43,9 +46,18 @@ class WebRTCEngine {
   /// Peer connection state transitions for UI status display.
   void Function(WebRTCEngineState state)? onStateChanged;
 
+  /// Direct P2P data channel messages (annotations, gestures) for sub-15ms latency.
+  void Function(Map<String, dynamic> data)? onDataChannelMessage;
+
+  /// P2P DataChannel state changes.
+  void Function(bool isOpen)? onDataChannelState;
+
   WebRTCEngineState get state => _state;
   bool get isScreenSharing => _isScreenSharing;
   bool get isAudioMuted => _isAudioMuted;
+  bool get isDataChannelOpen =>
+      _dataChannel != null &&
+      _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
   RTCPeerConnection? get peerConnection => _pc;
 
   Future<void> initialize({
@@ -94,6 +106,9 @@ class WebRTCEngine {
     };
     _pc!.onAddStream = (stream) {
       onRemoteStream?.call(stream);
+    };
+    _pc!.onDataChannel = (channel) {
+      _setupDataChannel(channel);
     };
     _pc!.onConnectionState = (state) {
       switch (state) {
@@ -297,10 +312,58 @@ class WebRTCEngine {
   }
 
   // ---------------------------------------------------------------------------
+  // P2P Data Channel (Instantaneous Annotations & Gestures)
+  // ---------------------------------------------------------------------------
+
+  Future<void> createDataChannel([String label = 'assistme_channel']) async {
+    if (_pc == null) return;
+    try {
+      final init = RTCDataChannelInit()..ordered = true;
+      final channel = await _pc!.createDataChannel(label, init);
+      _setupDataChannel(channel);
+    } catch (_) {}
+  }
+
+  void _setupDataChannel(RTCDataChannel channel) {
+    _dataChannel = channel;
+    channel.onDataChannelState = (state) {
+      onDataChannelState?.call(state == RTCDataChannelState.RTCDataChannelOpen);
+    };
+    channel.onMessage = (RTCDataChannelMessage msg) {
+      if (msg.isBinary) return;
+      try {
+        final decoded = jsonDecode(msg.text);
+        if (decoded is Map<String, dynamic>) {
+          onDataChannelMessage?.call(decoded);
+        }
+      } catch (_) {}
+    };
+  }
+
+  /// Sends a JSON payload directly over P2P DataChannel (UDP, sub-15ms latency).
+  /// Returns true if successfully queued on the open data channel.
+  bool sendData(Map<String, dynamic> data) {
+    if (_dataChannel != null &&
+        _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen) {
+      try {
+        _dataChannel!.send(RTCDataChannelMessage(jsonEncode(data)));
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
   // Signaling primitives (plain maps so RealtimeService can relay them)
   // ---------------------------------------------------------------------------
 
   Future<Map<String, dynamic>> createOffer() async {
+    // Automatically prepare data channel on offerer side
+    if (_dataChannel == null) {
+      await createDataChannel();
+    }
     final offer = await _pc!.createOffer({
       'offerToReceiveVideo': true,
       'offerToReceiveAudio': true,
@@ -361,6 +424,10 @@ class WebRTCEngine {
   Future<void> dispose() async {
     try {
       await stopScreenCapture();
+      try {
+        await _dataChannel?.close();
+      } catch (_) {}
+      _dataChannel = null;
       if (_micStream != null) {
         for (final track in _micStream!.getTracks()) {
           await track.stop();

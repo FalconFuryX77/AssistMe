@@ -56,6 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _incomingCall;
   bool _incomingDialogOpen = false;
   Map<String, dynamic>? _activeSession;
+  bool _isReconnecting = false;
+  bool _isOpeningSession = false;
 
   // Inline setup code handling for "Add a helper"
   String? _myCode;
@@ -620,32 +622,44 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  void _openLiveSession(
+  Future<void> _openLiveSession(
     String sessionId, {
     required bool isHelpee,
     String? peerName,
-  }) {
-    if (!mounted) return;
+  }) async {
+    if (!mounted || _isOpeningSession) return;
+    _isOpeningSession = true;
     final resolvedPeerName = peerName ?? _ringingName ?? 'your contact';
-    widget.secureStorage.saveActiveSession(
+    await widget.secureStorage.saveActiveSession(
       sessionId: sessionId,
       peerName: resolvedPeerName,
       isHelpee: isHelpee,
     );
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => MobileWorkspaceScreen(
-          sessionId: sessionId,
-          sessionCode: 'LIVE',
-          apiClient: widget.apiClient,
-          secureStorage: widget.secureStorage,
-          isHelpee: isHelpee,
-          autoStartScreenShare: isHelpee,
-          peerName: resolvedPeerName,
-          onSessionClosed: _clearActiveSession,
+    if (!mounted) {
+      _isOpeningSession = false;
+      return;
+    }
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => MobileWorkspaceScreen(
+            sessionId: sessionId,
+            sessionCode: 'LIVE',
+            apiClient: widget.apiClient,
+            secureStorage: widget.secureStorage,
+            isHelpee: isHelpee,
+            autoStartScreenShare: isHelpee,
+            peerName: resolvedPeerName,
+            onSessionClosed: _clearActiveSession,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _isOpeningSession = false;
+      if (mounted) {
+        await _loadLists();
+      }
+    }
   }
 
   Future<String?> _askForMessage(Map<String, dynamic> device) async {
@@ -739,24 +753,10 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
       if (accept && mounted) {
-        await widget.secureStorage.saveActiveSession(
-          sessionId: call['session_id'] as String,
-          peerName: (call['from_name'] as String?) ?? 'your contact',
+        await _openLiveSession(
+          call['session_id'] as String,
           isHelpee: false,
-        );
-        if (!mounted) return;
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => MobileWorkspaceScreen(
-              sessionId: call['session_id'] as String,
-              sessionCode: 'LIVE',
-              apiClient: widget.apiClient,
-              secureStorage: widget.secureStorage,
-              isHelpee: false,
-              peerName: (call['from_name'] as String?) ?? 'your contact',
-              onSessionClosed: _clearActiveSession,
-            ),
-          ),
+          peerName: (call['from_name'] as String?) ?? 'your contact',
         );
       }
     } catch (e) {
@@ -1382,13 +1382,22 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             ElevatedButton(
-              onPressed: _reconnectActiveSession,
+              onPressed: (_isReconnecting || _isOpeningSession) ? null : _reconnectActiveSession,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.accentEmerald,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 minimumSize: const Size(70, 44),
               ),
-              child: const Text('Rejoin'),
+              child: _isReconnecting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text('Rejoin'),
             ),
           ],
         ),
@@ -1397,9 +1406,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _reconnectActiveSession() async {
+    if (_isReconnecting || _isOpeningSession) return;
     final active = _activeSession;
     if (active == null || !mounted) return;
     final sessionId = active['session_id'] as String;
+    setState(() => _isReconnecting = true);
     try {
       final response = await widget.apiClient.post(
         '/sessions/recover',
@@ -1413,7 +1424,7 @@ class _HomeScreenState extends State<HomeScreen> {
           return;
         }
       }
-      _openLiveSession(
+      await _openLiveSession(
         sessionId,
         isHelpee: active['is_helpee'] == true,
         peerName: active['peer_name'] as String? ?? 'your contact',
@@ -1423,6 +1434,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('That session is no longer available.')),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isReconnecting = false);
       }
     }
   }
