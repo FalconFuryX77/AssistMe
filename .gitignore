@@ -27,3 +27,6 @@ coverage/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Release binaries
+releases/*.apk
