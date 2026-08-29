@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SecureStorageService {
   static const String keyAccessToken = 'jwt_access_token';
   static const String keyRefreshToken = 'jwt_refresh_token';
+  static const String keyDeviceSecret = 'device_auth_secret';
   static const String keyE2EEIdentityKey = 'e2ee_identity_key';
   static const String keyServerUrl = 'server_base_url';
   static const String keyDisplayName = 'device_display_name';
@@ -107,5 +108,13 @@ class SecureStorageService {
 
   Future<String?> getRefreshToken() async {
     return await read(key: keyRefreshToken);
+  }
+
+  Future<void> saveDeviceSecret(String secret) async {
+    await write(key: keyDeviceSecret, value: secret);
+  }
+
+  Future<String?> getDeviceSecret() async {
+    return await read(key: keyDeviceSecret);
   }
 }

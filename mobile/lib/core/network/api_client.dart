@@ -214,10 +214,11 @@ class ApiClient {
   // ---------------------------------------------------------------------------
 
   /// Device-first bootstrap: no email/password. Returns tokens + (on first
-  /// launch only) the one-time recovery code.
+  /// launch only) the one-time recovery code and device authentication secret.
   Future<http.Response> deviceBootstrap({
     required String deviceFingerprint,
     String? displayName,
+    String? deviceSecret,
     bool requireAuth = false,
   }) {
     return post(
@@ -225,6 +226,7 @@ class ApiClient {
       body: {
         'device_fingerprint': deviceFingerprint,
         ...?displayName == null ? null : {'display_name': displayName},
+        ...?deviceSecret == null ? null : {'device_secret': deviceSecret},
       },
       requireAuth: requireAuth,
     );

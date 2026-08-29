@@ -27,6 +27,7 @@ async def device_bootstrap(
     return await AuthService.device_bootstrap(
         device_fingerprint=payload.device_fingerprint,
         display_name=payload.display_name,
+        device_secret=payload.device_secret,
         db=db,
     )
 

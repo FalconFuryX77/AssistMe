@@ -48,9 +48,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     try {
       final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+      final existingSecret = await widget.secureStorage.getDeviceSecret();
       final resp = await widget.apiClient.deviceBootstrap(
         deviceFingerprint: fingerprint,
         displayName: name,
+        deviceSecret: existingSecret,
       );
       if (resp.statusCode != 201) {
         String errorMsg = 'Could not set up (${resp.statusCode}). Please try again.';
@@ -72,6 +74,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         accessToken: data['access_token'] as String,
         refreshToken: data['refresh_token'] as String,
       );
+      final returnedSecret = data['device_secret'] as String?;
+      if (returnedSecret != null && returnedSecret.isNotEmpty) {
+        await widget.secureStorage.saveDeviceSecret(returnedSecret);
+      }
       await widget.secureStorage.saveDisplayName(name);
 
       if (!mounted) return;
@@ -399,6 +405,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         accessToken: data['access_token'] as String,
         refreshToken: data['refresh_token'] as String,
       );
+      final returnedSecret = data['device_secret'] as String?;
+      if (returnedSecret != null && returnedSecret.isNotEmpty) {
+        await widget.secureStorage.saveDeviceSecret(returnedSecret);
+      }
       final name = (data['display_name'] as String?) ?? '';
       if (name.isNotEmpty) await widget.secureStorage.saveDisplayName(name);
       if (mounted) Navigator.of(context).pushReplacementNamed('/home');

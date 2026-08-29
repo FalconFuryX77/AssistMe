@@ -28,12 +28,13 @@ class AuthService:
         device_fingerprint: str,
         display_name: str | None,
         db: AsyncSession,
+        device_secret: str | None = None,
     ) -> dict:
         """Device-first identity: find-or-create the account for this install.
 
         First call creates an invisible user (no email/password known to the
-        human) plus a hashed one-time recovery code. Later calls simply log
-        the same identity back in and refresh tokens.
+        human) plus a hashed one-time recovery code and a cryptographic device secret.
+        Later calls must verify the device secret to prevent account hijacking.
         """
         result = await db.execute(
             select(DeviceAccount).where(
@@ -43,6 +44,7 @@ class AuthService:
         account = result.scalar_one_or_none()
 
         recovery_code: str | None = None
+        issued_secret: str | None = None
 
         if account is None:
             # --- first launch: create invisible identity ---
@@ -58,15 +60,37 @@ class AuthService:
             await db.flush()
 
             recovery_code = secrets.token_hex(6)  # 12 chars, shown once
+            issued_secret = device_secret or secrets.token_urlsafe(32)
             account = DeviceAccount(
                 user_id=user.id,
                 fingerprint=device_fingerprint,
                 recovery_code_hash=AuthService._hash_recovery(recovery_code),
+                device_secret_hash=AuthService._hash_recovery(issued_secret),
             )
             db.add(account)
             created = True
             resolved_name = display_name
         else:
+            # --- Returning login: verify device_secret if registered ---
+            if account.device_secret_hash:
+                if not device_secret or not secrets.compare_digest(
+                    AuthService._hash_recovery(device_secret),
+                    account.device_secret_hash,
+                ):
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid device credentials: authentication secret mismatch.",
+                    )
+                issued_secret = device_secret
+            else:
+                # Migration: register secret on first upgrade if provided
+                if device_secret:
+                    account.device_secret_hash = AuthService._hash_recovery(device_secret)
+                    issued_secret = device_secret
+                else:
+                    issued_secret = secrets.token_urlsafe(32)
+                    account.device_secret_hash = AuthService._hash_recovery(issued_secret)
+
             result = await db.execute(select(User).where(User.id == account.user_id))
             user = result.scalar_one_or_none()
             if user is None:
@@ -113,6 +137,7 @@ class AuthService:
             "display_name": resolved_name,
             "created": created,
             "recovery_code": recovery_code,
+            "device_secret": issued_secret,
         }
 
     @staticmethod
@@ -123,10 +148,21 @@ class AuthService:
         exclude_user_id: str | None = None,
     ) -> None:
         """Validate the human-facing display name."""
-        if not display_name or not display_name.strip():
+        if not display_name:
+            return
+
+        normalized = display_name.strip()
+        query = select(User).where(
+            func.lower(User.display_name) == normalized.lower()
+        )
+        if exclude_user_id is not None:
+            query = query.where(User.id != exclude_user_id)
+
+        result = await db.execute(query)
+        if result.scalar_one_or_none() is not None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Please enter your name",
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"The name '{normalized}' is already in use. Please choose a different name.",
             )
 
     @staticmethod
@@ -168,6 +204,8 @@ class AuthService:
 
         # Rebind: this physical install now IS that account.
         account.fingerprint = device_fingerprint
+        new_secret = secrets.token_urlsafe(32)
+        account.device_secret_hash = AuthService._hash_recovery(new_secret)
         await db.flush()
 
         result = await db.execute(select(User).where(User.id == account.user_id))
@@ -197,6 +235,7 @@ class AuthService:
             "display_name": user.display_name,
             "created": False,
             "recovery_code": None,
+            "device_secret": new_secret,
         }
 
     @staticmethod

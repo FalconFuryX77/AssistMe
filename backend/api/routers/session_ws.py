@@ -565,16 +565,52 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 "draw_preview", "draw_stroke", "draw_erase", "draw_undo", "draw_redo", "draw_clear"
             ):
                 # Drawing is the default, least-privilege guidance layer.
-                # It never grants touch control and is relayed to both phones.
+                # Validate and bound payload to prevent memory/CPU exhaustion.
+                raw_points = msg.get("points")
+                sanitized_points = None
+                if isinstance(raw_points, list):
+                    sanitized_points = []
+                    for pt in raw_points[:128]:
+                        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                            try:
+                                px = max(0.0, min(1.0, float(pt[0])))
+                                py = max(0.0, min(1.0, float(pt[1])))
+                                sanitized_points.append([px, py])
+                            except (ValueError, TypeError):
+                                pass
+                        elif isinstance(pt, dict) and "x" in pt and "y" in pt:
+                            try:
+                                px = max(0.0, min(1.0, float(pt["x"])))
+                                py = max(0.0, min(1.0, float(pt["y"])))
+                                sanitized_points.append({"x": px, "y": py})
+                            except (ValueError, TypeError):
+                                pass
+
+                raw_point = msg.get("point")
+                sanitized_point = None
+                if isinstance(raw_point, (list, tuple)) and len(raw_point) >= 2:
+                    try:
+                        sanitized_point = [
+                            max(0.0, min(1.0, float(raw_point[0]))),
+                            max(0.0, min(1.0, float(raw_point[1]))),
+                        ]
+                    except (ValueError, TypeError):
+                        pass
+
+                raw_width = msg.get("width")
+                sanitized_width = 4.0
+                if isinstance(raw_width, (int, float)):
+                    sanitized_width = max(1.0, min(50.0, float(raw_width)))
+
                 await _broadcast(
                     session_id,
                     {
                         "type": msg_type,
                         "sender_user_id": user.id,
-                        "points": msg.get("points"),
-                        "point": msg.get("point"),
-                        "color": msg.get("color"),
-                        "width": msg.get("width"),
+                        "points": sanitized_points,
+                        "point": sanitized_point,
+                        "color": str(msg.get("color", "#FF0000"))[:32],
+                        "width": sanitized_width,
                     },
                     exclude_user=user.id,
                 )

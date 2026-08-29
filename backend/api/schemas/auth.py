@@ -61,13 +61,13 @@ class MessageResponse(BaseModel):
 class DeviceBootstrapRequest(BaseModel):
     """Device-first registration/login — no email or password, ever.
 
-    The client sends its stable install fingerprint; the first call creates an
-    invisible account and returns a one-time recovery code. Every later call
-    simply logs that identity back in.
+    The client sends its stable install fingerprint and an optional
+    device_secret to authenticate returning logins.
     """
 
     device_fingerprint: str
     display_name: str | None = None
+    device_secret: str | None = None
 
     @field_validator("device_fingerprint")
     @classmethod
@@ -89,6 +89,7 @@ class DeviceBootstrapResponse(BaseModel):
 
     `recovery_code` is returned exactly once, on the call that created the
     identity; it is the root credential for reclaiming after reinstall.
+    `device_secret` is the cryptographic secret for authenticating the device.
     """
 
     access_token: str
@@ -98,3 +99,4 @@ class DeviceBootstrapResponse(BaseModel):
     display_name: str | None = None
     created: bool
     recovery_code: str | None = None
+    device_secret: str | None = None

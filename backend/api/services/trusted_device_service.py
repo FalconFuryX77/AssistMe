@@ -124,18 +124,23 @@ class TrustedDeviceService:
         )
 
         if pairing is None:
+            for p in pairings:
+                p.failed_attempts += 1
+                if p.failed_attempts >= 5:
+                    p.status = "expired"
+            await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Pairing code not found",
             )
 
-        # 3. Check expiry
-        if _is_expired(pairing.expires_at):
+        # 3. Check expiry and attempt limits
+        if pairing.failed_attempts >= 5 or _is_expired(pairing.expires_at):
             pairing.status = "expired"
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
-                detail="Pairing code has expired",
+                detail="Pairing code has expired or was locked due to too many attempts",
             )
 
         # 4. Create the accepted device
@@ -206,17 +211,22 @@ class TrustedDeviceService:
             None,
         )
         if pairing is None:
+            for cand in candidates:
+                cand.failed_attempts += 1
+                if cand.failed_attempts >= 5:
+                    cand.status = "expired"
+            await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Setup code not found",
             )
 
-        if _is_expired(pairing.expires_at):
+        if pairing.failed_attempts >= 5 or _is_expired(pairing.expires_at):
             pairing.status = "expired"
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
-                detail="Setup code has expired",
+                detail="Setup code has expired or was locked due to too many attempts",
             )
 
         # Reject if this device is already accepted for the owner

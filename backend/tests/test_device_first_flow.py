@@ -19,11 +19,20 @@ FP_HELPER = "assistme-device-fp-helper-000000000002"
 
 
 async def _bootstrap_device(
-    client: AsyncClient, fingerprint: str, name: str | None = None
+    client: AsyncClient,
+    fingerprint: str,
+    name: str | None = None,
+    device_secret: str | None = None,
 ) -> dict:
+    payload = {"device_fingerprint": fingerprint}
+    if name is not None:
+        payload["display_name"] = name
+    if device_secret is not None:
+        payload["device_secret"] = device_secret
+
     resp = await client.post(
         "/auth/device",
-        json={"device_fingerprint": fingerprint, "display_name": name},
+        json=payload,
     )
     assert resp.status_code == 201, resp.text
     return resp.json()
@@ -43,8 +52,11 @@ async def test_device_bootstrap_creates_identity_once(client: AsyncClient) -> No
     assert len(first["recovery_code"]) == 12
     assert first["display_name"] == "Grandma"
     assert first["access_token"]
+    assert first["device_secret"]
 
-    second = await _bootstrap_device(client, FP_HELPEE)
+    second = await _bootstrap_device(
+        client, FP_HELPEE, device_secret=first["device_secret"]
+    )
     assert second["created"] is False
     assert second["recovery_code"] is None
     assert second["user_id"] == first["user_id"]
@@ -56,7 +68,9 @@ async def test_device_bootstrap_creates_identity_once(client: AsyncClient) -> No
 async def test_device_bootstrap_updates_display_name(client: AsyncClient) -> None:
     """A later bootstrap can rename the device owner."""
     first = await _bootstrap_device(client, FP_HELPER, "Old Name")
-    renamed = await _bootstrap_device(client, FP_HELPER, "New Name")
+    renamed = await _bootstrap_device(
+        client, FP_HELPER, "New Name", device_secret=first["device_secret"]
+    )
     assert renamed["user_id"] == first["user_id"]
     assert renamed["display_name"] == "New Name"
 

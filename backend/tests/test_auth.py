@@ -43,17 +43,26 @@ async def test_device_bootstrap_first_call_creates_identity(client: AsyncClient)
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_device_bootstrap_subsequent_call_silent_login(client: AsyncClient) -> None:
-    """Subsequent bootstrap with same fingerprint logs in without creating a new user or exposing code."""
+    """Subsequent bootstrap with same fingerprint logs in when device_secret matches, and rejects spoofing."""
     first = await client.post(
         "/auth/device",
         json={"device_fingerprint": FP_2, "display_name": "Dad"},
     )
     assert first.status_code == 201
     first_data = first.json()
+    assert first_data["device_secret"]
 
+    # Spoofed attempt with wrong/missing secret is rejected
+    spoof = await client.post(
+        "/auth/device",
+        json={"device_fingerprint": FP_2, "device_secret": "wrong-secret-guess"},
+    )
+    assert spoof.status_code == 401
+
+    # Legitimate device presenting its secret succeeds
     second = await client.post(
         "/auth/device",
-        json={"device_fingerprint": FP_2},
+        json={"device_fingerprint": FP_2, "device_secret": first_data["device_secret"]},
     )
     assert second.status_code == 201
     second_data = second.json()

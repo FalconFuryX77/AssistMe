@@ -8,7 +8,7 @@ may act as a helper for that user's assistance sessions.
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from core.database import Base
@@ -82,6 +82,8 @@ class DevicePairing(Base):
     pairing_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     # The user who claimed the setup code (the helper), bound at claim time.
     claimed_by_user_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    # Number of failed code verification attempts before lockout
+    failed_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # pending -> confirmed -> expired
     status: Mapped[str] = mapped_column(
         String(20), default="pending", nullable=False

@@ -56,9 +56,16 @@ help_call_rate_limiter = RateLimiter(max_requests=12, window_seconds=60)
 
 
 def _client_identifier(request: Request, bucket: str) -> str:
-  """Return a stable limiter key without trusting spoofable user input."""
-  host = request.client.host if request.client else "unknown"
-  return f"{bucket}:{host}"
+    """Return a stable limiter key with reverse proxy IP header resolution."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        # First IP in X-Forwarded-For is the originating client
+        host = forwarded.split(",")[0].strip()
+    else:
+        host = request.headers.get("X-Real-IP") or (
+            request.client.host if request.client else "unknown"
+        )
+    return f"{bucket}:{host}"
 
 
 def limit_pairing_attempts(request: Request) -> None:

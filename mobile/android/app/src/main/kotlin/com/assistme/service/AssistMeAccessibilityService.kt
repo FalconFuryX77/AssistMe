@@ -17,13 +17,18 @@ import androidx.annotation.RequiresApi
 class AssistMeAccessibilityService : AccessibilityService() {
 
     companion object {
-        private const val TAG = "AssistMeA11y"
+        private const val TAG = "AssistMeAccessibility"
         var instance: AssistMeAccessibilityService? = null
             private set
 
         private const val CLICK_DURATION_MS = 50L
         private const val LONG_PRESS_DURATION_MS = 600L
+        private const val PANIC_SAFE_ZONE_TOP_RATIO = 0.10f
     }
+
+    @Volatile
+    var isSensitiveWindowFocused: Boolean = false
+        private set
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -35,17 +40,29 @@ class AssistMeAccessibilityService : AccessibilityService() {
         if (event == null) return
 
         when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
-                val packageName = event.packageName?.toString() ?: ""
-                val className = event.className?.toString() ?: ""
-                Log.d(TAG, "Window state changed: package=$packageName, class=$className")
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
+                val packageName = event.packageName?.toString()?.lowercase() ?: ""
+                val className = event.className?.toString()?.lowercase() ?: ""
 
-                // Check for sensitive windows (e.g. password prompts, banking apps)
-                val isSensitive = packageName.contains("password", ignoreCase = true) ||
-                                  packageName.contains("bank", ignoreCase = true) ||
-                                  className.contains("Credentials", ignoreCase = true)
+                // Check for sensitive windows (passwords, banking apps, 2FA, system permission prompts)
+                val isSensitive = packageName.contains("password") ||
+                                  packageName.contains("bank") ||
+                                  packageName.contains("wallet") ||
+                                  packageName.contains("pay") ||
+                                  packageName.contains("authenticator") ||
+                                  packageName.contains("bitwarden") ||
+                                  packageName.contains("keepass") ||
+                                  packageName.contains("1password") ||
+                                  packageName.contains("permissioncontroller") ||
+                                  packageName.contains("packageinstaller") ||
+                                  className.contains("credentials") ||
+                                  className.contains("password") ||
+                                  className.contains("grantpermissions")
+
+                isSensitiveWindowFocused = isSensitive
                 if (isSensitive) {
-                    Log.w(TAG, "FLAG_SECURE / Sensitive window detected: $packageName")
+                    Log.w(TAG, "FLAG_SECURE / Sensitive window active ($packageName / $className) - Remote control latched.")
                 }
             }
         }
@@ -168,9 +185,15 @@ class AssistMeAccessibilityService : AccessibilityService() {
 
     /** Dispatches the normalized event received from the helper phone.
      * Accurately scales normalized coordinates to the real physical display dimensions.
+     * Enforces native security boundaries: Panic Safe Zone (top 10%) & sensitive app lock.
      */
     @RequiresApi(Build.VERSION_CODES.N)
     fun dispatchInput(event: Map<*, *>): Boolean {
+        if (isSensitiveWindowFocused) {
+            Log.w(TAG, "BLOCKED input: Sensitive window/credential prompt is active.")
+            return false
+        }
+
         val realSize = getRealScreenSize()
         val screenW = realSize.x.toFloat()
         val screenH = realSize.y.toFloat()
@@ -179,6 +202,12 @@ class AssistMeAccessibilityService : AccessibilityService() {
             ?: (((event["x"] as? Number)?.toFloat() ?: 0f).let { if (it > 1f) it / screenW else it })
         val normalizedY = (event["normalized_y"] as? Number)?.toFloat()
             ?: (((event["y"] as? Number)?.toFloat() ?: 0f).let { if (it > 1f) it / screenH else it })
+
+        // Panic Safe Zone: top 10% of screen is reserved for the helpee's floating panic stop dock
+        if (normalizedY < PANIC_SAFE_ZONE_TOP_RATIO) {
+            Log.w(TAG, "BLOCKED input: Target coordinate ($normalizedX, $normalizedY) is within the Panic Safe Zone.")
+            return false
+        }
 
         val x = (normalizedX * screenW).coerceIn(0f, screenW - 1f)
         val y = (normalizedY * screenH).coerceIn(0f, screenH - 1f)
@@ -191,6 +220,11 @@ class AssistMeAccessibilityService : AccessibilityService() {
                     ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
                 val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
                     ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
+
+                if (normEndY < PANIC_SAFE_ZONE_TOP_RATIO) {
+                    Log.w(TAG, "BLOCKED drag: Destination ($normEndX, $normEndY) is within the Panic Safe Zone.")
+                    return false
+                }
 
                 val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
                 val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
