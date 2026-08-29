@@ -30,9 +30,17 @@ class Base(DeclarativeBase):
 
 
 async def create_tables() -> None:
-    """Create all tables from ORM metadata (dev convenience)."""
+    """Create all tables from ORM metadata and perform incremental column migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        try:
+            await conn.execute(text("ALTER TABLE device_accounts ADD COLUMN device_secret_hash VARCHAR(64)"))
+        except Exception:
+            pass
+        try:
+            await conn.execute(text("ALTER TABLE device_pairings ADD COLUMN failed_attempts INTEGER DEFAULT 0 NOT NULL"))
+        except Exception:
+            pass
 
 
 async def check_database_connection() -> None:
