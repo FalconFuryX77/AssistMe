@@ -92,6 +92,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     try {
       await widget.apiClient.post('/sessions/${widget.sessionId}/leave');
     } catch (_) {}
+    await widget.secureStorage.clearActiveSession();
     await widget.onSessionClosed?.call();
     if (!mounted) return;
     setState(() => _allowPop = true);
@@ -99,6 +100,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
   }
 
   Future<void> _handleRemoteSessionEnded() async {
+    await widget.secureStorage.clearActiveSession();
     await widget.onSessionClosed?.call();
     if (!mounted) return;
     setState(() => _allowPop = true);

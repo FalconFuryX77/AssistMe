@@ -59,6 +59,7 @@ class WebRTCEngine {
       _dataChannel != null &&
       _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
   RTCPeerConnection? get peerConnection => _pc;
+  MediaStream? get micStream => _micStream;
 
   Future<void> initialize({
     required List<Map<String, dynamic>> iceServers,
@@ -364,20 +365,14 @@ class WebRTCEngine {
     if (_dataChannel == null) {
       await createDataChannel();
     }
-    final offer = await _pc!.createOffer({
-      'offerToReceiveVideo': true,
-      'offerToReceiveAudio': true,
-    });
+    final offer = await _pc!.createOffer({});
     await _pc!.setLocalDescription(offer);
     final desc = await _pc!.getLocalDescription();
     return {'type': desc!.type, 'sdp': desc.sdp};
   }
 
   Future<Map<String, dynamic>> createAnswer() async {
-    final answer = await _pc!.createAnswer({
-      'offerToReceiveVideo': true,
-      'offerToReceiveAudio': true,
-    });
+    final answer = await _pc!.createAnswer({});
     await _pc!.setLocalDescription(answer);
     final desc = await _pc!.getLocalDescription();
     return {'type': desc!.type, 'sdp': desc.sdp};

@@ -531,6 +531,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       await _engine.initialize(iceServers: iceServers);
+      if (!widget.isHelpee) {
+        await _engine.startMicOnly();
+      }
       if (mounted) setState(() => _mediaReady = true);
 
       // The helper can receive the offer before its media engine finishes
@@ -611,13 +614,15 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
     if (remoteStreamNotifier.value != null) return;
     try {
+      if (!widget.isHelpee && _engine.micStream == null) {
+        await _engine.startMicOnly();
+      }
       await _engine.setRemoteDescription(sdp);
       _remoteDescriptionSet = true;
       for (final candidate in _pendingIceCandidates) {
         await _engine.addIceCandidate(candidate);
       }
       _pendingIceCandidates.clear();
-      await _engine.startMicOnly();
       final answer = await _engine.createAnswer();
       _realtime?.send({'type': 'signal_answer', 'sdp': answer});
     } catch (e) {

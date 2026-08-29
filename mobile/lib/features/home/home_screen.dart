@@ -82,7 +82,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _bootstrap() async {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
-    _activeSession = await widget.secureStorage.getActiveSession();
+    await _refreshActiveSession();
     await [Permission.microphone, Permission.notification].request();
     await _loadLists();
     await _connectChannel();
@@ -92,6 +92,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         _checkMissedCalls();
+        _refreshActiveSession();
       }
     });
   }
@@ -1403,6 +1404,64 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _refreshActiveSession() async {
+    final active = await widget.secureStorage.getActiveSession();
+    if (active == null) {
+      if (mounted && _activeSession != null) {
+        setState(() => _activeSession = null);
+      }
+      return;
+    }
+    final sessionId = active['session_id'] as String?;
+    if (sessionId == null) {
+      await widget.secureStorage.clearActiveSession();
+      if (mounted) setState(() => _activeSession = null);
+      return;
+    }
+    try {
+      final resp = await widget.apiClient.get('/sessions/$sessionId');
+      if (resp.statusCode != 200) {
+        await widget.secureStorage.clearActiveSession();
+        if (mounted) setState(() => _activeSession = null);
+        return;
+      }
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      final status = data['status'] as String?;
+      final participants = (data['participants'] as List?) ?? [];
+
+      if (status == 'ended') {
+        await widget.secureStorage.clearActiveSession();
+        if (mounted) setState(() => _activeSession = null);
+        return;
+      }
+
+      // Check if the other person is still in the call (connected or waiting)
+      bool otherConnected = false;
+      for (final p in participants) {
+        if (p is Map) {
+          final pStatus = p['status'] as String?;
+          if (pStatus == 'connected' || pStatus == 'waiting') {
+            otherConnected = true;
+            break;
+          }
+        }
+      }
+      if (!otherConnected) {
+        // Nobody is in the session -> end and clear
+        await widget.secureStorage.clearActiveSession();
+        if (mounted) setState(() => _activeSession = null);
+        return;
+      }
+
+      if (mounted && _activeSession == null) {
+        setState(() => _activeSession = active);
+      }
+    } catch (_) {
+      await widget.secureStorage.clearActiveSession();
+      if (mounted) setState(() => _activeSession = null);
+    }
   }
 
   Future<void> _reconnectActiveSession() async {
