@@ -613,9 +613,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _pendingOffer = sdp;
       return;
     }
-    if (remoteStreamNotifier.value != null) return;
     try {
-      if (!widget.isHelpee && _engine.micStream == null) {
+      if (!widget.isHelpee) {
         await _engine.startMicOnly();
       }
       await _engine.setRemoteDescription(sdp);
@@ -812,12 +811,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'request_offer':
-        if (widget.isHelpee && _screenShareStarted) {
-          // Helper reconnected and has no video – re-offer immediately.
-          // If media is still recovering, queue via _handleRealtimeConnected.
-          if (!_mediaRecovering) {
-            await _recoverMedia(sendOffer: true);
+        if (widget.isHelpee) {
+          if (!_screenShareStarted && widget.autoStartScreenShare) {
+            startScreenShare();
+          } else if (_screenShareStarted && !_mediaRecovering) {
+            _recoverMedia(sendOffer: true);
           }
+        }
+        break;
+
+      case 'screen_share_start':
+        if (!widget.isHelpee && remoteStreamNotifier.value == null) {
+          _realtime?.send({'type': 'request_offer'});
         }
         break;
 

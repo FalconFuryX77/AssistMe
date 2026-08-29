@@ -215,6 +215,14 @@ class WebRTCEngine {
       await _ensurePermissions();
     }
 
+    if (_screenStream != null) {
+      for (final track in _screenStream!.getTracks()) {
+        await track.stop();
+      }
+      await _screenStream!.dispose();
+      _screenStream = null;
+    }
+
     MediaStream? screen;
     try {
       screen = await navigator.mediaDevices.getDisplayMedia({
@@ -264,14 +272,29 @@ class WebRTCEngine {
   }
 
   Future<void> _addMicrophone() async {
-    if (_micStream != null) return;
-    final mic = await navigator.mediaDevices.getUserMedia({
-      'audio': true,
-      'video': false,
-    });
-    _micStream = mic;
-    for (final track in mic.getAudioTracks()) {
-      await _pc!.addTrack(track, mic);
+    if (_pc == null) return;
+    if (_micStream == null) {
+      final mic = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': false,
+      });
+      _micStream = mic;
+    }
+
+    try {
+      final senders = await _pc!.getSenders();
+      final audioTrackIds = senders.map((s) => s.track?.id).toSet();
+
+      for (final track in _micStream!.getAudioTracks()) {
+        if (!audioTrackIds.contains(track.id)) {
+          await _pc!.addTrack(track, _micStream!);
+        }
+        track.enabled = !_isAudioMuted;
+      }
+    } catch (_) {
+      for (final track in _micStream!.getAudioTracks()) {
+        track.enabled = !_isAudioMuted;
+      }
     }
   }
 
