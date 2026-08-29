@@ -23,7 +23,6 @@ class AssistMeAccessibilityService : AccessibilityService() {
 
         private const val CLICK_DURATION_MS = 50L
         private const val LONG_PRESS_DURATION_MS = 600L
-        private const val PANIC_SAFE_ZONE_TOP_RATIO = 0.10f
     }
 
     @Volatile
@@ -203,12 +202,6 @@ class AssistMeAccessibilityService : AccessibilityService() {
         val normalizedY = (event["normalized_y"] as? Number)?.toFloat()
             ?: (((event["y"] as? Number)?.toFloat() ?: 0f).let { if (it > 1f) it / screenH else it })
 
-        // Panic Safe Zone: top 10% of screen is reserved for the helpee's floating panic stop dock
-        if (normalizedY < PANIC_SAFE_ZONE_TOP_RATIO) {
-            Log.w(TAG, "BLOCKED input: Target coordinate ($normalizedX, $normalizedY) is within the Panic Safe Zone.")
-            return false
-        }
-
         val x = (normalizedX * screenW).coerceIn(0f, screenW - 1f)
         val y = (normalizedY * screenH).coerceIn(0f, screenH - 1f)
 
@@ -220,11 +213,6 @@ class AssistMeAccessibilityService : AccessibilityService() {
                     ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
                 val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
                     ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
-
-                if (normEndY < PANIC_SAFE_ZONE_TOP_RATIO) {
-                    Log.w(TAG, "BLOCKED drag: Destination ($normEndX, $normEndY) is within the Panic Safe Zone.")
-                    return false
-                }
 
                 val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
                 val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
