@@ -1,0 +1,61 @@
+{
+  "name": "sequence_recommender",
+  "version": "2026-09-06T10-28-24Z-6d1e86",
+  "created_at": "2026-09-06T10:28:24.281468+00:00",
+  "intended_use": "Suggest the next assistance action a helper is likely to need, ranked, and intersected with the admissible set.",
+  "out_of_scope_use": "Suggestions are never executed automatically and never widen what the policy engine permits.",
+  "training_data": "793 synthetic assistance sessions with per-user behavioural bias.",
+  "n_training_samples": 793,
+  "model_type": "first-order Markov chain with Jelinek-Mercer backoff",
+  "selection_criterion": "Recall@3 and MRR on a chronological session split with held-out cold-start users; simplicity preferred at equal performance",
+  "metrics": {
+    "model_name": "markov_backoff",
+    "n_predictions": 2004,
+    "n_actions": 6,
+    "recall_at_1": 0.5414171656686627,
+    "recall_at_3": 0.969560878243513,
+    "recall_at_5": 1.0,
+    "mrr": 0.738231869594145,
+    "ndcg_at_3": 0.7920108444343539,
+    "random_recall_at_3": 0.5,
+    "cold_start_recall_at_3": 0.9615384615384616,
+    "cold_start_n": 780,
+    "first_action_recall_at_3": 1.0,
+    "first_action_n": 450,
+    "per_action_recall": {
+      "chat": 1.0,
+      "drawing": 0.9929577464788732,
+      "pointer": 1.0,
+      "remote_control": 0.7715736040609137,
+      "screen_share": 1.0,
+      "voice": 0.9764705882352941
+    }
+  },
+  "limitations": [
+    "First-order: conditions only on the immediately previous action, so a longer-range dependency is invisible to it.",
+    "Suggestions reflect what helpers have done before, which will reinforce existing habits including poor ones.",
+    "Synthetic sequences follow a hand-specified workflow; real sessions will be messier."
+  ],
+  "ethical_considerations": [
+    "Suggesting remote control makes it more likely to be requested, so suggestions are filtered through the safety envelope before display.",
+    "Per-user models are built from that user's own history only and are never shared between accounts."
+  ],
+  "global_seed": 20260901,
+  "hyperparameters": {
+    "smoothing": 5.0
+  },
+  "feature_names": [
+    "chat",
+    "drawing",
+    "pointer",
+    "remote_control",
+    "screen_share",
+    "voice"
+  ],
+  "library_versions": {
+    "sklearn": "1.8.0",
+    "numpy": "2.2.6",
+    "scipy": "1.17.1",
+    "joblib": "1.5.3"
+  }
+}

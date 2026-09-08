@@ -1,0 +1,104 @@
+{
+  "scale": 40000,
+  "generated_at": "2026-09-01T18:32:37.269585+00:00",
+  "results": [
+    {
+      "name": "live sessions by creator",
+      "description": "The hot path: a user's non-ended sessions. The partial index excludes the ~92% of rows that are ended, so it stays small no matter how much history accumulates.",
+      "query": "SELECT id, status, created_at FROM sessions WHERE creator_id = (SELECT creator_id FROM sessions LIMIT 1) AND status <> 'ended' ORDER BY created_at DESC LIMIT 20",
+      "with_index_ms": 0.119,
+      "without_index_ms": 7.226,
+      "with_index_plan": "Seq Scan",
+      "without_index_plan": "Seq Scan",
+      "rows": 6,
+      "speedup": 60.72268907563026
+    },
+    {
+      "name": "elevated-control review",
+      "description": "Every session that granted remote control \u2014 the population a security review starts from, and a small minority of rows.",
+      "query": "SELECT id, remote_control_granted_at FROM sessions WHERE remote_control_granted ORDER BY remote_control_granted_at DESC LIMIT 50",
+      "with_index_ms": 0.139,
+      "without_index_ms": 9.743,
+      "with_index_plan": "Index Scan on ix_sessions_elevated",
+      "without_index_plan": "Seq Scan",
+      "rows": 50,
+      "speedup": 70.09352517985612
+    },
+    {
+      "name": "session list (covering index)",
+      "description": "Answered from the index alone via INCLUDE columns, with no heap access at all.",
+      "query": "SELECT status, created_at, creator_id, ended_at FROM sessions WHERE status = 'ended' AND created_at > now() - interval '30 days' ORDER BY created_at DESC LIMIT 100",
+      "with_index_ms": 0.281,
+      "without_index_ms": 22.863,
+      "with_index_plan": "Index Only Scan on ix_sessions_status_created",
+      "without_index_plan": "Seq Scan",
+      "rows": 100,
+      "speedup": 81.36298932384341
+    },
+    {
+      "name": "context history for a session",
+      "description": "The training extract's access pattern: one session's events in time order.",
+      "query": "SELECT foreground_app, recorded_at FROM context_events WHERE session_id = (SELECT session_id FROM context_events LIMIT 1) ORDER BY recorded_at",
+      "with_index_ms": 0.269,
+      "without_index_ms": 54.924,
+      "with_index_plan": "Seq Scan",
+      "without_index_plan": "Seq Scan",
+      "rows": 6,
+      "speedup": 204.17843866171003
+    },
+    {
+      "name": "protected-content events",
+      "description": "Partial index over the security-relevant minority of events.",
+      "query": "SELECT count(*) FROM context_events WHERE (is_flag_secure_active OR is_sensitive_app) AND recorded_at > now() - interval '7 days'",
+      "with_index_ms": 3.186,
+      "without_index_ms": 23.118,
+      "with_index_plan": "Bitmap Heap Scan",
+      "without_index_plan": "Seq Scan",
+      "rows": 1,
+      "speedup": 7.256120527306968
+    },
+    {
+      "name": "partition pruning (7-day window)",
+      "description": "A time-windowed scan should touch only the partitions that can contain matching rows, not all of them.",
+      "query": "SELECT count(*) FROM context_events WHERE recorded_at >= CAST(:cutoff AS timestamptz) AND recorded_at < CAST(:window_end AS timestamptz)",
+      "with_index_ms": 8.543,
+      "without_index_ms": 5.804,
+      "with_index_plan": "Seq Scan",
+      "without_index_plan": "Seq Scan",
+      "rows": 1,
+      "speedup": 0.6793866323305632
+    }
+  ],
+  "table_sizes": {
+    "sessions": "10 MB",
+    "context_events_p202605": "8560 kB",
+    "context_events_p202608": "8456 kB",
+    "context_events_p202607": "8440 kB",
+    "context_events_p202606": "8432 kB",
+    "context_events_p202604": "8296 kB",
+    "context_events_p202603": "7304 kB",
+    "users": "568 kB",
+    "context_events_p202609": "360 kB",
+    "audit_ledger_p202609": "96 kB",
+    "audit_ledger_p202611": "96 kB",
+    "audit_ledger_p202612": "96 kB"
+  },
+  "index_sizes": {
+    "ix_sessions_status_created": "2936 kB",
+    "context_events_p202606_pkey": "1944 kB",
+    "context_events_p202605_pkey": "1944 kB",
+    "context_events_p202608_pkey": "1920 kB",
+    "context_events_p202607_pkey": "1904 kB",
+    "context_events_p202604_pkey": "1880 kB",
+    "context_events_p202603_pkey": "1656 kB",
+    "pk_sessions": "1600 kB",
+    "context_events_p202607_session_id_recorded_at_idx": "720 kB",
+    "context_events_p202606_session_id_recorded_at_idx": "712 kB",
+    "context_events_p202605_session_id_recorded_at_idx": "704 kB",
+    "context_events_p202608_session_id_recorded_at_idx": "672 kB"
+  },
+  "notes": [
+    "Partition pruning: 2 of 11 partitions scanned for a 7-day window (82% eliminated before execution).",
+    "Total BRIN index size across context_events partitions: 648 kB"
+  ]
+}

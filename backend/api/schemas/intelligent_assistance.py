@@ -19,6 +19,29 @@ class TaskRecordRequest(BaseModel):
     platform: str | None = None
     action: str  # e.g. "remote_control", "screen_share", "voice", "chat"
 
+    #: Whether the action resolved the helpee's problem.
+    #:
+    #: The single most important addition to this schema. Without an outcome
+    #: the engine can only learn what was *tried*, so an action a helper
+    #: retried five times because it kept failing outranks one that worked
+    #: immediately. Defaults to True so existing clients keep working; a client
+    #: that reports honestly gets materially better suggestions.
+    succeeded: bool = True
+
+    #: The action taken immediately before this one, for the transition model.
+    #: ``None`` means this is the first action of the session.
+    previous_action: str | None = None
+
+    @field_validator("previous_action")
+    @classmethod
+    def validate_previous_action(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v_lower = v.lower()
+        if v_lower not in VALID_ACTIONS:
+            raise ValueError(f"previous_action must be one of {VALID_ACTIONS}")
+        return v_lower
+
     @field_validator("action")
     @classmethod
     def validate_action(cls, v: str) -> str:
@@ -46,6 +69,14 @@ class TaskPatternResponse(BaseModel):
     occurrence_count: int
     last_occurred_at: datetime
 
+    #: How many of those occurrences resolved the problem.
+    success_count: int = 0
+    #: Exponentially time-decayed exposure and reward. Ranking uses these
+    #: rather than the raw counts, so abandoned habits fade out.
+    decayed_count: float = 0.0
+    decayed_success: float = 0.0
+    first_occurred_at: datetime | None = None
+
     model_config = {"from_attributes": True}
 
 
@@ -55,6 +86,13 @@ class PreferredModeResponse(BaseModel):
     user_id: str
     mode: str
     updated_at: datetime
+
+    #: ``"explicit"`` when the user chose it, ``"inferred"`` when derived from
+    #: behaviour. The policy engine respects a stated preference up to the
+    #: safety ceiling but treats an inferred one as advisory.
+    source: str = "explicit"
+    confidence: float = 1.0
+    observation_count: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -83,6 +121,12 @@ class AssistanceSuggestionResponse(BaseModel):
     detail: str | None = None
     confidence: float = 0.0
     created_at: datetime
+
+    #: The concrete action suggested, so acceptance can be attributed to an
+    #: action rather than only to a headline string.
+    action: str | None = None
+    #: Position in the returned list, for rank-aware metrics from production.
+    rank: int = 1
 
     model_config = {"from_attributes": True}
 

@@ -1,18 +1,32 @@
-"""Adaptive Policy Engine business logic (Phase 9, Research Core).
+"""Adaptive Policy Engine (Phase 9, research core).
 
-Classifies risk from live device/session context, negotiates capabilities
-between helper and helpee, selects an assistance mode, and verifies explicit
-consent before any remote interaction capability is granted.
+What this does now
+------------------
+The inherited implementation classified risk with a chain of ``if`` statements
+and returned one of three strings. It is replaced by a three-layer decision:
 
-Output (assistance modes):
-    - voice       → audio guidance only
-    - pointer     → laser pointer / annotation overlay (no tap)
-    - drawing     → freehand drawing & highlighting (no tap)
-    - tap         → remote tap gestures (no drag/keyboard)
-    - restricted  → view-only
+1. **Model layer** — a calibrated risk classifier and a contextual bandit
+   propose a risk level and an assistance mode
+   (:mod:`ml.inference`).
+2. **Safety envelope** — a deterministic rule ceiling clamps the proposal
+   (:mod:`ml.risk.safety`). The clamp only ever lowers privilege.
+3. **Database constraints** — ``ck_policy_decisions_high_risk_limits_mode``
+   refuses to store an elevated mode at high risk, whatever layers one and two
+   concluded.
+
+The rule engine remains the fallback for every failure and every abstention, so
+the system's floor is exactly its previous behaviour. That is the property that
+makes shipping a model on this path defensible: the worst case is the old
+system, not an unpredictable one.
+
+Every model-influenced decision is written to ``ml_decision_log`` with the
+feature vector, the propensity and the latency, which is what makes off-policy
+evaluation of a future policy possible without experimenting on users.
 """
 
-import json
+from __future__ import annotations
+
+import logging
 from datetime import datetime, timezone
 from secrets import compare_digest
 
@@ -27,29 +41,22 @@ from api.schemas.policy_engine import (
     PolicyEvaluateRequest,
     PolicyStatusResponse,
 )
+from api.services.audit_ledger_service import AuditLedgerService
+from core.config import settings
+from core.db.enums import MODE_CAPABILITIES, RISK_RANK
 from models.context_snapshot import ContextSnapshot
+from models.ml_decision_log import MLDecisionLog
 from models.policy_decision import PolicyDecision
 from models.session import Session
-from models.session_participant import SessionParticipant
 
-# Mode → capability set that the mode enables.
-_MODE_CAPABILITIES: dict[str, set[str]] = {
-    "voice": {"voice"},
-    "pointer": {"voice", "pointer"},
-    "drawing": {"voice", "pointer", "drawing"},
-    "tap": {"voice", "pointer", "drawing", "tap"},
-    "restricted": set(),
-}
-
-# Mode ordering for "least privileged" selection when risk increases.
-_MODE_RANK = {"restricted": 0, "voice": 1, "pointer": 2, "drawing": 3, "tap": 4}
+logger = logging.getLogger(__name__)
 
 
 class AdaptivePolicyEngineService:
-    """Applies context-aware risk classification and capability negotiation."""
+    """Context-aware risk classification, capability negotiation, and consent."""
 
     # ------------------------------------------------------------------
-    # Evaluate (risk classification → mode selection)
+    # Evaluate
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -57,62 +64,52 @@ class AdaptivePolicyEngineService:
         session_id: str,
         current_user_id: str,
         request: PolicyEvaluateRequest,
-        db,
+        db: AsyncSession,
     ) -> PolicyStatusResponse:
-        """Evaluate the adaptive policy for a session from live context.
-
-        Returns a policy decision persisted on the session.
-        """
+        """Evaluate the adaptive policy for a session from live context."""
         session = await AdaptivePolicyEngineService._load_session(
             session_id, current_user_id, db
         )
+        context = await AdaptivePolicyEngineService._get_helpee_context(session, db)
 
-        # Gather the helpee's context snapshot (fall back to empty context).
-        context = await AdaptivePolicyEngineService._get_helpee_context(
-            session, db
-        )
+        requested = set(request.requested_capabilities or []) & set(CAPABILITIES)
 
-        risk_level, risk_reasons = AdaptivePolicyEngineService._classify_risk(
-            context
-        )
-
-        # Start from the union of what the requester asked for (if any).
-        requested = set(request.requested_capabilities or [])
-        requested = requested & set(CAPABILITIES)
-
-        # Negotiate capabilities given risk.
-        negotiated = AdaptivePolicyEngineService._negotiate_capabilities(
-            requested=requested,
-            risk_level=risk_level,
+        decision = await AdaptivePolicyEngineService._decide(
             context=context,
+            requested_capabilities=requested or None,
+            db=db,
         )
 
-        assistance_mode = AdaptivePolicyEngineService._select_mode(negotiated)
-
-        # Upsert policy decision.
-        result = await db.execute(
-            select(PolicyDecision).where(PolicyDecision.session_id == session_id)
+        record = await AdaptivePolicyEngineService._persist(
+            session_id=session_id,
+            user_id=current_user_id,
+            decision=decision,
+            db=db,
         )
-        decision = result.scalar_one_or_none()
-        if decision is None:
-            decision = PolicyDecision(
-                session_id=session_id,
-                evaluated_by_user_id=current_user_id,
-            )
-            db.add(decision)
 
-        decision.risk_level = risk_level
-        decision.risk_reasons = ", ".join(risk_reasons)
-        decision.negotiated_capabilities = json.dumps(sorted(negotiated))
-        decision.assistance_mode = assistance_mode
-        decision.updated_at = datetime.now(timezone.utc)
+        await AuditLedgerService.append(
+            db,
+            session_id=session_id,
+            actor_user_id=current_user_id,
+            event_type="policy_evaluated",
+            event_category="capability",
+            detail={
+                "risk_level": decision.risk_level,
+                "assistance_mode": decision.assistance_mode,
+                "decision_source": decision.decision_source,
+                "model_version": decision.model_version,
+                "envelope_clamped": decision.envelope_clamped,
+            },
+        )
 
         await db.commit()
-        await db.refresh(decision)
-        return AdaptivePolicyEngineService._to_response(decision)
+        await db.refresh(record)
+        return AdaptivePolicyEngineService._to_response(
+            record, capability_names=decision.capabilities
+        )
 
     # ------------------------------------------------------------------
-    # Capability negotiation
+    # Negotiate
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -120,44 +117,33 @@ class AdaptivePolicyEngineService:
         session_id: str,
         current_user_id: str,
         capabilities: list[str],
-        db,
+        db: AsyncSession,
     ) -> PolicyStatusResponse:
-        """Explicitly negotiate a capability set, constrained by context risk."""
+        """Negotiate an explicit capability set, constrained by context risk."""
         session = await AdaptivePolicyEngineService._load_session(
             session_id, current_user_id, db
         )
         context = await AdaptivePolicyEngineService._get_helpee_context(session, db)
-        risk_level, _ = AdaptivePolicyEngineService._classify_risk(context)
 
-        negotiated = AdaptivePolicyEngineService._negotiate_capabilities(
-            requested=set(capabilities),
-            risk_level=risk_level,
+        decision = await AdaptivePolicyEngineService._decide(
             context=context,
+            requested_capabilities=set(capabilities) & set(CAPABILITIES),
+            db=db,
         )
-        assistance_mode = AdaptivePolicyEngineService._select_mode(negotiated)
-
-        result = await db.execute(
-            select(PolicyDecision).where(PolicyDecision.session_id == session_id)
+        record = await AdaptivePolicyEngineService._persist(
+            session_id=session_id,
+            user_id=current_user_id,
+            decision=decision,
+            db=db,
         )
-        decision = result.scalar_one_or_none()
-        if decision is None:
-            decision = PolicyDecision(
-                session_id=session_id,
-                evaluated_by_user_id=current_user_id,
-            )
-            db.add(decision)
-
-        decision.risk_level = risk_level
-        decision.negotiated_capabilities = json.dumps(sorted(negotiated))
-        decision.assistance_mode = assistance_mode
-        decision.updated_at = datetime.now(timezone.utc)
-
         await db.commit()
-        await db.refresh(decision)
-        return AdaptivePolicyEngineService._to_response(decision)
+        await db.refresh(record)
+        return AdaptivePolicyEngineService._to_response(
+            record, capability_names=decision.capabilities
+        )
 
     # ------------------------------------------------------------------
-    # Consent verification
+    # Consent
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -165,12 +151,15 @@ class AdaptivePolicyEngineService:
         session_id: str,
         current_user_id: str,
         request: PolicyConsentRequest,
-        db,
+        db: AsyncSession,
     ) -> PolicyStatusResponse:
-        """Verify helpee consent to a capability set before enabling it.
+        """Verify helpee consent before a capability set is enabled.
 
-        Consent is verified only when the helpee supplies a valid consent token
-        matching the session's generated proof.
+        Consent is checked *before* the policy is recomputed, and the granted
+        set is the intersection of what was consented to with what the policy
+        allows. Consent can never widen the policy: agreeing to remote control
+        inside a banking app does not make it available, because the envelope
+        still forbids it. Consent is necessary, not sufficient.
         """
         session = await AdaptivePolicyEngineService._load_session(
             session_id, current_user_id, db
@@ -181,44 +170,55 @@ class AdaptivePolicyEngineService:
                 detail="Consent can only be verified in an active session",
             )
 
-        expected_token = AdaptivePolicyEngineService._consent_token(session.id)
-        if not compare_digest(request.consent_token, expected_token):
+        expected = AdaptivePolicyEngineService._consent_token(session.id)
+        if not compare_digest(request.consent_token, expected):
+            await AuditLedgerService.append(
+                db,
+                session_id=session_id,
+                actor_user_id=current_user_id,
+                event_type="consent_token_rejected",
+                event_category="security",
+                detail={"capabilities": sorted(set(request.capabilities))},
+                commit=True,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Invalid consent token — consent not granted by helpee",
             )
 
-        requested = set(request.capabilities)
         context = await AdaptivePolicyEngineService._get_helpee_context(session, db)
-        risk_level, _ = AdaptivePolicyEngineService._classify_risk(context)
-        negotiated = AdaptivePolicyEngineService._negotiate_capabilities(
-            requested=requested,
-            risk_level=risk_level,
+        decision = await AdaptivePolicyEngineService._decide(
             context=context,
+            requested_capabilities=set(request.capabilities) & set(CAPABILITIES),
+            db=db,
         )
-        assistance_mode = AdaptivePolicyEngineService._select_mode(negotiated)
 
-        result = await db.execute(
-            select(PolicyDecision).where(PolicyDecision.session_id == session_id)
+        record = await AdaptivePolicyEngineService._persist(
+            session_id=session_id,
+            user_id=current_user_id,
+            decision=decision,
+            db=db,
+            consent_verified=True,
         )
-        decision = result.scalar_one_or_none()
-        if decision is None:
-            decision = PolicyDecision(
-                session_id=session_id,
-                evaluated_by_user_id=current_user_id,
-            )
-            db.add(decision)
 
-        decision.consent_verified = True
-        decision.consent_granted_at = datetime.now(timezone.utc)
-        decision.negotiated_capabilities = json.dumps(sorted(negotiated))
-        decision.assistance_mode = assistance_mode
-        decision.risk_level = risk_level
-        decision.updated_at = datetime.now(timezone.utc)
+        await AuditLedgerService.append(
+            db,
+            session_id=session_id,
+            actor_user_id=current_user_id,
+            event_type="consent_verified",
+            event_category="consent",
+            detail={
+                "granted_capabilities": sorted(decision.capabilities),
+                "assistance_mode": decision.assistance_mode,
+                "risk_level": decision.risk_level,
+            },
+        )
 
         await db.commit()
-        await db.refresh(decision)
-        return AdaptivePolicyEngineService._to_response(decision)
+        await db.refresh(record)
+        return AdaptivePolicyEngineService._to_response(
+            record, capability_names=decision.capabilities
+        )
 
     # ------------------------------------------------------------------
     # Status
@@ -226,151 +226,202 @@ class AdaptivePolicyEngineService:
 
     @staticmethod
     async def get_status(
-        session_id: str,
-        current_user_id: str,
-        db,
+        session_id: str, current_user_id: str, db: AsyncSession
     ) -> PolicyStatusResponse:
-        """Return the current policy decision for a session."""
+        """Return the current policy decision, or a conservative default."""
         await AdaptivePolicyEngineService._load_session(session_id, current_user_id, db)
 
-        result = await db.execute(
-            select(PolicyDecision).where(PolicyDecision.session_id == session_id)
-        )
-        decision = result.scalar_one_or_none()
-        if decision is None:
-            # Default conservative decision before first evaluation.
+        record = (
+            await db.execute(
+                select(PolicyDecision)
+                .where(PolicyDecision.session_id == session_id)
+                .options(selectinload(PolicyDecision.capabilities))
+            )
+        ).scalar_one_or_none()
+
+        if record is None:
             now = datetime.now(timezone.utc)
             default = PolicyDecision(
                 session_id=session_id,
                 evaluated_by_user_id=current_user_id,
                 risk_level="low",
-                negotiated_capabilities=json.dumps(["voice"]),
                 assistance_mode="voice",
+                decision_source="rules",
                 consent_verified=False,
                 created_at=now,
                 updated_at=now,
             )
-            return AdaptivePolicyEngineService._to_response(default, persisted=False)
-        return AdaptivePolicyEngineService._to_response(decision)
+            default.capabilities = []
+            return AdaptivePolicyEngineService._to_response(
+                default, persisted=False, capability_names={"voice"}
+            )
+        return AdaptivePolicyEngineService._to_response(record)
 
     # ------------------------------------------------------------------
-    # Internal classification & negotiation logic
+    # Decision core
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _classify_risk(context: ContextSnapshot | None) -> tuple[str, list[str]]:
-        """Classify risk level from the helpee's context snapshot.
-
-        - high:    FLAG_SECURE active or critical sensitive app (banking, health,
-                   payment, password manager)
-        - medium:  other sensitive app categories or protected content
-        - low:     normal apps with no protective signals
-        """
-        if context is None:
-            return "low", ["no context reported — defaulting to minimal capabilities"]
-
-        reasons: list[str] = []
-
-        critical_categories = ("banking", "health", "password_manager", "payment")
-
-        if context.is_flag_secure_active:
-            reasons.append("FLAG_SECURE is active on the helpee device")
-
-        category = (context.foreground_app_category or "").lower()
-        if context.is_sensitive_app or category in critical_categories:
-            if category in critical_categories:
-                reasons.append(f"critical sensitive app category: {category}")
-            elif context.foreground_app:
-                reasons.append(f"sensitive app in foreground: {context.foreground_app}")
-            else:
-                reasons.append("sensitive app content detected")
-
-        if context.is_flag_secure_active:
-            return "high", reasons or ["sensitive content detected"]
-
-        if category in critical_categories or context.is_sensitive_app:
-            # Distinguish critical categories (high) from generally sensitive apps.
-            if category in critical_categories:
-                return "high", reasons
-            return "medium", reasons
-
-        if reasons:
-            return "medium", reasons
-
-        return "low", []
-
-    @staticmethod
-    def _negotiate_capabilities(
-        requested: set[str],
-        risk_level: str,
+    async def _decide(
         context: ContextSnapshot | None,
-    ) -> set[str]:
-        """Compute the actual granted capability set under current risk."""
-        if risk_level == "high":
-            # View-only — no interaction of any kind.
-            return set()
+        requested_capabilities: set[str] | None,
+        db: AsyncSession,
+    ):
+        """Produce a decision and log it if a model was involved."""
+        from ml.inference import get_inference_service
 
-        if risk_level == "medium":
-            # No tap/drag/keyboard; allow pointer/drawing only if accessibility allows.
-            allowed = {"voice", "pointer", "drawing"}
-            if context is not None and not context.accessibility_enabled:
-                allowed.discard("pointer")
-                allowed.discard("drawing")
-            granted = requested & allowed
-            # Always keep voice guidance available.
-            granted.add("voice")
-            return granted
+        app_profile = await AdaptivePolicyEngineService._app_profile(context, db)
 
-        # Low risk — full capability set, still require accessibility for touch.
-        granted = set(requested)
-        if context is not None and not context.accessibility_gesture_capable:
-            granted -= {"tap", "drag", "keyboard"}
-        granted.add("voice")
-        return granted
+        decision = get_inference_service().decide(
+            context,
+            app_profile=app_profile,
+            requested_capabilities=requested_capabilities,
+        )
 
-    @staticmethod
-    def _select_mode(negotiated: set[str]) -> str:
-        """Select the least-privileged assistance mode that covers capabilities."""
-        if "tap" in negotiated or "drag" in negotiated:
-            return "tap"
-        if "drawing" in negotiated:
-            return "drawing"
-        if "pointer" in negotiated:
-            return "pointer"
-        if "voice" in negotiated:
-            return "voice"
-        return "restricted"
+        if settings.ML_LOG_DECISIONS and decision.decision_source == "model":
+            db.add(
+                MLDecisionLog(
+                    session_id=getattr(context, "session_id", None),
+                    user_id=getattr(context, "user_id", None),
+                    decision_kind="mode_selection",
+                    model_version=decision.model_version or "unknown",
+                    features=decision.features,
+                    action=decision.assistance_mode,
+                    candidate_actions=decision.candidate_actions,
+                    propensity=decision.propensity,
+                    confidence=decision.model_confidence,
+                    envelope_clamped=decision.envelope_clamped,
+                    latency_us=decision.latency_us,
+                )
+            )
+
+        return decision
 
     @staticmethod
-    def _consent_token(session_id: str) -> str:
-        """Deterministic consent proof bound to the session.
+    async def _app_profile(context: ContextSnapshot | None, db: AsyncSession):
+        """Read population risk statistics for the foreground app.
 
-        In production this is exchanged via a side channel (e.g. QR scan or
-        helpee app confirmation). For the API contract we derive a stable token.
+        Sourced from ``mv_app_risk_profile``, which is where the database's
+        materialised views feed the model directly. A missing view or an app
+        below the view's k>=5 aggregation floor yields ``None``, which the
+        feature extractor handles as the cold-start case.
         """
-        import hashlib
+        if context is None or not getattr(context, "foreground_app", None):
+            return None
 
-        return hashlib.sha256(f"assistme-consent-{session_id}".encode()).hexdigest()[:32]
+        from sqlalchemy import text
+
+        from core.db.dialect import is_postgres
+
+        if not is_postgres(db.bind):
+            return None
+
+        try:
+            row = (
+                await db.execute(
+                    text(
+                        "SELECT high_risk_rate, sensitive_rate, observation_count "
+                        "FROM mv_app_risk_profile WHERE foreground_app = :app"
+                    ),
+                    {"app": context.foreground_app},
+                )
+            ).first()
+        except Exception as exc:  # noqa: BLE001 - the view may not exist yet
+            logger.debug("App risk profile unavailable: %s", exc)
+            return None
+
+        if row is None:
+            return None
+        return {
+            "high_risk_rate": row[0] or 0.0,
+            "sensitive_rate": row[1] or 0.0,
+            "observation_count": row[2] or 0.0,
+        }
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _persist(
+        session_id: str,
+        user_id: str,
+        decision,
+        db: AsyncSession,
+        *,
+        consent_verified: bool | None = None,
+    ) -> PolicyDecision:
+        """Upsert the session's policy decision."""
+        record = (
+            await db.execute(
+                select(PolicyDecision)
+                .where(PolicyDecision.session_id == session_id)
+                .options(selectinload(PolicyDecision.capabilities))
+            )
+        ).scalar_one_or_none()
+
+        now = datetime.now(timezone.utc)
+        if record is None:
+            record = PolicyDecision(
+                session_id=session_id,
+                evaluated_by_user_id=user_id,
+                created_at=now,
+                updated_at=now,
+            )
+            record.capabilities = []
+            db.add(record)
+        else:
+            record.updated_at = max(now, record.created_at)
+
+        record.risk_level = decision.risk_level
+        record.risk_reasons = list(decision.reasons) or None
+        record.risk_score = decision.risk_score
+        record.assistance_mode = decision.assistance_mode
+        record.decision_source = decision.decision_source
+        record.model_version = decision.model_version
+        record.model_confidence = decision.model_confidence
+        record.envelope_clamped = decision.envelope_clamped
+        record.set_capabilities(decision.capabilities)
+
+        if consent_verified:
+            record.consent_verified = True
+            record.consent_granted_at = datetime.now(timezone.utc)
+
+        await db.flush()
+        return record
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def _load_session(session_id: str, user_id: str, db) -> Session:
-        result = await db.execute(
-            select(Session)
-            .where(Session.id == session_id)
-            .options(selectinload(Session.participants))
-        )
-        session = result.scalar_one_or_none()
+    def _consent_token(session_id: str) -> str:
+        """Deterministic consent proof bound to the session.
+
+        In production this is exchanged over a side channel (the helpee's own
+        confirmation in the app). Derived here so the API contract is testable.
+        """
+        from hashlib import sha256
+
+        return sha256(f"assistme-consent-{session_id}".encode()).hexdigest()[:32]
+
+    @staticmethod
+    async def _load_session(
+        session_id: str, user_id: str, db: AsyncSession
+    ) -> Session:
+        session = (
+            await db.execute(
+                select(Session)
+                .where(Session.id == session_id)
+                .options(selectinload(Session.participants))
+            )
+        ).scalar_one_or_none()
+
         if session is None:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found",
+                status_code=status.HTTP_404_NOT_FOUND, detail="Session not found"
             )
-        is_participant = any(p.user_id == user_id for p in session.participants)
-        if not is_participant:
+        if not any(p.user_id == user_id for p in session.participants):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not a participant of this session",
@@ -379,39 +430,46 @@ class AdaptivePolicyEngineService:
 
     @staticmethod
     async def _get_helpee_context(
-        session: Session, db
+        session: Session, db: AsyncSession
     ) -> ContextSnapshot | None:
-        """Find the helpee's context snapshot (or the creator's as fallback)."""
-        helpee = next(
-            (p for p in session.participants if p.role == "helpee"), None
-        )
+        """The helpee's context — the device whose screen is at stake."""
+        helpee = next((p for p in session.participants if p.role == "helpee"), None)
         target_id = helpee.user_id if helpee else session.creator_id
-        result = await db.execute(
-            select(ContextSnapshot).where(
-                ContextSnapshot.session_id == session.id,
-                ContextSnapshot.user_id == target_id,
+        return (
+            await db.execute(
+                select(ContextSnapshot).where(
+                    ContextSnapshot.session_id == session.id,
+                    ContextSnapshot.user_id == target_id,
+                )
             )
-        )
-        return result.scalar_one_or_none()
+        ).scalar_one_or_none()
 
     @staticmethod
     def _to_response(
-        decision: PolicyDecision, persisted: bool = True
+        decision: PolicyDecision,
+        persisted: bool = True,
+        capability_names: set[str] | None = None,
     ) -> PolicyStatusResponse:
-        reasons = []
-        if decision.risk_reasons:
-            reasons = [r for r in decision.risk_reasons.split(", ") if r]
-        try:
-            caps = json.loads(decision.negotiated_capabilities) if decision.negotiated_capabilities else []
-        except (TypeError, ValueError):
-            caps = []
+        if capability_names is None:
+            try:
+                capability_names = decision.capability_set
+            except Exception:  # noqa: BLE001 - unloaded relationship on a transient row
+                capability_names = set(
+                    MODE_CAPABILITIES.get(decision.assistance_mode, frozenset())
+                )
+
         return PolicyStatusResponse(
             session_id=decision.session_id,
             risk_level=decision.risk_level,
-            risk_reasons=reasons,
-            negotiated_capabilities=sorted(caps),
+            risk_reasons=list(decision.risk_reasons or []),
+            negotiated_capabilities=sorted(capability_names),
             assistance_mode=decision.assistance_mode,
             consent_verified=decision.consent_verified,
             consent_granted_at=decision.consent_granted_at,
             evaluated_at=decision.updated_at if persisted else decision.created_at,
+            decision_source=getattr(decision, "decision_source", "rules"),
+            model_version=getattr(decision, "model_version", None),
+            risk_score=getattr(decision, "risk_score", None),
+            model_confidence=getattr(decision, "model_confidence", None),
+            envelope_clamped=bool(getattr(decision, "envelope_clamped", False)),
         )

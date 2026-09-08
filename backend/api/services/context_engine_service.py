@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.schemas.context_engine import ContextReportRequest
+from models.context_event import ContextEvent
 from models.context_snapshot import ContextSnapshot
 from models.session import Session
 from models.session_participant import SessionParticipant
@@ -122,9 +123,49 @@ class ContextEngineService:
         snapshot.is_flag_secure_active = participant.is_flag_secure_active
         snapshot.is_in_audio_call = participant.is_in_audio_call
 
+        # Append the immutable event alongside the mutable projection.
+        #
+        # This is the change that makes the system able to learn at all. The
+        # snapshot is overwritten on every report, so on its own it retains one
+        # instant per participant and no history — meaning no training corpus,
+        # no sequence to model, and no way to replay what the policy engine saw
+        # when it made a past decision. The event stream is the source of
+        # truth; the snapshot is a read-optimised cache of its latest row.
+        db.add(ContextEngineService._event_from(snapshot))
+
         await db.commit()
         await db.refresh(snapshot)
         return snapshot
+
+    @staticmethod
+    def _event_from(snapshot: ContextSnapshot) -> ContextEvent:
+        """Project a snapshot into an immutable event-stream row."""
+        return ContextEvent(
+            session_id=snapshot.session_id,
+            user_id=snapshot.user_id,
+            platform=snapshot.platform,
+            os_version=snapshot.os_version,
+            device_model=snapshot.device_model,
+            screen_width=snapshot.screen_width,
+            screen_height=snapshot.screen_height,
+            screen_density=snapshot.screen_density,
+            foreground_app=snapshot.foreground_app,
+            foreground_app_category=snapshot.foreground_app_category,
+            is_sensitive_app=snapshot.is_sensitive_app,
+            accessibility_enabled=snapshot.accessibility_enabled,
+            accessibility_gesture_capable=snapshot.accessibility_gesture_capable,
+            screen_share_permission=snapshot.screen_share_permission,
+            microphone_permission=snapshot.microphone_permission,
+            remote_control_permission=snapshot.remote_control_permission,
+            is_screen_sharing=snapshot.is_screen_sharing,
+            is_flag_secure_active=snapshot.is_flag_secure_active,
+            is_in_audio_call=snapshot.is_in_audio_call,
+            role=snapshot.role,
+            battery_percent=snapshot.battery_percent,
+            is_charging=snapshot.is_charging,
+            network_type=snapshot.network_type,
+            provenance={"source": "context_report", "schema_version": 1},
+        )
 
     @staticmethod
     async def get_context(

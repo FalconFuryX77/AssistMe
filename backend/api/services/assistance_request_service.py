@@ -7,7 +7,6 @@ Security invariants enforced here:
      accept the stated risks (disclaimer) before any capability is granted.
 """
 
-import json
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
@@ -87,7 +86,7 @@ class AssistanceRequestService:
             helper_device_fingerprint=helper_device_fingerprint,
             message=message,
             status="pending",
-            initial_capabilities=json.dumps(list(DEFAULT_GRANTED_CAPABILITIES)),
+            initial_capabilities=list(DEFAULT_GRANTED_CAPABILITIES),
         )
         db.add(request)
         await db.commit()
@@ -230,7 +229,7 @@ class AssistanceRequestService:
             session_id=session_id,
             request_id=request.id if request else None,
             requested_by_user_id=helper_user_id,
-            target_capabilities=json.dumps(target),
+            target_capabilities=target,
             status="pending",
             disclaimer_text=disclaimer,
             disclaimer_accepted=False,
@@ -287,7 +286,11 @@ class AssistanceRequestService:
                     detail="Risks were not accepted — control not granted",
                 )
             escalation.disclaimer_accepted = True
-            escalation.granted_capabilities = escalation.target_capabilities
+            # A *copy*, not an alias. Assigning the same list object to a
+            # second JSON column leaves both attributes pointing at one list,
+            # so SQLAlchemy's change detection sees no new value and the
+            # column is never written.
+            escalation.granted_capabilities = list(escalation.target_capabilities)
 
             # The escalation record is the durable source of truth for the
             # approval, but the live input gateway checks the session flag.
@@ -408,7 +411,7 @@ class AssistanceRequestService:
         result = await db.execute(
             select(TrustedDevice).where(
                 TrustedDevice.owner_user_id == owner_user_id,
-                TrustedDevice.device_fingerprint == device_fingerprint,
+                TrustedDevice.device_fingerprint_bi == device_fingerprint,
                 TrustedDevice.status == "accepted",
             )
         )

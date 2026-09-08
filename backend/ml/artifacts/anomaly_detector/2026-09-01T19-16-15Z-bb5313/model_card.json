@@ -1,0 +1,80 @@
+{
+  "name": "anomaly_detector",
+  "version": "2026-09-01T19-16-15Z-bb5313",
+  "created_at": "2026-09-01T19:16:15.727264+00:00",
+  "intended_use": "Flag pairing and session behaviour that is unlike typical legitimate use, for a second confirmation to the helpee or for human review.",
+  "out_of_scope_use": "Must not block a session, ban an account, or be presented to any user as a finding of fraud. An anomaly score is a prompt to look, not a verdict.",
+  "training_data": "12000 synthetic normal observations plus 640 injected attacks across three scenarios, of which a majority are blended toward normal behaviour.",
+  "n_training_samples": 12640,
+  "model_type": "IsolationForest + robust Mahalanobis, rank-averaged",
+  "selection_criterion": "PR-AUC and precision@k at review-queue capacities",
+  "metrics": {
+    "n_samples": 6320,
+    "n_anomalies": 320,
+    "base_rate": 0.05063291139240506,
+    "roc_auc": 0.9873611979166668,
+    "pr_auc": 0.9364473302704431,
+    "pr_auc_no_skill": 0.05063291139240506,
+    "threshold": 0.9464873417721518,
+    "alert_rate": 0.049367088607594936,
+    "precision": 0.8942307692307693,
+    "recall": 0.871875,
+    "false_positive_rate": 0.0055,
+    "precision_at_k": {
+      "25": 1.0,
+      "50": 1.0,
+      "100": 1.0,
+      "200": 1.0
+    },
+    "recall_at_k": {
+      "25": 0.078125,
+      "50": 0.15625,
+      "100": 0.3125,
+      "200": 0.625
+    },
+    "per_scenario_recall": {
+      "coercion": 0.8240740740740741,
+      "escalation_probing": 0.8018867924528302,
+      "pairing_spam": 0.9905660377358491
+    },
+    "per_scenario_n": {
+      "coercion": 108,
+      "escalation_probing": 106,
+      "pairing_spam": 106
+    }
+  },
+  "limitations": [
+    "Unsupervised: it detects unusualness, not malice. An unusual but legitimate helper will be flagged.",
+    "Attack scenarios are hand-specified; a novel pattern that mimics normal behaviour closely will be missed.",
+    "Legitimate behaviour drifts, so the threshold needs periodic refitting or it will alert on ordinary change."
+  ],
+  "ethical_considerations": [
+    "Telling someone their family member looks suspicious is harmful when wrong, so the operating point favours precision and the output is advisory.",
+    "Scores must never be shown as accusations, and every alert carries its top contributing features so a human can judge it."
+  ],
+  "global_seed": 20260901,
+  "hyperparameters": {
+    "contamination": 0.02,
+    "alert_quantile": 0.95
+  },
+  "feature_names": [
+    "pairing_attempts_1h",
+    "distinct_targets_1h",
+    "failed_code_attempts",
+    "escalation_requests_per_session",
+    "escalation_request_latency_s",
+    "session_hour_sin",
+    "session_hour_cos",
+    "helper_account_age_days_log",
+    "session_duration_s_log",
+    "control_requests_per_minute",
+    "distinct_apps_touched",
+    "revocation_count_30d"
+  ],
+  "library_versions": {
+    "sklearn": "1.8.0",
+    "numpy": "2.4.4",
+    "scipy": "1.17.1",
+    "joblib": "1.5.3"
+  }
+}

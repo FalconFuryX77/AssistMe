@@ -1,6 +1,5 @@
 """Trusted device business logic — pairing, password-gated management, identity."""
 
-import hashlib
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -8,6 +7,8 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.crypto.blind_index import blind_index
+from core.crypto.hashing import PEPPER_DOMAIN_RECOVERY, hash_secret, verify_secret
 from core.security import verify_password
 from models.trusted_device import DevicePairing, TrustedDevice
 from models.user import User
@@ -15,10 +16,33 @@ from models.user import User
 PAIRING_CODE_TTL_MINUTES = 15
 PAIRING_CODE_LENGTH = 6
 
+#: Failed attempts before a pairing code is locked out. Six digits give only
+#: 10^6 possibilities, so without a hard attempt cap an attacker who can
+#: retry freely recovers a code by brute force regardless of how it is hashed.
+MAX_PAIRING_ATTEMPTS = 5
 
-def _sha256(value: str) -> str:
-    """Return a hex SHA-256 digest of the input."""
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+def _hash_code(code: str) -> str:
+    """Argon2id hash of a pairing code, peppered with an out-of-database key."""
+    return hash_secret(code.strip(), domain=PEPPER_DOMAIN_RECOVERY)
+
+
+def _verify_code(code: str, stored_hash: str) -> bool:
+    """Constant-time verification of a pairing code against its stored hash."""
+    return verify_secret(
+        code.strip(), stored_hash, domain=PEPPER_DOMAIN_RECOVERY
+    ).ok
+
+
+def _code_index(code: str) -> str:
+    """Keyed lookup token for a pairing code.
+
+    Lets the claim path find candidate rows with an index scan instead of
+    loading and hashing every open pairing.
+    """
+    return blind_index(
+        code.strip(), domain="device_pairings.pairing_code", normalise=False
+    )
 
 
 def _is_expired(expires_at: datetime) -> bool:
@@ -61,7 +85,7 @@ class TrustedDeviceService:
         result = await db.execute(
             select(TrustedDevice).where(
                 TrustedDevice.owner_user_id == owner_user_id,
-                TrustedDevice.device_fingerprint == device_fingerprint,
+                TrustedDevice.device_fingerprint_bi == device_fingerprint,
                 TrustedDevice.status == "accepted",
             )
         )
@@ -76,13 +100,14 @@ class TrustedDeviceService:
 
         pairing = DevicePairing(
             owner_user_id=owner_user_id,
-            device_fingerprint=device_fingerprint,
             friendly_name=friendly_name,
             device_platform=device_platform,
-            pairing_code_hash=_sha256(code),
+            pairing_code_hash=_hash_code(code),
+            pairing_code_bi=code,
             status="pending",
             expires_at=expires_at,
         )
+        pairing.set_device_fingerprint(device_fingerprint)
         db.add(pairing)
         await db.commit()
         await db.refresh(pairing)
@@ -110,24 +135,35 @@ class TrustedDeviceService:
             )
 
         # 2. Find the matching pending pairing
+        # Index lookup narrows to the rows whose code token matches; Argon2id
+        # then verifies. Six-digit codes can collide, so the candidate set is
+        # a list rather than a single row.
         result = await db.execute(
             select(DevicePairing).where(
                 DevicePairing.owner_user_id == owner_user_id,
                 DevicePairing.status == "pending",
+                DevicePairing.pairing_code_bi == pairing_code,
             )
         )
-        pairings = result.scalars().all()
-        code_hash = _sha256(pairing_code)
+        candidates = list(result.scalars().all())
         pairing = next(
-            (p for p in pairings if secrets.compare_digest(p.pairing_code_hash, code_hash)),
+            (p for p in candidates if _verify_code(pairing_code, p.pairing_code_hash)),
             None,
         )
 
         if pairing is None:
-            for p in pairings:
+            # Count the failure against this owner's open pairings so repeated
+            # guessing locks the codes out rather than continuing indefinitely.
+            result = await db.execute(
+                select(DevicePairing).where(
+                    DevicePairing.owner_user_id == owner_user_id,
+                    DevicePairing.status == "pending",
+                )
+            )
+            for p in result.scalars().all():
                 p.failed_attempts += 1
-                if p.failed_attempts >= 5:
-                    p.status = "expired"
+                if p.failed_attempts >= MAX_PAIRING_ATTEMPTS:
+                    p.status = "locked"
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -135,8 +171,14 @@ class TrustedDeviceService:
             )
 
         # 3. Check expiry and attempt limits
-        if pairing.failed_attempts >= 5 or _is_expired(pairing.expires_at):
-            pairing.status = "expired"
+        if pairing.failed_attempts >= MAX_PAIRING_ATTEMPTS or _is_expired(
+            pairing.expires_at
+        ):
+            pairing.status = (
+                "locked"
+                if pairing.failed_attempts >= MAX_PAIRING_ATTEMPTS
+                else "expired"
+            )
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
@@ -146,11 +188,11 @@ class TrustedDeviceService:
         # 4. Create the accepted device
         device = TrustedDevice(
             owner_user_id=owner_user_id,
-            device_fingerprint=pairing.device_fingerprint,
             friendly_name=pairing.friendly_name,
             device_platform=pairing.device_platform,
             status="accepted",
         )
+        device.set_device_fingerprint(pairing.device_fingerprint)
         db.add(device)
         pairing.status = "confirmed"
         await db.commit()
@@ -173,13 +215,16 @@ class TrustedDeviceService:
 
         pairing = DevicePairing(
             owner_user_id=owner_user_id,
-            device_fingerprint="",
             friendly_name=None,
             device_platform=None,
-            pairing_code_hash=_sha256(code),
+            pairing_code_hash=_hash_code(code),
+            pairing_code_bi=code,
             status="awaiting_helper",
             expires_at=expires_at,
         )
+        # No helper device is known yet; the empty fingerprint is replaced
+        # when the helper claims the code.
+        pairing.set_device_fingerprint("")
         db.add(pairing)
         await db.commit()
         await db.refresh(pairing)
@@ -199,30 +244,41 @@ class TrustedDeviceService:
         The pairing is moved to 'pending', awaiting the owner's one-tap
         approval. A device already trusted by that owner cannot re-claim.
         """
+        # The inherited implementation loaded every awaiting_helper pairing in
+        # the entire database and hashed each one — work proportional to global
+        # traffic on every keystroke of a six-digit code, and a trivial
+        # denial-of-service lever. The blind index turns it into an index scan
+        # over the handful of rows that share this code token.
         result = await db.execute(
             select(DevicePairing).where(
                 DevicePairing.status == "awaiting_helper",
+                DevicePairing.pairing_code_bi == setup_code,
             )
         )
-        candidates = result.scalars().all()
-        code_hash = _sha256(setup_code)
+        candidates = list(result.scalars().all())
         pairing = next(
-            (p for p in candidates if secrets.compare_digest(p.pairing_code_hash, code_hash)),
+            (p for p in candidates if _verify_code(setup_code, p.pairing_code_hash)),
             None,
         )
         if pairing is None:
             for cand in candidates:
                 cand.failed_attempts += 1
-                if cand.failed_attempts >= 5:
-                    cand.status = "expired"
+                if cand.failed_attempts >= MAX_PAIRING_ATTEMPTS:
+                    cand.status = "locked"
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Setup code not found",
             )
 
-        if pairing.failed_attempts >= 5 or _is_expired(pairing.expires_at):
-            pairing.status = "expired"
+        if pairing.failed_attempts >= MAX_PAIRING_ATTEMPTS or _is_expired(
+            pairing.expires_at
+        ):
+            pairing.status = (
+                "locked"
+                if pairing.failed_attempts >= MAX_PAIRING_ATTEMPTS
+                else "expired"
+            )
             await db.commit()
             raise HTTPException(
                 status_code=status.HTTP_410_GONE,
@@ -233,7 +289,7 @@ class TrustedDeviceService:
         result = await db.execute(
             select(TrustedDevice).where(
                 TrustedDevice.owner_user_id == pairing.owner_user_id,
-                TrustedDevice.device_fingerprint == device_fingerprint,
+                TrustedDevice.device_fingerprint_bi == device_fingerprint,
                 TrustedDevice.status == "accepted",
             )
         )
@@ -243,7 +299,7 @@ class TrustedDeviceService:
                 detail="Device is already trusted",
             )
 
-        pairing.device_fingerprint = device_fingerprint
+        pairing.set_device_fingerprint(device_fingerprint)
         pairing.friendly_name = friendly_name
         pairing.device_platform = device_platform
         # Remember WHO claimed it — this makes trust mutual: the owner's list
@@ -309,7 +365,7 @@ class TrustedDeviceService:
         res_existing = await db.execute(
             select(TrustedDevice).where(
                 TrustedDevice.owner_user_id == owner_user_id,
-                TrustedDevice.device_fingerprint == pairing.device_fingerprint,
+                TrustedDevice.device_fingerprint_bi == pairing.device_fingerprint,
             )
         )
         device = res_existing.scalar_one_or_none()
@@ -321,12 +377,12 @@ class TrustedDeviceService:
         else:
             device = TrustedDevice(
                 owner_user_id=owner_user_id,
-                device_fingerprint=pairing.device_fingerprint,
                 helper_user_id=pairing.claimed_by_user_id,
                 friendly_name=pairing.friendly_name,
                 device_platform=pairing.device_platform,
                 status="accepted",
             )
+            device.set_device_fingerprint(pairing.device_fingerprint)
             db.add(device)
 
         pairing.status = "confirmed"
@@ -424,7 +480,7 @@ class TrustedDeviceService:
         result = await db.execute(
             select(TrustedDevice).where(
                 TrustedDevice.owner_user_id == owner_user_id,
-                TrustedDevice.device_fingerprint == device_fingerprint,
+                TrustedDevice.device_fingerprint_bi == device_fingerprint,
             )
         )
         device = result.scalar_one_or_none()

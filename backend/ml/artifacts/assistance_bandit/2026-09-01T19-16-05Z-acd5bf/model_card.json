@@ -1,0 +1,77 @@
+{
+  "name": "assistance_bandit",
+  "version": "2026-09-01T19-16-05Z-acd5bf",
+  "created_at": "2026-09-01T19:16:05.075783+00:00",
+  "intended_use": "Select an assistance mode from the admissible set the safety envelope permits, balancing helpfulness against over-assistance.",
+  "out_of_scope_use": "Must not select outside the admissible set, and must not explore on a context the envelope marks high risk.",
+  "training_data": "10000 synthetic logged decisions with recorded propensities under an epsilon-greedy logging policy.",
+  "n_training_samples": 10000,
+  "model_type": "thompson",
+  "selection_criterion": "lowest cumulative regret in online simulation",
+  "metrics": {
+    "final_regret": 259.22212027042053,
+    "terminal_regret_rate": 0.03039556817004763,
+    "optimal_action_rate": 0.5116333333333334,
+    "safety_violations": 0,
+    "dr_estimated_value": 0.8882296661309105
+  },
+  "limitations": [
+    "Reward is simulated. The real reward signal (task resolved, control revoked, session abandoned) must be instrumented before deployment.",
+    "Assumes reward is linear in the features; the true relationship is probably not.",
+    "Exploration means an occasional deliberately suboptimal mode. Set ML_BANDIT_EXPLORATION=0 to disable it."
+  ],
+  "ethical_considerations": [
+    "Exploration happens on real assistance sessions with vulnerable users, so it is confined to the admissible set and never trades safety for information.",
+    "Reward penalises over-assistance as well as under-assistance, encoding that doing things for someone is not automatically helping them."
+  ],
+  "global_seed": 20260901,
+  "hyperparameters": {
+    "policy": "thompson",
+    "n_rounds": 6000,
+    "n_seeds": 5
+  },
+  "feature_names": [
+    "is_flag_secure_active",
+    "is_sensitive_app",
+    "is_critical_category",
+    "category_banking",
+    "category_payment",
+    "category_health",
+    "category_password_manager",
+    "category_messaging",
+    "category_social",
+    "category_productivity",
+    "category_system",
+    "category_media",
+    "category_unknown",
+    "app_high_risk_rate",
+    "app_sensitive_rate",
+    "app_observation_weight",
+    "accessibility_enabled",
+    "accessibility_gesture_capable",
+    "screen_share_permission",
+    "microphone_permission",
+    "remote_control_permission",
+    "is_screen_sharing",
+    "platform_android",
+    "platform_ios",
+    "platform_web",
+    "platform_unknown",
+    "battery_normalised",
+    "battery_is_low",
+    "is_charging",
+    "network_wifi",
+    "network_cellular",
+    "network_constrained",
+    "helper_trust_age_days_log",
+    "prior_sessions_log",
+    "prior_escalation_rate",
+    "is_first_session"
+  ],
+  "library_versions": {
+    "sklearn": "1.8.0",
+    "numpy": "2.4.4",
+    "scipy": "1.17.1",
+    "joblib": "1.5.3"
+  }
+}

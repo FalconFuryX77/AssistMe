@@ -61,24 +61,31 @@ async def place_help_call(
     """
     # 1. Resolve the relationship from trusted list (security gate).
     # Either current_user is the owner (helpee calling a helper), or helper calling an owner.
+    target = payload.helper_device_fingerprint
+    import uuid as _uuid
+    is_uuid = False
+    try:
+        _uuid.UUID(str(target))
+        is_uuid = True
+    except (ValueError, TypeError, AttributeError):
+        is_uuid = False
+
+    if is_uuid:
+        match_filter = (
+            (TrustedDevice.id == target)
+            | (TrustedDevice.helper_user_id == target)
+            | (TrustedDevice.owner_user_id == target)
+        )
+    else:
+        match_filter = (TrustedDevice.device_fingerprint_bi == target)
+
     result = await db.execute(
         select(TrustedDevice).where(
             (
                 (TrustedDevice.owner_user_id == current_user.id)
-                & (
-                    (TrustedDevice.device_fingerprint == payload.helper_device_fingerprint)
-                    | (TrustedDevice.helper_user_id == payload.helper_device_fingerprint)
-                    | (TrustedDevice.id == payload.helper_device_fingerprint)
-                )
-            )
-            | (
-                (TrustedDevice.helper_user_id == current_user.id)
-                & (
-                    (TrustedDevice.owner_user_id == payload.helper_device_fingerprint)
-                    | (TrustedDevice.device_fingerprint == payload.helper_device_fingerprint)
-                    | (TrustedDevice.id == payload.helper_device_fingerprint)
-                )
+                | (TrustedDevice.helper_user_id == current_user.id)
             ),
+            match_filter,
             TrustedDevice.status == "accepted",
         )
     )

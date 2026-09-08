@@ -24,7 +24,7 @@ class ContactsService:
             404 – target user not found
         """
         # Find the target user
-        result = await db.execute(select(User).where(User.email == contact_email))
+        result = await db.execute(select(User).where(User.email_bi == contact_email))
         contact_user = result.scalar_one_or_none()
 
         if contact_user is None:

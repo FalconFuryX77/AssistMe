@@ -70,7 +70,15 @@ class PolicyConsentRequest(BaseModel):
 
 
 class PolicyStatusResponse(BaseModel):
-    """Current policy decision for a session."""
+    """Current policy decision for a session.
+
+    The provenance fields exist so a decision is explainable after the fact.
+    A helpee — or a family member reviewing what happened — is entitled to know
+    not just what the system decided but whether a model was involved, which
+    version, and whether the deterministic safety rules had to override it.
+    ``decision_source`` is never absent: every decision is attributable to
+    either a named model artefact or the rule engine.
+    """
 
     session_id: str
     risk_level: str = "low"
@@ -81,4 +89,16 @@ class PolicyStatusResponse(BaseModel):
     consent_granted_at: datetime | None = None
     evaluated_at: datetime
 
-    model_config = {"from_attributes": True}
+    # --- Decision provenance ---------------------------------------------
+    #: ``"model"`` or ``"rules"``.
+    decision_source: str = "rules"
+    #: Registry identifier of the artefact that scored this decision.
+    model_version: str | None = None
+    #: Calibrated P(elevated risk), when a model produced it.
+    risk_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: The model's confidence in its own output, distinct from risk_score.
+    model_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    #: True when the rule-based safety envelope reduced the model's proposal.
+    envelope_clamped: bool = False
+
+    model_config = {"from_attributes": True, "protected_namespaces": ()}

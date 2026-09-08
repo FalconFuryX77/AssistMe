@@ -1,0 +1,95 @@
+{
+  "name": "risk_classifier",
+  "version": "2026-09-06T10-28-14Z-d4498f",
+  "created_at": "2026-09-06T10:28:14.146208+00:00",
+  "intended_use": "Estimate the probability that a helpee's current device context contains sensitive content, so the adaptive policy engine can select an assistance mode. Output is a suggestion bounded by the rule-based safety envelope.",
+  "out_of_scope_use": "Must not be used to grant a capability the rule envelope forbids, to make any decision without the helpee's explicit consent, or as evidence about a person's behaviour or trustworthiness.",
+  "training_data": "Synthetic contexts from ml.datasets.generators with a documented generative process. No real user data was used or is available; see docs/ML_METHODOLOGY.md.",
+  "n_training_samples": 4000,
+  "model_type": "logistic_regression",
+  "selection_criterion": "cross-validated Brier score",
+  "metrics": {
+    "roc_auc": 0.8200648106492254,
+    "pr_auc": 0.7166853534410478,
+    "brier_score": 0.12657997671655968,
+    "expected_calibration_error": 0.011424513020120354,
+    "recall": 0.9622166246851386,
+    "expected_cost_per_decision": 0.6853333333333333
+  },
+  "limitations": [
+    "Trained entirely on synthetic data. Reported metrics describe the simulator, not real usage.",
+    "Features are supplied by the client and are therefore attacker-influenceable; the rule envelope keys on OS-provided signals for this reason.",
+    "Calibration is expected to drift as the app population changes; recalibrate against production data before relying on the probability.",
+    "Abstains on the cost-equivalence band (0.08363636363636363, 0.09818181818181819), where the rule engine decides instead."
+  ],
+  "ethical_considerations": [
+    "Errors are asymmetric by design: a false 'safe' can expose an elderly person's financial data, so the threshold is set from a 10:1 cost ratio rather than at 0.5.",
+    "The model never grants a capability; it can only propose one at or below the rule ceiling.",
+    "Decisions are logged with their features so any outcome can be explained to the person it affected."
+  ],
+  "global_seed": 20260901,
+  "hyperparameters": {
+    "selected_model": "logistic_regression",
+    "selection_criterion": "cross-validated Brier score",
+    "candidate_brier_scores": {
+      "logistic_regression": 0.12610972322442202,
+      "hist_gradient_boosting": 0.1287863210021857
+    },
+    "n_samples": 4000,
+    "n_features": 36,
+    "positive_rate": 0.2595,
+    "decision_threshold": 0.09090909090909091,
+    "abstain_cost_gap": 0.08,
+    "abstention_band": [
+      0.08363636363636363,
+      0.09818181818181819
+    ],
+    "cost_false_safe": 10.0,
+    "cost_false_risky": 1.0,
+    "random_state": 1816561401
+  },
+  "feature_names": [
+    "is_flag_secure_active",
+    "is_sensitive_app",
+    "is_critical_category",
+    "category_banking",
+    "category_payment",
+    "category_health",
+    "category_password_manager",
+    "category_messaging",
+    "category_social",
+    "category_productivity",
+    "category_system",
+    "category_media",
+    "category_unknown",
+    "app_high_risk_rate",
+    "app_sensitive_rate",
+    "app_observation_weight",
+    "accessibility_enabled",
+    "accessibility_gesture_capable",
+    "screen_share_permission",
+    "microphone_permission",
+    "remote_control_permission",
+    "is_screen_sharing",
+    "platform_android",
+    "platform_ios",
+    "platform_web",
+    "platform_unknown",
+    "battery_normalised",
+    "battery_is_low",
+    "is_charging",
+    "network_wifi",
+    "network_cellular",
+    "network_constrained",
+    "helper_trust_age_days_log",
+    "prior_sessions_log",
+    "prior_escalation_rate",
+    "is_first_session"
+  ],
+  "library_versions": {
+    "sklearn": "1.8.0",
+    "numpy": "2.2.6",
+    "scipy": "1.17.1",
+    "joblib": "1.5.3"
+  }
+}

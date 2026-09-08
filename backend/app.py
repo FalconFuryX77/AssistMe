@@ -8,15 +8,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routers.auth.auth import router as auth_router
 from api.routers.assistance_requests import router as assistance_requests_router
 from api.routers.contacts import router as contacts_router
+from api.routers.context_engine import router as context_engine_router
 from api.routers.device_ws import router as device_ws_router
 from api.routers.health import router as health_router
 from api.routers.help_flow import router as help_flow_router
 from api.routers.intelligent_assistance import router as intelligent_assistance_router
+from api.routers.policy_engine import router as policy_engine_router
 from api.routers.sessions import router as sessions_router
 from api.routers.session_ws import router as session_ws_router
 from api.routers.trusted_devices import router as trusted_devices_router
 from api.routers.users import router as users_router
 from core.config import settings
+
+#: Prefix for framework endpoints that are not part of the consumer product.
+INTERNAL_PREFIX = "/internal"
 from core.database import create_tables, engine
 
 # Ensure all models are imported so SQLAlchemy knows about them
@@ -61,4 +66,7 @@ app.include_router(trusted_devices_router)
 app.include_router(assistance_requests_router)
 app.include_router(contacts_router)
 app.include_router(users_router)
+app.include_router(context_engine_router, prefix=INTERNAL_PREFIX)
+app.include_router(policy_engine_router, prefix=INTERNAL_PREFIX)
 app.include_router(intelligent_assistance_router)
+

@@ -1,20 +1,54 @@
-"""Authentication business logic."""
+"""Authentication business logic.
+
+Security corrections over the inherited implementation
+------------------------------------------------------
+1. **Credential hashing.** Recovery codes and device secrets were hashed with a
+   single unsalted SHA-256 (``_hash_recovery``). A 12-character recovery code
+   under that construction is recoverable from a database dump by dictionary
+   attack; a rainbow table works because there is no salt. Both now use
+   Argon2id with a keyed pepper.
+
+2. **Lookup versus verification.** Salting makes hash-equality lookup
+   impossible, which is why the reclaim path now finds the account by a keyed
+   *blind index* and only then verifies with Argon2id. See
+   :class:`models.device_account.DeviceAccount` for the full rationale.
+
+3. **Refresh-token storage and rotation.** Tokens are stored as digests, and
+   every refresh rotates: the presented token is revoked and a new one issued.
+   Presenting an already-revoked token is treated as evidence of theft and
+   revokes the user's whole token family, which is the standard detection
+   mechanism for a stolen refresh token (OAuth 2.0 BCP, §4.13.2). The previous
+   implementation returned a new access token indefinitely for one stolen
+   refresh token, with no way to notice.
+
+4. **Uniqueness under concurrency.** The display-name check was
+   ``WHERE lower(display_name) = ?`` followed by an insert — a check-then-act
+   race, and a sequential scan besides. Uniqueness is now carried by a unique
+   index on the blind index column, so concurrent registrations cannot both
+   succeed, and the pre-check exists only to produce a friendly error message.
+"""
 
 import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.config import settings
+from core.crypto.hashing import (
+    PEPPER_DOMAIN_RECOVERY,
+    hash_secret,
+    verify_secret,
+)
 from core.security import (
     create_access_token,
     create_refresh_token,
     hash_password,
+    password_needs_upgrade,
     verify_password,
 )
-from core.config import settings
 from models.device_account import DeviceAccount
 from models.refresh_token import RefreshToken
 from models.user import User
@@ -23,6 +57,10 @@ from models.user import User
 class AuthService:
     """Handles registration, login, token refresh, logout, device bootstrap."""
 
+    # ------------------------------------------------------------------
+    # Device-first identity
+    # ------------------------------------------------------------------
+
     @staticmethod
     async def device_bootstrap(
         device_fingerprint: str,
@@ -30,66 +68,69 @@ class AuthService:
         db: AsyncSession,
         device_secret: str | None = None,
     ) -> dict:
-        """Device-first identity: find-or-create the account for this install.
+        """Find-or-create the account for this install.
 
-        First call creates an invisible user (no email/password known to the
-        human) plus a hashed one-time recovery code and a cryptographic device secret.
-        Later calls must verify the device secret to prevent account hijacking.
+        First call creates an invisible user plus a one-time recovery code and
+        a device secret. Later calls must present the device secret.
         """
-        result = await db.execute(
-            select(DeviceAccount).where(
-                DeviceAccount.fingerprint == device_fingerprint
-            )
+        account = await AuthService._find_account_by_fingerprint(
+            device_fingerprint, db
         )
-        account = result.scalar_one_or_none()
 
         recovery_code: str | None = None
         issued_secret: str | None = None
 
         if account is None:
-            # --- first launch: create invisible identity ---
             await AuthService._ensure_display_name_available(display_name, db)
+
             suffix = secrets.token_hex(8)
             random_password = secrets.token_urlsafe(24)
-            user = User(
-                email=f"device-{suffix}@assistme.internal",
-                hashed_password=hash_password(random_password),
-                display_name=display_name,
-            )
+            user = User(hashed_password=hash_password(random_password))
+            user.set_email(f"device-{suffix}@assistme.internal")
+            user.set_display_name(display_name)
             db.add(user)
             await db.flush()
 
-            recovery_code = secrets.token_hex(6)  # 12 chars, shown once
+            recovery_code = secrets.token_hex(6)  # 12 characters, shown once
             issued_secret = device_secret or secrets.token_urlsafe(32)
+
             account = DeviceAccount(
                 user_id=user.id,
-                fingerprint=device_fingerprint,
-                recovery_code_hash=AuthService._hash_recovery(recovery_code),
-                device_secret_hash=AuthService._hash_recovery(issued_secret),
+                recovery_code_hash=AuthService._hash_secret(recovery_code),
+                recovery_code_bi=AuthService._normalise_code(recovery_code),
+                device_secret_hash=AuthService._hash_secret(issued_secret),
             )
+            account.set_fingerprint(device_fingerprint)
             db.add(account)
             created = True
             resolved_name = display_name
         else:
-            # --- Returning login: verify device_secret if registered ---
             if account.device_secret_hash:
-                if not device_secret or not secrets.compare_digest(
-                    AuthService._hash_recovery(device_secret),
-                    account.device_secret_hash,
-                ):
+                verify_res = (
+                    verify_secret(
+                        device_secret,
+                        account.device_secret_hash,
+                        domain=PEPPER_DOMAIN_RECOVERY,
+                    )
+                    if device_secret
+                    else None
+                )
+                if not verify_res or not verify_res.ok:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Invalid device credentials: authentication secret mismatch.",
+                        detail=(
+                            "Invalid device credentials: authentication secret "
+                            "mismatch."
+                        ),
                     )
+                if verify_res.needs_rehash:
+                    account.device_secret_hash = AuthService._hash_secret(device_secret)
                 issued_secret = device_secret
+
             else:
-                # Migration: register secret on first upgrade if provided
-                if device_secret:
-                    account.device_secret_hash = AuthService._hash_recovery(device_secret)
-                    issued_secret = device_secret
-                else:
-                    issued_secret = secrets.token_urlsafe(32)
-                    account.device_secret_hash = AuthService._hash_recovery(issued_secret)
+                # Upgrade path for accounts created before device secrets existed.
+                issued_secret = device_secret or secrets.token_urlsafe(32)
+                account.device_secret_hash = AuthService._hash_secret(issued_secret)
 
             result = await db.execute(select(User).where(User.id == account.user_id))
             user = result.scalar_one_or_none()
@@ -103,20 +144,14 @@ class AuthService:
                 await AuthService._ensure_display_name_available(
                     display_name, db, exclude_user_id=user.id
                 )
-                user.display_name = display_name
+                user.set_display_name(display_name)
             resolved_name = user.display_name
 
         await db.flush()
 
         access_token = create_access_token(user.id)
-        raw_refresh = create_refresh_token()
-        refresh_record = RefreshToken(
-            token=raw_refresh,
-            user_id=user.id,
-            expires_at=datetime.now(timezone.utc)
-            + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-        db.add(refresh_record)
+        raw_refresh = await AuthService._issue_refresh_token(user.id, db)
+
         try:
             await db.commit()
         except IntegrityError as exc:
@@ -125,8 +160,7 @@ class AuthService:
             if "display_name" not in str(exc.orig).lower():
                 detail = "This device identity is already being created. Please retry."
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=detail,
+                status_code=status.HTTP_409_CONFLICT, detail=detail
             ) from exc
 
         return {
@@ -141,71 +175,55 @@ class AuthService:
         }
 
     @staticmethod
-    async def _ensure_display_name_available(
-        display_name: str | None,
-        db: AsyncSession,
-        *,
-        exclude_user_id: str | None = None,
-    ) -> None:
-        """Validate the human-facing display name."""
-        if not display_name:
-            return
-
-        normalized = display_name.strip()
-        query = select(User).where(
-            func.lower(User.display_name) == normalized.lower()
-        )
-        if exclude_user_id is not None:
-            query = query.where(User.id != exclude_user_id)
-
-        result = await db.execute(query)
-        if result.scalar_one_or_none() is not None:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"The name '{normalized}' is already in use. Please choose a different name.",
-            )
-
-    @staticmethod
     async def device_reclaim(
         device_fingerprint: str,
         recovery_code: str,
         db: AsyncSession,
     ) -> dict:
-        """Reclaim an identity with a recovery code (reinstall/phone loss).
+        """Reclaim an identity with a recovery code (reinstall or phone loss).
 
-        Verifies the code against the stored hash and rebinds THIS install's
-        fingerprint to that account — trusted people come back with it.
+        Two steps, deliberately separated: a keyed blind index narrows the
+        search to at most one candidate, then Argon2id verifies the code
+        against that candidate's salted hash. Neither step alone is sufficient
+        — the index is not a credential check, and the salted hash cannot be
+        searched.
         """
-        code_hash = AuthService._hash_recovery(recovery_code)
+        normalised = AuthService._normalise_code(recovery_code)
+
         result = await db.execute(
-            select(DeviceAccount).where(
-                DeviceAccount.recovery_code_hash == code_hash
-            )
+            select(DeviceAccount).where(DeviceAccount.recovery_code_bi == normalised)
         )
         account = result.scalar_one_or_none()
-        if account is None:
+
+        if account is None or not account.recovery_code_hash or not verify_secret(
+            recovery_code.strip(),
+            account.recovery_code_hash,
+            domain=PEPPER_DOMAIN_RECOVERY,
+        ).ok:
+            # One message for "no such code" and "wrong code", so the response
+            # cannot be used to enumerate which codes exist.
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="No account matches that recovery code",
             )
 
-        # Guard: another live install already holds this fingerprint.
-        result = await db.execute(
-            select(DeviceAccount).where(
-                DeviceAccount.fingerprint == device_fingerprint
-            )
-        )
-        clash = result.scalar_one_or_none()
+        clash = await AuthService._find_account_by_fingerprint(device_fingerprint, db)
         if clash is not None and clash.id != account.id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This install already belongs to a different identity",
             )
 
-        # Rebind: this physical install now IS that account.
-        account.fingerprint = device_fingerprint
+        # Rebind this physical install to the reclaimed account.
+        account.set_fingerprint(device_fingerprint)
         new_secret = secrets.token_urlsafe(32)
-        account.device_secret_hash = AuthService._hash_recovery(new_secret)
+        account.device_secret_hash = AuthService._hash_secret(new_secret)
+
+        # A reclaim invalidates every session issued to the previous install.
+        # Without this, a stolen phone keeps working after the owner recovers
+        # their identity onto a new one — precisely the scenario reclaim exists
+        # to address.
+        await AuthService._revoke_all_refresh_tokens(account.user_id, db)
         await db.flush()
 
         result = await db.execute(select(User).where(User.id == account.user_id))
@@ -217,14 +235,7 @@ class AuthService:
             )
 
         access_token = create_access_token(user.id)
-        raw_refresh = create_refresh_token()
-        refresh_record = RefreshToken(
-            token=raw_refresh,
-            user_id=user.id,
-            expires_at=datetime.now(timezone.utc)
-            + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-        db.add(refresh_record)
+        raw_refresh = await AuthService._issue_refresh_token(user.id, db)
         await db.commit()
 
         return {
@@ -238,11 +249,9 @@ class AuthService:
             "device_secret": new_secret,
         }
 
-    @staticmethod
-    def _hash_recovery(code: str) -> str:
-        import hashlib
-
-        return hashlib.sha256(code.strip().lower().encode("utf-8")).hexdigest()
+    # ------------------------------------------------------------------
+    # Email/password (legacy surface, retained for API compatibility)
+    # ------------------------------------------------------------------
 
     @staticmethod
     async def register(
@@ -251,12 +260,8 @@ class AuthService:
         display_name: str | None,
         db: AsyncSession,
     ) -> dict[str, str]:
-        """Register a new user and return access + refresh tokens.
-
-        Raises 400 if the email is already taken.
-        """
-        # Check for duplicate email
-        result = await db.execute(select(User).where(User.email == email))
+        """Register a new user and return access + refresh tokens."""
+        result = await db.execute(select(User).where(User.email_bi == email))
         if result.scalar_one_or_none() is not None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -265,26 +270,22 @@ class AuthService:
 
         await AuthService._ensure_display_name_available(display_name, db)
 
-        # Create user
-        user = User(
-            email=email,
-            hashed_password=hash_password(password),
-            display_name=display_name,
-        )
+        user = User(hashed_password=hash_password(password))
+        user.set_email(email)
+        user.set_display_name(display_name)
         db.add(user)
-        await db.flush()  # get user.id without committing
 
-        # Generate tokens
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already registered",
+            ) from exc
+
         access_token = create_access_token(user.id)
-        raw_refresh = create_refresh_token()
-
-        refresh_record = RefreshToken(
-            token=raw_refresh,
-            user_id=user.id,
-            expires_at=datetime.now(timezone.utc)
-            + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-        db.add(refresh_record)
+        raw_refresh = await AuthService._issue_refresh_token(user.id, db)
         await db.commit()
 
         return {
@@ -294,16 +295,9 @@ class AuthService:
         }
 
     @staticmethod
-    async def login(
-        email: str,
-        password: str,
-        db: AsyncSession,
-    ) -> dict[str, str]:
-        """Authenticate a user and return tokens.
-
-        Raises 401 on invalid credentials.
-        """
-        result = await db.execute(select(User).where(User.email == email))
+    async def login(email: str, password: str, db: AsyncSession) -> dict[str, str]:
+        """Authenticate a user and return tokens."""
+        result = await db.execute(select(User).where(User.email_bi == email))
         user = result.scalar_one_or_none()
 
         if user is None or not verify_password(password, user.hashed_password):
@@ -312,16 +306,14 @@ class AuthService:
                 detail="Invalid email or password",
             )
 
-        access_token = create_access_token(user.id)
-        raw_refresh = create_refresh_token()
+        # Opportunistic upgrade: the plaintext is known to be correct only
+        # here, so this is the one moment a legacy bcrypt hash can be replaced
+        # without asking the user to reset anything.
+        if password_needs_upgrade(user.hashed_password):
+            user.hashed_password = hash_password(password)
 
-        refresh_record = RefreshToken(
-            token=raw_refresh,
-            user_id=user.id,
-            expires_at=datetime.now(timezone.utc)
-            + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-        )
-        db.add(refresh_record)
+        access_token = create_access_token(user.id)
+        raw_refresh = await AuthService._issue_refresh_token(user.id, db)
         await db.commit()
 
         return {
@@ -330,40 +322,70 @@ class AuthService:
             "token_type": "bearer",
         }
 
+    # ------------------------------------------------------------------
+    # Refresh token lifecycle
+    # ------------------------------------------------------------------
+
     @staticmethod
     async def refresh(refresh_token: str, db: AsyncSession) -> dict[str, str]:
-        """Issue a new access token using a valid refresh token.
+        """Rotate a refresh token and issue a new access token.
 
-        Raises 401 if the refresh token is invalid, expired, or revoked.
+        Rotation with reuse detection: the presented token is revoked and
+        replaced. If a token that was *already* revoked is presented, either it
+        was stolen and replayed or the legitimate client is retrying after a
+        lost response — both are handled by revoking the whole family, which
+        forces a clean re-authentication rather than leaving a possibly-stolen
+        credential live.
         """
+        digest = RefreshToken.digest(refresh_token)
         result = await db.execute(
-            select(RefreshToken).where(RefreshToken.token == refresh_token)
+            select(RefreshToken).where(RefreshToken.token_hash == digest)
         )
         record = result.scalar_one_or_none()
 
-        if record is None or record.revoked:
+        if record is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired refresh token",
             )
 
-        if record.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        if record.revoked:
+            await AuthService._revoke_all_refresh_tokens(record.user_id, db)
+            await db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "This refresh token has already been used. All sessions "
+                    "have been signed out; please sign in again."
+                ),
+            )
+
+        expires_at = record.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < datetime.now(timezone.utc):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired refresh token",
             )
 
+        record.revoked = True
         access_token = create_access_token(record.user_id)
-        return {"access_token": access_token, "token_type": "bearer"}
+        new_refresh = await AuthService._issue_refresh_token(record.user_id, db)
+        await db.commit()
+
+        return {
+            "access_token": access_token,
+            "refresh_token": new_refresh,
+            "token_type": "bearer",
+        }
 
     @staticmethod
     async def logout(refresh_token: str, db: AsyncSession) -> dict[str, str]:
-        """Revoke a refresh token (logout).
-
-        Raises 401 if the token is not found.
-        """
+        """Revoke a refresh token."""
+        digest = RefreshToken.digest(refresh_token)
         result = await db.execute(
-            select(RefreshToken).where(RefreshToken.token == refresh_token)
+            select(RefreshToken).where(RefreshToken.token_hash == digest)
         )
         record = result.scalar_one_or_none()
 
@@ -375,5 +397,87 @@ class AuthService:
 
         record.revoked = True
         await db.commit()
-
         return {"detail": "Successfully logged out"}
+
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _issue_refresh_token(user_id: str, db: AsyncSession) -> str:
+        """Create and stage a refresh token, returning the raw value.
+
+        The raw token is returned to the caller and never stored; only its
+        digest reaches the database.
+        """
+        raw = create_refresh_token()
+        db.add(
+            RefreshToken(
+                token_hash=RefreshToken.digest(raw),
+                user_id=user_id,
+                expires_at=datetime.now(timezone.utc)
+                + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+            )
+        )
+        return raw
+
+    @staticmethod
+    async def _revoke_all_refresh_tokens(user_id: str, db: AsyncSession) -> None:
+        """Revoke every live refresh token for a user."""
+        await db.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == user_id, RefreshToken.revoked.is_(False))
+            .values(revoked=True)
+        )
+
+    @staticmethod
+    async def _find_account_by_fingerprint(
+        fingerprint: str, db: AsyncSession
+    ) -> DeviceAccount | None:
+        """Look up a device account by its blind-indexed fingerprint."""
+        result = await db.execute(
+            select(DeviceAccount).where(DeviceAccount.fingerprint_bi == fingerprint)
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def _ensure_display_name_available(
+        display_name: str | None,
+        db: AsyncSession,
+        *,
+        exclude_user_id: str | None = None,
+    ) -> None:
+        """Pre-check display-name availability for a friendly error message.
+
+        The authoritative guarantee is the unique index on ``display_name_bi``;
+        this check only exists so the common case produces a clear 409 rather
+        than an integrity error. A race between this check and the insert is
+        therefore harmless — the index still refuses the duplicate.
+        """
+        if not display_name:
+            return
+
+        normalised = display_name.strip()
+        query = select(User).where(User.display_name_bi == normalised)
+        if exclude_user_id is not None:
+            query = query.where(User.id != exclude_user_id)
+
+        result = await db.execute(query)
+        if result.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"The name '{normalised}' is already in use. "
+                    "Please choose a different name."
+                ),
+            )
+
+    @staticmethod
+    def _normalise_code(code: str) -> str:
+        """Canonical form of a user-typed code, before hashing or indexing."""
+        return code.strip()
+
+    @staticmethod
+    def _hash_secret(secret: str) -> str:
+        """Argon2id hash of a recovery code or device secret."""
+        return hash_secret(secret.strip(), domain=PEPPER_DOMAIN_RECOVERY)

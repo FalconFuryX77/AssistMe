@@ -151,15 +151,27 @@ async def respond_to_escalation(
 # ---------------------------------------------------------------------------
 
 
-def _request_to_dict(request) -> dict:
+def _capabilities(value) -> list[str]:
+    """Normalise a capability column to a list.
+
+    Capability sets are stored as native JSON arrays now, so the value arrives
+    as a list. The string branch exists only for rows written before that
+    change; it can be deleted once the backfill migration has run everywhere.
+    """
+    if not value:
+        return []
+    if isinstance(value, list):
+        return value
     import json
 
-    caps = []
-    if request.initial_capabilities:
-        try:
-            caps = json.loads(request.initial_capabilities)
-        except (TypeError, ValueError):
-            caps = []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _request_to_dict(request) -> dict:
     return {
         "id": request.id,
         "session_id": request.session_id,
@@ -167,32 +179,22 @@ def _request_to_dict(request) -> dict:
         "helper_user_id": request.helper_user_id,
         "helper_device_fingerprint": request.helper_device_fingerprint,
         "status": request.status,
-        "initial_capabilities": caps,
+        "initial_capabilities": _capabilities(request.initial_capabilities),
         "responded_at": request.responded_at,
         "created_at": request.created_at,
     }
 
 
 def _escalation_to_dict(escalation) -> dict:
-    import json
-
-    def _loads(value):
-        if not value:
-            return []
-        try:
-            return json.loads(value)
-        except (TypeError, ValueError):
-            return []
-
     return {
         "id": escalation.id,
         "session_id": escalation.session_id,
         "requested_by_user_id": escalation.requested_by_user_id,
-        "target_capabilities": _loads(escalation.target_capabilities),
+        "target_capabilities": _capabilities(escalation.target_capabilities),
         "status": escalation.status,
         "disclaimer_text": escalation.disclaimer_text,
         "disclaimer_accepted": escalation.disclaimer_accepted,
-        "granted_capabilities": _loads(escalation.granted_capabilities),
+        "granted_capabilities": _capabilities(escalation.granted_capabilities),
         "responded_at": escalation.responded_at,
         "created_at": escalation.created_at,
     }
