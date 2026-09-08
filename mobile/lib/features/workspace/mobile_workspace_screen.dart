@@ -43,6 +43,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
   final ValueNotifier<bool> _remoteControlNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<bool> _annotationModeNotifier = ValueNotifier<bool>(false);
   final ValueNotifier<double> _aspectRatioNotifier = ValueNotifier<double>(9 / 16);
+  final ValueNotifier<bool> _screenShareNotifier = ValueNotifier<bool>(false);
   bool _leaving = false;
   bool _allowPop = false;
   Offset _voiceBarOffset = Offset.zero;
@@ -99,15 +100,21 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     await widget.onSessionClosed?.call();
     if (!mounted) return;
     setState(() => _allowPop = true);
-    Navigator.of(context).pop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   Future<void> _handleRemoteSessionEnded() async {
+    if (_leaving) return;
+    _leaving = true;
     await widget.secureStorage.clearActiveSession();
     await widget.onSessionClosed?.call();
     if (!mounted) return;
     setState(() => _allowPop = true);
-    Navigator.of(context).pop();
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -169,9 +176,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                             Container(
                               color: AppTheme.bgPrimary,
                               child: Center(
-                                child: ValueListenableBuilder<dynamic>(
-                                  valueListenable: _remoteStreamNotifier,
-                                  builder: (context, stream, _) => _helpeeSharingPlaceholder(stream != null),
+                                child: ValueListenableBuilder<bool>(
+                                  valueListenable: _screenShareNotifier,
+                                  builder: (context, sharing, _) => _helpeeSharingPlaceholder(sharing),
                                 ),
                               ),
                             ),
@@ -192,6 +199,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               remoteControlSink: _remoteControlNotifier,
                               annotationModeSink: _annotationModeNotifier,
                               contentAspectRatioNotifier: _aspectRatioNotifier,
+                              screenSharingSink: _screenShareNotifier,
                             ),
                           ),
 
@@ -201,9 +209,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               top: 14,
                               left: 14,
                               right: 14,
-                              child: ValueListenableBuilder<dynamic>(
-                                valueListenable: _remoteStreamNotifier,
-                                builder: (context, stream, _) => _helpeeStatusBanner(stream != null),
+                              child: ValueListenableBuilder<bool>(
+                                valueListenable: _screenShareNotifier,
+                                builder: (context, sharing, _) => _helpeeStatusBanner(sharing),
                               ),
                             ),
                         ],
@@ -293,16 +301,38 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
           ),
           const SizedBox(height: 20),
           Text(
-            sharing ? 'Screen Sharing Active' : 'Ready to Start',
+            sharing ? 'Screen Sharing Active' : 'Ready to Share',
             style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 10),
           Text(
             sharing
-                ? 'Your helper can see your screen. You can use your phone normally.\nUse DRAW to point, and STOP to end.'
-                : 'Tap the green Start Sharing button to let your helper see your screen.',
+                ? 'Your helper can see your screen. You can use your phone normally.\nTap Stop Sharing below to end sharing.'
+                : 'Tap Start Sharing below so your helper can view and guide your screen.',
             textAlign: TextAlign.center,
             style: const TextStyle(color: AppTheme.textSecondary, fontSize: 15, height: 1.4),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            icon: Icon(sharing ? Icons.stop_screen_share : Icons.screen_share, size: 22),
+            label: Text(
+              sharing ? 'Stop Sharing' : 'Start Sharing',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: sharing ? AppTheme.accentRose : AppTheme.accentEmerald,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              elevation: 4,
+            ),
+            onPressed: () {
+              if (sharing) {
+                _flowCoordinatorKey.currentState?.stopScreenShare();
+              } else {
+                _flowCoordinatorKey.currentState?.startScreenShare();
+              }
+            },
           ),
         ],
       ),
@@ -402,6 +432,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     _remoteStreamNotifier.dispose();
     _remoteControlNotifier.dispose();
     _annotationModeNotifier.dispose();
+    _screenShareNotifier.dispose();
     super.dispose();
   }
 }

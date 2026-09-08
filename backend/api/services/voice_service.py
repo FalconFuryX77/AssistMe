@@ -94,12 +94,13 @@ class VoiceService:
         )
         participant = result.scalar_one_or_none()
 
-        if participant is None or not participant.is_in_audio_call:
+        if participant is None:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User is not currently in an active audio call",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found in session",
             )
 
+        participant.is_in_audio_call = True
         participant.is_audio_muted = is_muted
         await db.commit()
         await db.refresh(participant)
@@ -121,12 +122,13 @@ class VoiceService:
         )
         participant = result.scalar_one_or_none()
 
-        if participant is None or not participant.is_in_audio_call:
+        if participant is None:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User is not currently in an active audio call",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Participant not found in session",
             )
 
+        participant.is_in_audio_call = True
         participant.audio_route = audio_route
         await db.commit()
         await db.refresh(participant)

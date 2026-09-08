@@ -41,9 +41,15 @@ void main() async {
     secureStorage: secureStorage,
   );
 
-  // Device-first identity: a token means onboarding already happened.
+  // Device-first identity: token or stored device credentials means onboarding already happened.
   final accessToken = await secureStorage.getAccessToken();
-  final hasIdentity = accessToken != null && accessToken.isNotEmpty;
+  final refreshToken = await secureStorage.getRefreshToken();
+  final deviceSecret = await secureStorage.getDeviceSecret();
+  final displayName = await secureStorage.getDisplayName();
+  final hasIdentity = (accessToken != null && accessToken.isNotEmpty) ||
+      (refreshToken != null && refreshToken.isNotEmpty) ||
+      (deviceSecret != null && deviceSecret.isNotEmpty) ||
+      (displayName != null && displayName.isNotEmpty);
 
   runApp(
     AssistMeMobileApp(

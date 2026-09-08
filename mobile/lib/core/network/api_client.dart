@@ -35,8 +35,12 @@ class ApiClient {
     };
 
     if (requireAuth) {
-      final token = await secureStorage.getAccessToken();
-      if (token != null) {
+      var token = await secureStorage.getAccessToken();
+      if ((token == null || token.isEmpty) && !_refreshing) {
+        await _tryRefresh();
+        token = await secureStorage.getAccessToken();
+      }
+      if (token != null && token.isNotEmpty) {
         headers['Authorization'] = 'Bearer $token';
       }
     }
@@ -52,7 +56,21 @@ class ApiClient {
     _refreshing = true;
     try {
       final refreshToken = await secureStorage.getRefreshToken();
-      if (refreshToken == null || refreshToken.isEmpty) return false;
+      if (refreshToken == null || refreshToken.isEmpty) {
+        // Try transparent device re-bootstrap if device credentials exist
+        final secret = await secureStorage.getDeviceSecret();
+        if (secret != null && secret.isNotEmpty) {
+          final fingerprint = await secureStorage.read(key: 'device_fingerprint') ?? '';
+          final name = await secureStorage.getDisplayName();
+          final bResp = await deviceBootstrap(
+            deviceFingerprint: fingerprint,
+            displayName: name,
+            deviceSecret: secret,
+          );
+          return bResp.statusCode == 200 || bResp.statusCode == 201;
+        }
+        return false;
+      }
       final resp = await httpClient.post(
         Uri.parse('$baseUrl/auth/refresh'),
         headers: const {
@@ -62,8 +80,19 @@ class ApiClient {
         body: jsonEncode({'refresh_token': refreshToken}),
       );
       if (resp.statusCode != 200) {
-        if (resp.statusCode == 401 || resp.statusCode == 404) {
-          await secureStorage.clearTokens();
+        // If refresh failed, attempt device bootstrap with stored secret before clearing
+        final secret = await secureStorage.getDeviceSecret();
+        if (secret != null && secret.isNotEmpty) {
+          final fingerprint = await secureStorage.read(key: 'device_fingerprint') ?? '';
+          final name = await secureStorage.getDisplayName();
+          final bResp = await deviceBootstrap(
+            deviceFingerprint: fingerprint,
+            displayName: name,
+            deviceSecret: secret,
+          );
+          if (bResp.statusCode == 200 || bResp.statusCode == 201) {
+            return true;
+          }
         }
         return false;
       }
@@ -74,6 +103,13 @@ class ApiClient {
         key: SecureStorageService.keyAccessToken,
         value: access,
       );
+      final newRefresh = data['refresh_token'];
+      if (newRefresh is String && newRefresh.isNotEmpty) {
+        await secureStorage.write(
+          key: SecureStorageService.keyRefreshToken,
+          value: newRefresh,
+        );
+      }
       return true;
     } catch (_) {
       return false;
@@ -90,7 +126,7 @@ class ApiClient {
     _ensureConfigured();
     var headers = await _getHeaders(requireAuth: requireAuth);
     var resp = await run(headers);
-    if (resp.statusCode == 401 && requireAuth) {
+    if ((resp.statusCode == 401 || resp.statusCode == 403) && requireAuth) {
       if (await _tryRefresh()) {
         headers = await _getHeaders(requireAuth: requireAuth);
         resp = await run(headers);
@@ -220,8 +256,8 @@ class ApiClient {
     String? displayName,
     String? deviceSecret,
     bool requireAuth = false,
-  }) {
-    return post(
+  }) async {
+    final resp = await post(
       '/auth/device',
       body: {
         'device_fingerprint': deviceFingerprint,
@@ -230,6 +266,30 @@ class ApiClient {
       },
       requireAuth: requireAuth,
     );
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      try {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final access = data['access_token'] as String?;
+        final refresh = data['refresh_token'] as String?;
+        if (access != null && access.isNotEmpty) {
+          await secureStorage.write(
+            key: SecureStorageService.keyAccessToken,
+            value: access,
+          );
+        }
+        if (refresh != null && refresh.isNotEmpty) {
+          await secureStorage.write(
+            key: SecureStorageService.keyRefreshToken,
+            value: refresh,
+          );
+        }
+        final sec = data['device_secret'] as String?;
+        if (sec != null && sec.isNotEmpty) {
+          await secureStorage.saveDeviceSecret(sec);
+        }
+      } catch (_) {}
+    }
+    return resp;
   }
 
   /// One-tap help call: rings a trusted helper, session forms silently.

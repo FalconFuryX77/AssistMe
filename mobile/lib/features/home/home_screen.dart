@@ -82,6 +82,20 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _bootstrap() async {
     _myName = await widget.secureStorage.getDisplayName() ?? '';
+    final token = await widget.secureStorage.getAccessToken();
+    if (token == null || token.isEmpty) {
+      final secret = await widget.secureStorage.getDeviceSecret();
+      if (secret != null && secret.isNotEmpty) {
+        final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+        try {
+          await widget.apiClient.deviceBootstrap(
+            deviceFingerprint: fingerprint,
+            displayName: _myName.isNotEmpty ? _myName : null,
+            deviceSecret: secret,
+          );
+        } catch (_) {}
+      }
+    }
     await _refreshActiveSession();
     await [Permission.microphone, Permission.notification].request();
     await _loadLists();

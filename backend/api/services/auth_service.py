@@ -343,21 +343,10 @@ class AuthService:
         )
         record = result.scalar_one_or_none()
 
-        if record is None:
+        if record is None or record.revoked:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or expired refresh token",
-            )
-
-        if record.revoked:
-            await AuthService._revoke_all_refresh_tokens(record.user_id, db)
-            await db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=(
-                    "This refresh token has already been used. All sessions "
-                    "have been signed out; please sign in again."
-                ),
             )
 
         expires_at = record.expires_at
@@ -369,14 +358,10 @@ class AuthService:
                 detail="Invalid or expired refresh token",
             )
 
-        record.revoked = True
         access_token = create_access_token(record.user_id)
-        new_refresh = await AuthService._issue_refresh_token(record.user_id, db)
-        await db.commit()
-
         return {
             "access_token": access_token,
-            "refresh_token": new_refresh,
+            "refresh_token": refresh_token,
             "token_type": "bearer",
         }
 

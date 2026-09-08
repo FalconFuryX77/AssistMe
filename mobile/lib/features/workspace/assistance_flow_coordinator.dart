@@ -45,6 +45,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
   final ValueNotifier<bool>? remoteControlSink;
   final ValueNotifier<bool>? annotationModeSink;
   final ValueNotifier<double>? contentAspectRatioNotifier;
+  final ValueNotifier<bool>? screenSharingSink;
 
   const AssistanceFlowCoordinator({
     super.key,
@@ -60,6 +61,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
     this.remoteControlSink,
     this.annotationModeSink,
     this.contentAspectRatioNotifier,
+    this.screenSharingSink,
   });
 
   @override
@@ -372,10 +374,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   /// Helpee STOP – VISION §12.5 panic: immediately shuts down everything for
   /// both sides (screen, annotations, control, overlay) so helper never sees
-  /// stale docs after helpee closed the app or tapped STOP. This is what the
-  /// user asked for: "shutting down the meeting just shut down everything for
-  /// the other guy".
-  Future<void> _panicStop() async {
+  /// stale docs after helpee closed the app or tapped STOP.
+  Future<void> _panicStop({bool isLocalLeave = false}) async {
     _sendRealtimeOrP2P({'type': 'session_ended'});
     _sendRealtimeOrP2P({'type': 'draw_clear'});
     try {
@@ -388,11 +388,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     try { await AnnotationOverlayService.stop(); } catch (_) {}
     _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
-    await widget.onSessionEnded?.call();
+    if (!isLocalLeave) {
+      await widget.onSessionEnded?.call();
+    }
     await widget.onSessionClosed?.call();
   }
 
-  Future<void> leave() => _panicStop();
+  Future<void> leave() => _panicStop(isLocalLeave: true);
 
   Future<void> _bootstrap() async {
     final fingerprint = await DeviceIdentity.getFingerprint(
@@ -532,10 +534,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       await _engine.initialize(iceServers: iceServers);
-      if (!widget.isHelpee) {
-        await _engine.startMicOnly();
-      }
+      // Start microphone immediately for both sides so voice is connected from second 1
+      await _engine.startMicOnly();
       if (mounted) setState(() => _mediaReady = true);
+
+      // Helpee: if not auto-starting screen share immediately, send initial audio offer
+      // so two-way voice works while deciding when to share screen.
+      if (widget.isHelpee && !_screenShareStarted && !widget.autoStartScreenShare) {
+        try {
+          final offer = await _engine.createOffer();
+          _realtime?.send({'type': 'signal_offer', 'sdp': offer});
+        } catch (_) {}
+      }
 
       // The helper can receive the offer before its media engine finishes
       // initializing. Keep it instead of dropping the first negotiation.
@@ -563,6 +573,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
+  void _updateScreenShareState(bool started) {
+    if (_screenShareStarted != started) {
+      _screenShareStarted = started;
+      if (mounted) setState(() {});
+      widget.screenSharingSink?.value = started;
+    }
+  }
+
   /// Helpee: capture screen + mic, then offer to the room.
   Future<void> startScreenShare() async {
     if (_screenShareStarted || !_mediaReady) {
@@ -581,7 +599,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final offer = await _engine.createOffer();
       _realtime?.send({'type': 'signal_offer', 'sdp': offer});
       _realtime?.send({'type': 'screen_share_start', 'platform': 'android'});
-      if (mounted) setState(() => _screenShareStarted = true);
+      _updateScreenShareState(true);
       await _startHelpeeOverlay();
     } catch (e) {
       debugPrint('Screen share failed: $e');
@@ -601,7 +619,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     try {
       await _engine.stopScreenCapture();
       _realtime?.send({'type': 'screen_share_stop'});
-      if (mounted) setState(() => _screenShareStarted = false);
+      _updateScreenShareState(false);
     } catch (e) {
       debugPrint('Stop screen share failed: $e');
     }
@@ -1273,29 +1291,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Widget build(BuildContext context) {
     return Stack(
       children: [
-        // Helpee permanent Start Sharing – always visible until sharing succeeds, never hidden behind banner.
-        // Banner is at top 12, so button is centered to avoid overlap. Disabled when media not ready.
-        if (widget.isHelpee && !_screenShareStarted)
-          Positioned.fill(
-            child: Center(
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.screen_share),
-                label: const Text(
-                  'Start Sharing',
-                  style: TextStyle(fontSize: 16),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.accentEmerald,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 14,
-                  ),
-                ),
-                onPressed: startScreenShare,
-              ),
-            ),
-          ),
-
         // Drawing overlay – for helper, only show the in-progress draft for low-latency
         // feedback. Completed strokes are already visible via the helpee's captured
         // overlay video (now not FLAG_SECURE so screenshots work), so showing them
