@@ -344,6 +344,15 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
+  void _pushOverlayThrottled() {
+    if (!widget.isHelpee || !_helpeeOverlayRunning) return;
+    if (_overlayTimer?.isActive == true) return;
+    _overlayTimer = Timer(const Duration(milliseconds: 33), () {
+      _overlayTimer = null;
+      _pushOverlay();
+    });
+  }
+
   Future<void> _startHelpeeOverlay() async {
     if (!widget.isHelpee || _helpeeOverlayRunning) return;
     try {
@@ -729,6 +738,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           }
           final rawColor = event.data['color'];
           final rawWidth = event.data['width'];
+          _overlayTimer?.cancel();
+          _overlayTimer = null;
           setState(() {
             _draftStroke = null;
             _redoStrokes.clear();
@@ -772,7 +783,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               width: width is num ? width.toDouble() : 4,
             ),
           );
-          _pushOverlay();
+          _pushOverlayThrottled();
         }
         break;
 
@@ -1432,63 +1443,94 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       color: AppTheme.bgSecondary.withValues(alpha: 0.94),
       borderRadius: BorderRadius.circular(14),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              tooltip: 'Pen',
-              color: _annotationTool == AnnotationTool.pen
-                  ? AppTheme.accentEmerald
-                  : AppTheme.textSecondary,
-              icon: const Icon(Icons.edit),
-              onPressed: () => _selectAnnotationTool(AnnotationTool.pen),
-            ),
-            IconButton(
-              tooltip: 'Eraser',
-              color: _annotationTool == AnnotationTool.eraser
-                  ? AppTheme.accentRose
-                  : AppTheme.textSecondary,
-              icon: const Icon(Icons.auto_fix_normal),
-              onPressed: () => _selectAnnotationTool(AnnotationTool.eraser),
-            ),
-            IconButton(
-              tooltip: 'Colour and thickness',
-              icon: Icon(Icons.tune, color: _annotationColor),
-              onPressed: _showAnnotationOptions,
-            ),
-            IconButton(
-              tooltip: 'Undo',
-              icon: const Icon(Icons.undo),
-              onPressed: _strokes.isEmpty ? null : _undoDrawing,
-            ),
-            IconButton(
-              tooltip: 'Redo',
-              icon: const Icon(Icons.redo),
-              onPressed: _redoStrokes.isEmpty ? null : _redoDrawing,
-            ),
-            IconButton(
-              tooltip: 'Clear annotations',
-              icon: const Icon(Icons.delete_sweep),
-              onPressed: _strokes.isEmpty ? null : _clearDrawings,
-            ),
-            IconButton(
-              tooltip: 'Bookmark step for guide',
-              icon: const Icon(Icons.bookmark_add_outlined),
-              color: AppTheme.accentAmber,
-              onPressed: () async {
-                await _keyframeManager.manualBookmark();
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('📸 Step bookmarked for visual guide'),
-                      duration: Duration(seconds: 1),
-                    ),
-                  );
-                }
-              },
-            ),
-          ],
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Pen',
+                color: _annotationTool == AnnotationTool.pen
+                    ? AppTheme.accentEmerald
+                    : AppTheme.textSecondary,
+                icon: const Icon(Icons.edit),
+                onPressed: () => _selectAnnotationTool(AnnotationTool.pen),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Eraser',
+                color: _annotationTool == AnnotationTool.eraser
+                    ? AppTheme.accentRose
+                    : AppTheme.textSecondary,
+                icon: const Icon(Icons.auto_fix_normal),
+                onPressed: () => _selectAnnotationTool(AnnotationTool.eraser),
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Colour and thickness',
+                icon: Icon(Icons.tune, color: _annotationColor),
+                onPressed: _showAnnotationOptions,
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Undo',
+                icon: const Icon(Icons.undo),
+                onPressed: _strokes.isEmpty ? null : _undoDrawing,
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Redo',
+                icon: const Icon(Icons.redo),
+                onPressed: _redoStrokes.isEmpty ? null : _redoDrawing,
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Clear annotations',
+                icon: const Icon(Icons.delete_sweep),
+                onPressed: _strokes.isEmpty ? null : _clearDrawings,
+              ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.all(6),
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                iconSize: 20,
+                tooltip: 'Bookmark step for guide',
+                icon: const Icon(Icons.bookmark_add_outlined),
+                color: AppTheme.accentAmber,
+                onPressed: () async {
+                  await _keyframeManager.manualBookmark();
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('📸 Step bookmarked for visual guide'),
+                        duration: Duration(seconds: 1),
+                      ),
+                    );
+                  }
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );

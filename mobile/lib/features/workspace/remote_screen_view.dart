@@ -121,16 +121,8 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
       },
       ...?durationMs == null ? null : {'duration_ms': durationMs},
     };
-    // 1. Instantly dispatch over WebRTC DataChannel (UDP, sub-15ms latency)
+    // Instantly dispatch over WebRTC DataChannel (UDP, sub-15ms latency)
     widget.onRemoteInput?.call(payload);
-
-    // 2. Asynchronously fire HTTP logging in background
-    try {
-      widget.apiClient.post(
-        '/sessions/${widget.sessionId}/remote-control/input',
-        body: payload,
-      );
-    } catch (_) {}
   }
 
   /// Normalized point inside the bounded video rect that matches RTCVideoView's

@@ -13,6 +13,7 @@ library;
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -164,6 +165,10 @@ class WebRTCEngine {
     final old = _pc;
     _pc = null;
     try {
+      try {
+        await _dataChannel?.close();
+      } catch (_) {}
+      _dataChannel = null;
       await old?.close();
       await _createPeerConnection();
       _setState(WebRTCEngineState.connected);
@@ -350,15 +355,22 @@ class WebRTCEngine {
   Future<void> createDataChannel([String label = 'assistme_channel']) async {
     if (_pc == null) return;
     try {
-      final init = RTCDataChannelInit()..ordered = true;
+      final init = RTCDataChannelInit()
+        ..ordered = true
+        ..negotiated = true
+        ..id = 1;
       final channel = await _pc!.createDataChannel(label, init);
       _setupDataChannel(channel);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('createDataChannel error: $e');
+    }
   }
 
   void _setupDataChannel(RTCDataChannel channel) {
     _dataChannel = channel;
+    debugPrint('WebRTC DataChannel attached, state: ${channel.state}');
     channel.onDataChannelState = (state) {
+      debugPrint('WebRTC DataChannel state: $state');
       onDataChannelState?.call(state == RTCDataChannelState.RTCDataChannelOpen);
     };
     channel.onMessage = (RTCDataChannelMessage msg) {
@@ -403,6 +415,10 @@ class WebRTCEngine {
   }
 
   Future<Map<String, dynamic>> createAnswer() async {
+    // Answerer side: prepare pre-negotiated data channel so both sides match
+    if (_dataChannel == null) {
+      await createDataChannel();
+    }
     final answer = await _pc!.createAnswer({});
     await _pc!.setLocalDescription(answer);
     final desc = await _pc!.getLocalDescription();
