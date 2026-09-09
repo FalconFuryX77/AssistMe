@@ -18,6 +18,7 @@ import '../../core/realtime/device_channel_service.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
+import '../guides/my_guides_screen.dart';
 import '../workspace/mobile_workspace_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -914,6 +915,20 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: AppTheme.bgPrimary,
       appBar: AppBar(
         title: Text(_myName.isEmpty ? 'AssistMe' : 'Hi, $_myName'),
+        actions: [
+          IconButton(
+            tooltip: 'My Step Guides',
+            icon: const Icon(Icons.menu_book, color: AppTheme.accentEmerald),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MyGuidesScreen(apiClient: widget.apiClient),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -1178,6 +1193,67 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             }),
           ],
+          const SizedBox(height: 20),
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => MyGuidesScreen(apiClient: widget.apiClient),
+                ),
+              );
+            },
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    AppTheme.accentEmerald.withValues(alpha: 0.2),
+                    AppTheme.bgSecondary,
+                  ],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppTheme.accentEmerald.withValues(alpha: 0.4)),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppTheme.accentEmerald.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.auto_stories, color: AppTheme.accentEmerald, size: 28),
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'My Step-by-Step Guides',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          'Review guides from past help calls anytime',
+                          style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right, color: AppTheme.accentEmerald),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );

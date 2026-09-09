@@ -447,6 +447,22 @@ class WebRTCEngine {
     }
   }
 
+  /// Captures a single image frame from the active video track.
+  /// Supports both local screen stream (helpee) or remote incoming stream (helper).
+  Future<Uint8List?> captureScreenFrame({MediaStream? remoteStream}) async {
+    try {
+      final stream = remoteStream ?? _screenStream;
+      if (stream == null) return null;
+      final tracks = stream.getVideoTracks();
+      if (tracks.isEmpty) return null;
+      final track = tracks.first;
+      final buffer = await track.captureFrame();
+      return buffer.asUint8List();
+    } catch (e) {
+      return null;
+    }
+  }
+
   Future<void> dispose() async {
     try {
       await stopScreenCapture();

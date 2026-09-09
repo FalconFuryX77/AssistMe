@@ -48,8 +48,11 @@ from models.intelligent_assistance import (  # noqa: F401
     AssistanceTaskPattern,
     PreferredAssistanceMode,
 )
+from models.guide import GuideStep, SessionGuide  # noqa: F401
 
 __all__ = [
+    "GuideStep",
+    "SessionGuide",
     "AssistanceActionTransition",
     "AssistanceEscalation",
     "AssistanceRequest",

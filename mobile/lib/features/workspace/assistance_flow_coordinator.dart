@@ -12,8 +12,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/guides/session_keyframe_manager.dart';
 import '../../core/network/api_client.dart';
 import '../../core/platform/accessibility_bridge.dart';
 import '../../core/platform/annotation_overlay_service.dart';
@@ -87,6 +89,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   final WebRTCEngine _engine = WebRTCEngine();
   late final ValueNotifier<dynamic> remoteStreamNotifier =
       widget.remoteStreamSink ?? ValueNotifier<dynamic>(null);
+
+  // Silent visual session guide keyframe manager
+  late final SessionKeyframeManager _keyframeManager = SessionKeyframeManager(
+    captureFrameCallback: () async {
+      if (widget.isHelpee) {
+        return await _engine.captureScreenFrame();
+      } else {
+        final stream = remoteStreamNotifier.value;
+        return await _engine.captureScreenFrame(
+          remoteStream: stream is MediaStream ? stream : null,
+        );
+      }
+    },
+  );
   bool _mediaReady = false;
   bool _screenShareStarted = false;
   bool _remoteControlGranted = false;
@@ -191,6 +207,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       'width': width,
     });
     _pushOverlay();
+    _keyframeManager.onStrokeCompleted(points);
   }
 
   void _eraseAt(Offset point) {
@@ -292,6 +309,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     // Local overlay already shows the stroke via native canvas; _pushOverlay
     // keeps it in sync for any future helper replay but does not duplicate.
     _pushOverlay();
+    _keyframeManager.onStrokeCompleted(points);
   }
 
   Future<void> toggleAudioMute(bool mute) async {
@@ -388,6 +406,23 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     try { await AnnotationOverlayService.stop(); } catch (_) {}
     _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
+
+    // Asynchronously dispatch captured keyframes to synthesize visual step guide
+    final keyframesPayload = _keyframeManager.toPayloadList();
+    if (keyframesPayload.isNotEmpty) {
+      unawaited(() async {
+        try {
+          await widget.apiClient.post(
+            '/sessions/${widget.sessionId}/guide/generate',
+            body: {
+              'title': widget.isHelpee ? 'Help from ${widget.peerName}' : 'Helping ${widget.peerName}',
+              'keyframes': keyframesPayload,
+            },
+          );
+        } catch (_) {}
+      }());
+    }
+
     if (!isLocalLeave) {
       await widget.onSessionEnded?.call();
     }
@@ -708,6 +743,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             );
           });
           _pushOverlay();
+          _keyframeManager.onStrokeCompleted(points);
         }
         break;
 
@@ -1436,6 +1472,22 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               icon: const Icon(Icons.delete_sweep),
               onPressed: _strokes.isEmpty ? null : _clearDrawings,
             ),
+            IconButton(
+              tooltip: 'Bookmark step for guide',
+              icon: const Icon(Icons.bookmark_add_outlined),
+              color: AppTheme.accentAmber,
+              onPressed: () async {
+                await _keyframeManager.manualBookmark();
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('📸 Step bookmarked for visual guide'),
+                      duration: Duration(seconds: 1),
+                    ),
+                  );
+                }
+              },
+            ),
           ],
         ),
       ),
@@ -1515,6 +1567,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _overlayTimer?.cancel();
     _realtime?.disconnect();
     _engine.dispose();
+    _keyframeManager.dispose();
     if (widget.isHelpee) AnnotationOverlayService.stop();
     super.dispose();
   }
