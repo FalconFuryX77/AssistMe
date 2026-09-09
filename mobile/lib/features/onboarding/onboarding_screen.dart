@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/config/server_config_dialog.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
@@ -178,6 +179,23 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.bgPrimary,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        actions: [
+          IconButton(
+            tooltip: 'Server Connection',
+            icon: const Icon(Icons.dns_outlined, color: AppTheme.accentPrimary),
+            onPressed: () {
+              ServerConfigDialog.show(
+                context,
+                apiClient: widget.apiClient,
+                secureStorage: widget.secureStorage,
+              );
+            },
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

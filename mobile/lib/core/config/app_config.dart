@@ -8,7 +8,7 @@ class AppConfig {
   /// development; release builds should provide DEFAULT_SERVER_URL.
   static const String defaultBackendHost = String.fromEnvironment(
     'BACKEND_HOST',
-    defaultValue: '10.0.2.2',
+    defaultValue: '192.168.1.39',
   );
 
   static const String defaultServerUrl = String.fromEnvironment(

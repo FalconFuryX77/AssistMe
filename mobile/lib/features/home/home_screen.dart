@@ -12,6 +12,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/config/server_config_dialog.dart';
 import '../../core/network/api_client.dart';
 import '../../core/notifications/push_notification_service.dart';
 import '../../core/realtime/device_channel_service.dart';
@@ -916,6 +917,18 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(_myName.isEmpty ? 'AssistMe' : 'Hi, $_myName'),
         actions: [
+          IconButton(
+            tooltip: 'Server Connection',
+            icon: const Icon(Icons.dns_outlined, color: AppTheme.accentPrimary),
+            onPressed: () {
+              ServerConfigDialog.show(
+                context,
+                apiClient: widget.apiClient,
+                secureStorage: widget.secureStorage,
+                onUrlChanged: _loadLists,
+              );
+            },
+          ),
           IconButton(
             tooltip: 'My Step Guides',
             icon: const Icon(Icons.menu_book, color: AppTheme.accentEmerald),
