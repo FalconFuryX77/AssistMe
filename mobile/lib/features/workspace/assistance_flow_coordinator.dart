@@ -676,10 +676,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       return;
     }
     try {
+      // Set remote description FIRST so transceivers match the incoming offer's m-line order
+      await _engine.setRemoteDescription(sdp);
       if (!widget.isHelpee) {
         await _engine.startMicOnly();
       }
-      await _engine.setRemoteDescription(sdp);
       _remoteDescriptionSet = true;
       for (final candidate in _pendingIceCandidates) {
         await _engine.addIceCandidate(candidate);
@@ -688,6 +689,26 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final answer = await _engine.createAnswer();
       _realtime?.send({'type': 'signal_answer', 'sdp': answer});
     } catch (e) {
+      if (e.toString().contains('m-lines') || e.toString().contains('SDP') || e.toString().contains('setRemoteDescription')) {
+        try {
+          debugPrint('m-line mismatch on incoming offer, rebuilding peer connection cleanly: $e');
+          await _engine.rebuildPeerConnection();
+          await _engine.setRemoteDescription(sdp);
+          if (!widget.isHelpee) {
+            await _engine.startMicOnly();
+          }
+          _remoteDescriptionSet = true;
+          for (final candidate in _pendingIceCandidates) {
+            await _engine.addIceCandidate(candidate);
+          }
+          _pendingIceCandidates.clear();
+          final answer = await _engine.createAnswer();
+          _realtime?.send({'type': 'signal_answer', 'sdp': answer});
+          return;
+        } catch (retryError) {
+          debugPrint('Retry after peer rebuild also failed: $retryError');
+        }
+      }
       debugPrint('Answering offer failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
