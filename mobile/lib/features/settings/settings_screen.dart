@@ -77,7 +77,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       final healthUri = Uri.parse('$url/health');
-      final resp = await http.get(healthUri).timeout(const Duration(seconds: 4));
+      final resp = await http.get(
+        healthUri,
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      ).timeout(const Duration(seconds: 4));
       if (resp.statusCode == 200) {
         setState(() {
           _testSuccess = true;
