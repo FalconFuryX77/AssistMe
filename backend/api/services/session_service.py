@@ -5,7 +5,7 @@ import string
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -23,6 +23,32 @@ def _generate_session_code(length: int = 6) -> str:
 class SessionService:
     """Manages assistance session lifecycle."""
 
+    @staticmethod
+    async def _get_unique_code(db: AsyncSession) -> str | None:
+        for _ in range(10):
+            code = _generate_session_code()
+            result = await db.execute(
+                select(Session).where(Session.session_code == code)
+            )
+            if result.scalar_one_or_none() is None:
+                return code
+        return None
+
+    @staticmethod
+    async def _close_stale_participants(user_id: str, db: AsyncSession, exclude_session_id: str | None = None) -> None:
+        """Close any lingering active participant records for this user to avoid exclusion constraint violation."""
+        stmt = (
+            update(SessionParticipant)
+            .where(
+                SessionParticipant.user_id == user_id,
+                SessionParticipant.left_at.is_(None),
+            )
+        )
+        if exclude_session_id:
+            stmt = stmt.where(SessionParticipant.session_id != exclude_session_id)
+        stmt = stmt.values(left_at=datetime.now(timezone.utc), status="left")
+        await db.execute(stmt)
+
     # ------------------------------------------------------------------
     # Create
     # ------------------------------------------------------------------
@@ -34,23 +60,19 @@ class SessionService:
         timeout_minutes: int,
         db: AsyncSession,
     ) -> Session:
-        """Create a new session and add the creator as 'helper'.
+        """Create a new assistance session.
 
-        Generates a unique session code for the helpee to join.
+        The creator is automatically attached as the helper participant.
         """
-        # Generate a unique session code (retry on collision)
-        for _ in range(10):
-            code = _generate_session_code()
-            result = await db.execute(
-                select(Session).where(Session.session_code == code)
-            )
-            if result.scalar_one_or_none() is None:
-                break
-        else:
+        code = await SessionService._get_unique_code(db)
+        if not code:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to generate unique session code",
             )
+
+        # Clear any stale active participant record for creator before creating a new session
+        await SessionService._close_stale_participants(creator_id, db)
 
         session = Session(
             creator_id=creator_id,
@@ -124,6 +146,8 @@ class SessionService:
             timeout_minutes=60,
             db=db,
         )
+        # Clear any stale active record for helpee before attaching to this session
+        await SessionService._close_stale_participants(helpee_id, db)
         participant = SessionParticipant(
             session_id=session.id,
             user_id=helpee_id,
@@ -207,6 +231,7 @@ class SessionService:
         if existing is not None:
             if existing.status == "disconnected":
                 # Reconnect — recovery path
+                await SessionService._close_stale_participants(user_id, db, exclude_session_id=session.id)
                 existing.status = "connected"
                 existing.last_seen_at = datetime.now(timezone.utc)
                 existing.left_at = None
@@ -220,6 +245,7 @@ class SessionService:
                 )
             else:
                 # Was 'left' — rejoin
+                await SessionService._close_stale_participants(user_id, db, exclude_session_id=session.id)
                 existing.status = "connected"
                 existing.last_seen_at = datetime.now(timezone.utc)
                 existing.left_at = None
@@ -228,6 +254,7 @@ class SessionService:
                 return session
 
         # New participant joins as helpee
+        await SessionService._close_stale_participants(user_id, db)
         participant = SessionParticipant(
             session_id=session.id,
             user_id=user_id,

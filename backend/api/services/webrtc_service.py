@@ -41,7 +41,14 @@ class WebRTCService:
         """
         metered = WebRTCService._fetch_metered()
         if metered is not None:
-            servers = [ICEServerEntry(**entry) for entry in metered]
+            google_stun = ICEServerEntry(urls=[
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+            ])
+            servers = [google_stun]
+            for entry in metered:
+                servers.append(ICEServerEntry(**entry))
             return ICEServersResponse(ice_servers=servers)
 
         # Use public-facing STUN URLs if configured, otherwise fallback to internal list

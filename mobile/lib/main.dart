@@ -29,7 +29,16 @@ void main() async {
   final savedUrl = await secureStorage.getServerUrl();
   if (savedUrl != null && savedUrl.isNotEmpty) {
     try {
-      AppConfig.setBaseUrl(savedUrl);
+      final isStaleLocal = savedUrl.contains('192.168.') ||
+          savedUrl.contains('localhost') ||
+          savedUrl.contains('127.0.0.1') ||
+          savedUrl.contains('10.0.2.2');
+      if (isStaleLocal && AppConfig.defaultServerUrl.startsWith('https://')) {
+        await secureStorage.clearServerUrl();
+        AppConfig.setBaseUrl(AppConfig.defaultServerUrl);
+      } else {
+        AppConfig.setBaseUrl(savedUrl);
+      }
     } catch (_) {
       // Ignore an invalid value left by an older build and use the compiled
       // default instead.

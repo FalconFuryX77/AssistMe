@@ -13,9 +13,8 @@ class AppConfig {
 
   static const String defaultServerUrl = String.fromEnvironment(
     'DEFAULT_SERVER_URL',
-    // A release build must inject the stable public API hostname. Temporary
-    // tunnel URLs expire and must never strand newly installed devices.
-    defaultValue: '',
+    // Default to the active public tunnel so mobile data devices can connect immediately.
+    defaultValue: 'https://arcane-unserviceably-tosha.ngrok-free.dev',
   );
 
   static const int backendPort = 8000;

@@ -542,6 +542,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
     List<Map<String, dynamic>> iceServers = const [
       {'urls': 'stun:stun.l.google.com:19302'},
+      {'urls': 'turns:in.relay.metered.ca:443?transport=tcp'},
+      {'urls': 'turn:in.relay.metered.ca:80?transport=tcp'},
     ];
     try {
       final resp = await widget.apiClient.getIceServers(widget.sessionId);
@@ -556,7 +558,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }).toList();
       }
     } catch (_) {
-      // fall back to default STUN-only config
+      // fall back to default STUN+TURN config
     }
 
     try {
@@ -690,7 +692,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _pendingIceCandidates.clear();
       final answer = await _engine.createAnswer();
       _realtime?.send({'type': 'signal_answer', 'sdp': answer});
-      if (!widget.isHelpee) {
+      if (!widget.isHelpee && remoteStreamNotifier.value == null) {
         final videoStream = await _engine.getRemoteVideoStream();
         if (videoStream != null && mounted) {
           remoteStreamNotifier.value = videoStream;
@@ -712,7 +714,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           _pendingIceCandidates.clear();
           final answer = await _engine.createAnswer();
           _realtime?.send({'type': 'signal_answer', 'sdp': answer});
-          if (!widget.isHelpee) {
+          if (!widget.isHelpee && remoteStreamNotifier.value == null) {
             final videoStream = await _engine.getRemoteVideoStream();
             if (videoStream != null && mounted) {
               remoteStreamNotifier.value = videoStream;

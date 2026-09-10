@@ -607,6 +607,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 if isinstance(raw_width, (int, float)):
                     sanitized_width = max(1.0, min(50.0, float(raw_width)))
 
+                raw_color = msg.get("color")
+                sanitized_color = raw_color if isinstance(raw_color, (int, float)) else str(raw_color or "#FF0000")[:32]
+
                 await _broadcast(
                     session_id,
                     {
@@ -614,7 +617,7 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                         "sender_user_id": user.id,
                         "points": sanitized_points,
                         "point": sanitized_point,
-                        "color": str(msg.get("color", "#FF0000"))[:32],
+                        "color": sanitized_color,
                         "width": sanitized_width,
                     },
                     exclude_user=user.id,
