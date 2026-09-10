@@ -566,11 +566,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       runSpacing: 6,
                       children: [
                         ActionChip(
-                          avatar: const Icon(Icons.cloud_outlined, size: 16, color: AppTheme.accentEmerald),
-                          label: const Text('Cloudflare Tunnel', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          avatar: const Icon(Icons.bolt, size: 16, color: AppTheme.accentEmerald),
+                          label: const Text('Public Tunnel (ngrok)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
                           onPressed: () {
                             setState(() {
-                              _serverUrlController.text = 'https://louise-courage-responded-cst.trycloudflare.com';
+                              _serverUrlController.text = 'https://arcane-unserviceably-tosha.ngrok-free.dev';
                               _testResult = null;
                             });
                           },
