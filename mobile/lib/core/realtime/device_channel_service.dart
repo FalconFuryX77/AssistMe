@@ -53,11 +53,15 @@ class DeviceChannelService {
           } catch (_) {/* ignore malformed frames */}
         },
         onDone: _scheduleReconnect,
-        onError: (_) => _scheduleReconnect,
+        onError: (err) {
+          _scheduleReconnect();
+        },
         cancelOnError: true,
       );
       _heartbeat = Timer.periodic(const Duration(seconds: 25), (_) {
-        _socket?.add('heartbeat');
+        try {
+          _socket?.add('heartbeat');
+        } catch (_) {}
       });
     } catch (_) {
       _scheduleReconnect();
@@ -67,7 +71,7 @@ class DeviceChannelService {
   void _scheduleReconnect() {
     _teardownSocket();
     if (_disposed) return;
-    Future.delayed(const Duration(seconds: 3), () {
+    Future.delayed(const Duration(seconds: 2), () {
       if (!_disposed && _socket == null) connect();
     });
   }

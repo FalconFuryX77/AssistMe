@@ -13,6 +13,8 @@ class AppConfig {
 
   static const String defaultServerUrl = String.fromEnvironment(
     'DEFAULT_SERVER_URL',
+    // A release build must inject the stable public API hostname. Temporary
+    // tunnel URLs expire and must never strand newly installed devices.
     defaultValue: '',
   );
 
@@ -46,6 +48,11 @@ class AppConfig {
 
   static void setBaseUrl(String value) {
     baseUrl = normalize(value);
+  }
+
+  static String resetToDefault() {
+    baseUrl = _initialBaseUrl();
+    return baseUrl;
   }
 
   static bool get isConfigured => baseUrl.trim().isNotEmpty;

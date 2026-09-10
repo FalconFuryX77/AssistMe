@@ -12,7 +12,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../core/config/server_config_dialog.dart';
 import '../../core/network/api_client.dart';
 import '../../core/notifications/push_notification_service.dart';
 import '../../core/realtime/device_channel_service.dart';
@@ -20,6 +19,7 @@ import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
 import '../guides/my_guides_screen.dart';
+import '../settings/settings_screen.dart';
 import '../workspace/mobile_workspace_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -36,7 +36,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const _tabNeedHelp = 0;
   static const _tabHelping = 1;
 
@@ -79,7 +79,29 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _bootstrap();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _channelSub?.cancel();
+    _channel?.dispose();
+    _ringStatusTimer?.cancel();
+    _codePollTimer?.cancel();
+    _heartbeatTimer?.cancel();
+    _codeInputController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _connectChannel();
+      _checkMissedCalls();
+      _refreshActiveSession();
+    }
   }
 
   Future<void> _bootstrap() async {
@@ -132,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   /// A closed app must never lose a request: fetch pending rings on open.
   Future<void> _checkMissedCalls() async {
-    if (_incomingCall != null || _ringingRequestId != null) return;
+    if (_incomingCall != null || _ringingRequestId != null || _incomingDialogOpen) return;
     try {
       final resp = await widget.apiClient.listPendingCalls();
       if (resp.statusCode != 200) return;
@@ -149,6 +171,9 @@ class _HomeScreenState extends State<HomeScreen> {
             'message': first['message'],
           };
         });
+        if (ModalRoute.of(context)?.isCurrent == true) {
+          _showIncomingDialog();
+        }
       }
     } catch (_) {
       /* offline — try again next bootstrap */
@@ -303,11 +328,11 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _submittingCode = true);
     try {
       final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
-      final storedName = (await widget.secureStorage.getDisplayName())?.trim();
+      final deviceId = await DeviceIdentity.getDeviceId(widget.secureStorage);
       final resp = await widget.apiClient.claimSetupCode(
         setupCode: code,
         deviceFingerprint: fingerprint,
-        friendlyName: storedName == null || storedName.isEmpty ? 'Helper' : storedName,
+        friendlyName: deviceId,
         devicePlatform: 'android',
       );
       if (resp.statusCode == 200) {
@@ -913,19 +938,29 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
+      backgroundColor: context.bgPrimary,
       appBar: AppBar(
-        title: Text(_myName.isEmpty ? 'AssistMe' : 'Hi, $_myName'),
+        title: Text(
+          _myName.isEmpty ? 'AssistMe' : 'Hi, $_myName',
+          style: TextStyle(color: context.textPrimary, fontSize: 22, fontWeight: FontWeight.w800),
+        ),
+        backgroundColor: context.bgPrimary,
+        iconTheme: IconThemeData(color: context.textPrimary),
+        elevation: 0,
         actions: [
           IconButton(
-            tooltip: 'Server Connection',
-            icon: const Icon(Icons.dns_outlined, color: AppTheme.accentPrimary),
+            tooltip: 'Settings',
+            icon: Icon(Icons.settings_outlined, color: context.textPrimary),
             onPressed: () {
-              ServerConfigDialog.show(
+              Navigator.push(
                 context,
-                apiClient: widget.apiClient,
-                secureStorage: widget.secureStorage,
-                onUrlChanged: _loadLists,
+                MaterialPageRoute(
+                  builder: (_) => SettingsScreen(
+                    apiClient: widget.apiClient,
+                    secureStorage: widget.secureStorage,
+                    onServerUrlChanged: _loadLists,
+                  ),
+                ),
               );
             },
           ),
@@ -957,40 +992,41 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           if (_ringingRequestId != null) _ringingOverlay(),
           if (_incomingCall != null && !_incomingDialogOpen) _incomingPopup(),
-          if (_activeSession != null) _activeSessionBanner(),
         ],
       ),
     );
   }
 
   Widget _roleSwitch() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppTheme.bgSecondary,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppTheme.borderGlass),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: _roleTab(
-                _tabNeedHelp,
-                'I need help',
-                Icons.help_outline,
-                AppTheme.accentEmerald,
+    return Builder(
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+        child: Container(
+          decoration: BoxDecoration(
+            color: context.bgSecondary,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: context.borderGlass),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: _roleTab(
+                  _tabNeedHelp,
+                  'I need help',
+                  Icons.help_outline,
+                  AppTheme.accentEmerald,
+                ),
               ),
-            ),
-            Expanded(
-              child: _roleTab(
-                _tabHelping,
-                "I'm helping",
-                Icons.volunteer_activism,
-                AppTheme.accentPrimary,
+              Expanded(
+                child: _roleTab(
+                  _tabHelping,
+                  "I'm helping",
+                  Icons.volunteer_activism,
+                  AppTheme.accentPrimary,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1032,425 +1068,516 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _needHelpTab() {
-    return RefreshIndicator(
-      onRefresh: _loadLists,
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          // Simplified inline helper code display card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.bgSecondary,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.borderGlass),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.person_add, color: AppTheme.accentEmerald, size: 24),
-                    SizedBox(width: 10),
-                    Text(
-                      'Add a new helper',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Want someone new to help you? Show them your 6-digit code.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-                ),
-                const SizedBox(height: 16),
-                if (_myCode != null) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    decoration: BoxDecoration(
-                      color: AppTheme.bgPrimary,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AppTheme.accentEmerald, width: 2),
-                    ),
-                    child: Text(
-                      _myCode!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 40,
-                        letterSpacing: 10,
-                        fontWeight: FontWeight.w900,
-                        color: AppTheme.accentEmerald,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'Read this code to your helper. Waiting for them to enter it...',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: AppTheme.accentAmber, fontSize: 14, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: () {
-                      _codePollTimer?.cancel();
-                      setState(() {
-                        _myCode = null;
-                        _myPairingId = null;
-                      });
-                    },
-                    child: const Text('Hide Code'),
-                  ),
-                ] else ...[
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: _generatingCode ? null : _generateMyCode,
-                      icon: _generatingCode
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.qr_code, size: 20),
-                      label: Text(_generatingCode ? 'Creating code...' : 'Show My 6-Digit Code'),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'Your Trusted Helpers',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 12),
-          if (_myHelpers.isEmpty)
-            _emptyState(
-              icon: Icons.people_outline,
-              text: 'No helpers added yet. Tap "Show My 6-Digit Code" above and have your helper enter it on their phone.',
-            )
-          else ...[
-            ..._myHelpers.map((d) {
-              final name = (d['helper_display_name'] as String?) ??
-                  (d['friendly_name'] as String?) ??
-                  'Helper';
-              final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-              return Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.borderGlassStrong),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
+    return Builder(
+      builder: (context) => RefreshIndicator(
+        onRefresh: _loadLists,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            // Simplified inline helper code display card
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: context.bgSecondary,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: context.borderGlass),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Row(
                     children: [
-                      CircleAvatar(
-                        radius: 28,
-                        backgroundColor: AppTheme.accentEmerald,
-                        child: Text(
-                          initial,
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.white,
-                          ),
+                      Icon(Icons.person_add, color: AppTheme.accentEmerald, size: 24),
+                      SizedBox(width: 10),
+                      Text(
+                        'Add a new helper',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              name,
-                              style: const TextStyle(
-                                fontSize: 20,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.textPrimary,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            const Text(
-                              'Tap Call to ask for help',
-                              style: TextStyle(fontSize: 14, color: AppTheme.textSecondary),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.call, size: 20),
-                        label: const Text('Call'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.accentEmerald,
-                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                          minimumSize: const Size(80, 48),
-                        ),
-                        onPressed: _isBusy ? null : () => _ringHelper(d),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 22),
-                        tooltip: 'Remove helper',
-                        onPressed: () => _removeHelper(d),
                       ),
                     ],
                   ),
-                ),
-              );
-            }),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Want someone new to help you? Show them your 6-digit code.',
+                    style: TextStyle(color: context.textSecondary, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_myCode != null) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      decoration: BoxDecoration(
+                        color: context.bgPrimary,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.accentEmerald, width: 2),
+                      ),
+                      child: Text(
+                        _myCode!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 40,
+                          letterSpacing: 10,
+                          fontWeight: FontWeight.w900,
+                          color: AppTheme.accentEmerald,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Read this code to your helper. Waiting for them to enter it...',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppTheme.accentAmber, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                      onPressed: () {
+                        _codePollTimer?.cancel();
+                        setState(() {
+                          _myCode = null;
+                          _myPairingId = null;
+                        });
+                      },
+                      child: const Text('Hide Code'),
+                    ),
+                  ] else ...[
+                    SizedBox(
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        onPressed: _generatingCode ? null : _generateMyCode,
+                        icon: _generatingCode
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.qr_code, size: 20),
+                        label: Text(_generatingCode ? 'Creating code...' : 'Show My 6-Digit Code'),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Your Trusted Helpers',
+              style: TextStyle(
+                color: context.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_myHelpers.isEmpty)
+              _emptyState(
+                icon: Icons.people_outline,
+                text: 'No helpers added yet. Tap "Show My 6-Digit Code" above and have your helper enter it on their phone.',
+              )
+            else ...[
+              ..._myHelpers.map((d) {
+                final name = (d['helper_display_name'] as String?) ??
+                    (d['friendly_name'] as String?) ??
+                    'Helper';
+                final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: context.bgSecondary,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: context.borderGlass),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 28,
+                          backgroundColor: AppTheme.accentEmerald,
+                          child: Text(
+                            initial,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                name,
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                  color: context.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Tap Call to ask for help',
+                                style: TextStyle(fontSize: 14, color: context.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.call, size: 20),
+                          label: const Text('Call'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.accentEmerald,
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                            minimumSize: const Size(80, 48),
+                          ),
+                          onPressed: _isBusy ? null : () => _ringHelper(d),
+                        ),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 22),
+                          tooltip: 'Remove helper',
+                          onPressed: () => _removeHelper(d),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 
   Widget _helpingTab() {
-    return RefreshIndicator(
-      onRefresh: _loadLists,
-      child: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.bgSecondary,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppTheme.borderGlass),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Row(
-                  children: [
-                    Icon(Icons.add_link, color: AppTheme.accentPrimary, size: 24),
-                    SizedBox(width: 10),
-                    Text(
-                      'Connect to someone you help',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Ask them for their 6-digit code shown on their "I need help" screen.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _codeInputController,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          letterSpacing: 6,
-                          fontSize: 22,
+    return Builder(
+      builder: (context) => RefreshIndicator(
+        onRefresh: _loadLists,
+        child: ListView(
+          padding: const EdgeInsets.all(20),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: context.bgSecondary,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: context.borderGlass),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.add_link, color: AppTheme.accentPrimary, size: 24),
+                      SizedBox(width: 10),
+                      Text(
+                        'Connect to someone you help',
+                        style: TextStyle(
+                          fontSize: 18,
                           fontWeight: FontWeight.w800,
-                          color: AppTheme.textPrimary,
                         ),
-                        decoration: const InputDecoration(
-                          hintText: '000000',
-                          counterText: '',
-                        ),
-                        maxLength: 6,
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      height: 58,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.accentPrimary,
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Ask them for their 6-digit code shown on their "I need help" screen.',
+                    style: TextStyle(color: context.textSecondary, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _codeInputController,
+                          keyboardType: TextInputType.number,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            letterSpacing: 6,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: context.textPrimary,
+                          ),
+                          decoration: const InputDecoration(
+                            hintText: '000000',
+                            counterText: '',
+                          ),
+                          maxLength: 6,
                         ),
-                        onPressed: _submittingCode ? null : _submitCode,
-                        child: _submittingCode
-                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                            : const Text('Connect'),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                      const SizedBox(width: 12),
+                      SizedBox(
+                        height: 58,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.accentPrimary,
+                          ),
+                          onPressed: _submittingCode ? null : _submitCode,
+                          child: _submittingCode
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                              : const Text('Connect'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          const Text(
-            'People You Help',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
+            const SizedBox(height: 24),
+            Text(
+              'People You Help',
+              style: TextStyle(
+                color: context.textPrimary,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          if (_iHelp.isEmpty)
-            _emptyState(
-              icon: Icons.volunteer_activism,
-              text: 'No one added yet. Enter their 6-digit code above to connect and start helping them.',
-            )
-          else ...[
-            ..._iHelp.map((e) {
-              final name = (e['owner_display_name'] as String?) ?? 'Someone';
-              final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-              return Container(
-                margin: const EdgeInsets.only(bottom: 14),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: AppTheme.bgSecondary,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.borderGlass),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: AppTheme.accentPrimary,
-                      child: Text(
-                        initial,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                        ),
-                      ),
+            const SizedBox(height: 12),
+            if (_iHelp.isEmpty)
+              _emptyState(
+                icon: Icons.volunteer_activism,
+                text: 'No one added yet. Enter their 6-digit code above to connect and start helping them.',
+              )
+            else ...[
+              ..._iHelp.map((e) {
+                final contactId = e['owner_device_fingerprint'] ?? e['owner_user_id'] ?? e['id'];
+                final name = (e['owner_display_name'] as String?) ?? 'Someone';
+                final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+                final isActiveForThisPerson = _activeSession != null &&
+                    ((_activeSession!['peer_id'] != null && _activeSession!['peer_id'] == contactId) ||
+                        _activeSession!['peer_name'] == name);
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 14),
+                  decoration: BoxDecoration(
+                    color: context.bgSecondary,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: isActiveForThisPerson ? AppTheme.accentRose : context.borderGlass,
+                      width: isActiveForThisPerson ? 1.5 : 1,
                     ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: isActiveForThisPerson ? _reconnectActiveSession : null,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
                         children: [
-                          Text(
-                            name,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: AppTheme.textPrimary,
+                          CircleAvatar(
+                            radius: 26,
+                            backgroundColor: isActiveForThisPerson ? AppTheme.accentRose : AppTheme.accentPrimary,
+                            child: Text(
+                              initial,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'They can ring your phone for help anytime',
-                            style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        name,
+                                        style: TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w800,
+                                          color: context.textPrimary,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (isActiveForThisPerson) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.accentRose.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: AppTheme.accentRose.withValues(alpha: 0.6)),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.fiber_manual_record, color: AppTheme.accentRose, size: 10),
+                                            SizedBox(width: 4),
+                                            Text(
+                                              'In Session',
+                                              style: TextStyle(
+                                                color: AppTheme.accentRose,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  isActiveForThisPerson
+                                      ? 'Awaiting your assistance. Tap Join to reconnect.'
+                                      : 'They can ring your phone for help anytime',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isActiveForThisPerson ? AppTheme.accentEmerald : context.textSecondary,
+                                    fontWeight: isActiveForThisPerson ? FontWeight.w600 : FontWeight.normal,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
+                          if (isActiveForThisPerson) ...[
+                            const SizedBox(width: 8),
+                            ElevatedButton.icon(
+                              icon: _isReconnecting
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    )
+                                  : const Icon(Icons.phone_in_talk, size: 18),
+                              label: const Text('Join'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.accentEmerald,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              onPressed: (_isReconnecting || _isOpeningSession) ? null : _reconnectActiveSession,
+                            ),
+                          ] else
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, color: AppTheme.accentRose),
+                              tooltip: 'Remove',
+                              onPressed: () => _removeHelping(e),
+                            ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline, color: AppTheme.accentRose),
-                      tooltip: 'Remove',
-                      onPressed: () => _removeHelping(e),
-                    ),
-                  ],
-                ),
-              );
-            }),
+                  ),
+                );
+              }),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }
 
   Widget _emptyState({required IconData icon, required String text}) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 64, color: AppTheme.textMuted.withValues(alpha: 0.6)),
-            const SizedBox(height: 18),
-            Text(
-              text,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 16,
-                height: 1.5,
+    return Builder(
+      builder: (context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 64, color: AppTheme.textMuted.withValues(alpha: 0.6)),
+              const SizedBox(height: 18),
+              Text(
+                text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: context.textSecondary,
+                  fontSize: 16,
+                  height: 1.5,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _activeSessionBanner() {
-    final active = _activeSession!;
-    final name = active['peer_name'] as String? ?? 'your contact';
-    return Positioned(
-      left: 16,
-      right: 16,
-      bottom: 16,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppTheme.bgCardElevated,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppTheme.accentEmerald, width: 2),
-          boxShadow: const [
-            BoxShadow(color: Colors.black54, blurRadius: 16, offset: Offset(0, 4)),
-          ],
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.phone_in_talk, color: AppTheme.accentEmerald, size: 32),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Reconnect to $name',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Colors.white),
-                  ),
-                  const SizedBox(height: 2),
-                  const Text(
-                    'Session is active. Tap to rejoin.',
-                    style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
-                  ),
-                ],
-              ),
-            ),
-            ElevatedButton(
-              onPressed: (_isReconnecting || _isOpeningSession) ? null : _reconnectActiveSession,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accentEmerald,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                minimumSize: const Size(70, 44),
-              ),
-              child: _isReconnecting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text('Rejoin'),
-            ),
-          ],
-        ),
-      ),
-    );
+  String? _getUserIdFromToken(String? token) {
+    if (token == null || !token.contains('.')) return null;
+    try {
+      final parts = token.split('.');
+      if (parts.length < 2) return null;
+      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final data = jsonDecode(payload);
+      return data['sub']?.toString();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _refreshActiveSession() async {
     final active = await widget.secureStorage.getActiveSession();
     if (active == null) {
+      try {
+        final listResp = await widget.apiClient.get('/sessions/?status=active');
+        if (listResp.statusCode == 200) {
+          final listData = jsonDecode(listResp.body) as List?;
+          if (listData != null && listData.isNotEmpty) {
+            final firstSession = listData.first as Map<String, dynamic>;
+            final sId = firstSession['id'] as String;
+            final fullResp = await widget.apiClient.get('/sessions/$sId');
+            if (fullResp.statusCode == 200) {
+              final sData = jsonDecode(fullResp.body) as Map<String, dynamic>;
+              final parts = (sData['participants'] as List?) ?? [];
+              final token = await widget.secureStorage.getAccessToken();
+              final myUserId = _getUserIdFromToken(token);
+              bool isHelpee = false;
+              String? peerName;
+              String? peerId;
+              for (final p in parts) {
+                if (p is Map) {
+                  final uid = p['user_id']?.toString();
+                  final role = p['role']?.toString();
+                  if (uid == myUserId) {
+                    isHelpee = (role == 'helpee');
+                  } else {
+                    peerId = uid;
+                  }
+                }
+              }
+              if (isHelpee) {
+                for (final h in _myHelpers) {
+                  final hid = h['helper_user_id'] ?? h['helper_device_fingerprint'] ?? h['id'];
+                  if (hid == peerId) {
+                    peerName = (h['helper_display_name'] as String?) ?? (h['friendly_name'] as String?);
+                    break;
+                  }
+                }
+                peerName ??= 'Helper';
+              } else {
+                for (final h in _iHelp) {
+                  final hid = h['owner_device_fingerprint'] ?? h['owner_user_id'] ?? h['id'];
+                  if (hid == peerId) {
+                    peerName = h['owner_display_name'] as String?;
+                    break;
+                  }
+                }
+                peerName ??= 'Helpee';
+              }
+              final recoveredActive = {
+                'session_id': sId,
+                'peer_id': peerId,
+                'peer_name': peerName,
+                'is_helpee': isHelpee,
+              };
+              await widget.secureStorage.saveActiveSession(
+                sessionId: sId,
+                peerName: peerName,
+                isHelpee: isHelpee,
+              );
+              if (mounted) setState(() => _activeSession = recoveredActive);
+              return;
+            }
+          }
+        }
+      } catch (_) {}
       if (mounted && _activeSession != null) {
         setState(() => _activeSession = null);
       }
@@ -1689,16 +1816,5 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _heartbeatTimer?.cancel();
-    _ringStatusTimer?.cancel();
-    _codePollTimer?.cancel();
-    _codeInputController.dispose();
-    _channelSub?.cancel();
-    _channel?.dispose();
-    super.dispose();
   }
 }

@@ -33,4 +33,18 @@ class DeviceIdentity {
     await storage.write(key: _key, value: created);
     return created;
   }
+
+  /// Return this device's unique auto-assigned hardware Device ID (e.g., "Device-4B9F").
+  static Future<String> getDeviceId(SecureStorageService storage) async {
+    final existing = await storage.getDeviceId();
+    if (existing != null && existing.isNotEmpty) {
+      return existing;
+    }
+    final fp = await getFingerprint(storage);
+    // Derive a clean, readable, unique 4-6 char identifier suffix from fingerprint
+    final suffix = fp.replaceAll('assistme-', '').substring(0, 4).toUpperCase();
+    final deviceId = 'Device-$suffix';
+    await storage.saveDeviceId(deviceId);
+    return deviceId;
+  }
 }

@@ -44,6 +44,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
   final RTCVideoRenderer _renderer = RTCVideoRenderer();
   bool _rendererInitialized = false;
   dynamic _attachedStream;
+  String? _attachedTrackId;
   double _videoAspectRatio = 9 / 16;
 
   @override
@@ -52,6 +53,16 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     widget.remoteStreamNotifier?.addListener(_onStreamChanged);
     _renderer.addListener(_onRendererChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onStreamChanged());
+  }
+
+  @override
+  void didUpdateWidget(RemoteScreenView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.remoteStreamNotifier != widget.remoteStreamNotifier) {
+      oldWidget.remoteStreamNotifier?.removeListener(_onStreamChanged);
+      widget.remoteStreamNotifier?.addListener(_onStreamChanged);
+      _onStreamChanged();
+    }
   }
 
   void _onRendererChanged() {
@@ -69,21 +80,51 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
     final stream = widget.remoteStreamNotifier?.value;
     if (stream == null) {
       if (_rendererInitialized && _attachedStream != null) {
-        _renderer.srcObject = null;
+        try {
+          await _renderer.setSrcObject(stream: null);
+        } catch (_) {
+          _renderer.srcObject = null;
+        }
+        _attachedTrackId = null;
         if (mounted) setState(() => _attachedStream = null);
       }
       return;
     }
-    if (identical(stream, _attachedStream)) return;
+
+    final videoTracks = (stream is MediaStream) ? stream.getVideoTracks() : <MediaStreamTrack>[];
+    final trackId = videoTracks.isNotEmpty ? videoTracks.first.id : null;
+
+    if (identical(stream, _attachedStream) && _renderer.srcObject != null && trackId == _attachedTrackId) return;
 
     if (!_rendererInitialized) {
       await _renderer.initialize();
       _rendererInitialized = true;
     }
-    setState(() {
-      _attachedStream = stream;
-      _renderer.srcObject = stream as MediaStream;
-    });
+    _attachedStream = stream;
+    _attachedTrackId = trackId;
+
+    // On Android WebRTC, native JNI track binding may take a few ms.
+    // Use async setSrcObject with trackId for direct, reliable native track binding.
+    for (int attempt = 0; attempt < 6; attempt++) {
+      if (!mounted) return;
+      try {
+        await _renderer.setSrcObject(
+          stream: stream is MediaStream ? stream : null,
+          trackId: trackId,
+        );
+        if (mounted) setState(() {});
+        break;
+      } catch (e) {
+        debugPrint('[RemoteScreenView] setSrcObject attempt $attempt error: $e');
+        if (attempt == 5) {
+          try {
+            _renderer.srcObject = stream is MediaStream ? stream : null;
+          } catch (_) {}
+          break;
+        }
+        await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
+      }
+    }
   }
 
   @override
@@ -272,7 +313,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                 // Live remote screen stream (WebRTC), fallback placeholder.
                 if (_attachedStream != null &&
                     _rendererInitialized &&
-                    _renderer.renderVideo)
+                    (_renderer.renderVideo || _renderer.srcObject != null))
                   RTCVideoView(
                     _renderer,
                     objectFit:

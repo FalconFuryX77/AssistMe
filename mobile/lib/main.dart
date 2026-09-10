@@ -10,10 +10,20 @@ import 'features/home/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'theme/app_theme.dart';
 
+/// Global theme mode notifier accessible across the app.
+final ValueNotifier<ThemeMode> appThemeModeNotifier =
+    ValueNotifier<ThemeMode>(ThemeMode.dark);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final secureStorage = SecureStorageService();
   await secureStorage.init();
+
+  // Restore theme preference
+  final isDark = await secureStorage.getDarkMode();
+  if (isDark != null) {
+    appThemeModeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+  }
 
   // Restore the saved server address (Settings) if present.
   final savedUrl = await secureStorage.getServerUrl();
@@ -74,23 +84,28 @@ class AssistMeMobileApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AssistMe',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.darkTheme,
-      initialRoute: initialRoute,
-      routes: {
-        '/onboarding': (_) => OnboardingScreen(
-          apiClient: apiClient,
-          secureStorage: secureStorage,
-        ),
-        '/home': (_) =>
-            HomeScreen(apiClient: apiClient, secureStorage: secureStorage),
-        '/trusted-devices': (_) => TrustedDevicesScreen(
-          apiClient: apiClient,
-          secureStorage: secureStorage,
-        ),
-      },
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeModeNotifier,
+      builder: (context, currentMode, _) => MaterialApp(
+        title: 'AssistMe',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: currentMode,
+        initialRoute: initialRoute,
+        routes: {
+          '/onboarding': (_) => OnboardingScreen(
+            apiClient: apiClient,
+            secureStorage: secureStorage,
+          ),
+          '/home': (_) =>
+              HomeScreen(apiClient: apiClient, secureStorage: secureStorage),
+          '/trusted-devices': (_) => TrustedDevicesScreen(
+            apiClient: apiClient,
+            secureStorage: secureStorage,
+          ),
+        },
+      ),
     );
   }
 }

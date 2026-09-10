@@ -14,6 +14,9 @@ class SecureStorageService {
   static const String keyE2EEIdentityKey = 'e2ee_identity_key';
   static const String keyServerUrl = 'server_base_url';
   static const String keyDisplayName = 'device_display_name';
+  static const String keyDeviceId = 'assistme_device_id';
+  static const String keyRecoveryCode = 'user_recovery_code';
+  static const String keyDarkMode = 'app_theme_dark_mode';
   static const String keyActiveSessionId = 'active_session_id';
   static const String keyActiveSessionPeerName = 'active_session_peer_name';
   static const String keyActiveSessionIsHelpee = 'active_session_is_helpee';
@@ -42,10 +45,31 @@ class SecureStorageService {
   Future<void> saveServerUrl(String url) =>
       write(key: keyServerUrl, value: url);
 
+  Future<void> clearServerUrl() =>
+      delete(key: keyServerUrl);
+
   Future<void> saveDisplayName(String name) =>
       write(key: keyDisplayName, value: name);
 
   Future<String?> getDisplayName() => read(key: keyDisplayName);
+
+  Future<void> saveDeviceId(String id) =>
+      write(key: keyDeviceId, value: id);
+
+  Future<String?> getDeviceId() => read(key: keyDeviceId);
+
+  Future<void> saveRecoveryCode(String code) =>
+      write(key: keyRecoveryCode, value: code);
+
+  Future<String?> getRecoveryCode() => read(key: keyRecoveryCode);
+
+  Future<void> saveDarkMode(bool enabled) async {
+    await prefs.setBool(keyDarkMode, enabled);
+  }
+
+  Future<bool?> getDarkMode() async {
+    return prefs.getBool(keyDarkMode);
+  }
 
   Future<void> saveActiveSession({
     required String sessionId,

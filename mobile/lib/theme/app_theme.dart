@@ -147,4 +147,112 @@ class AppTheme {
       ),
     );
   }
+
+  static ThemeData get lightTheme {
+    const bgLight = Color(0xFFF1F5F9);
+    const cardLight = Color(0xFFFFFFFF);
+    const textMain = Color(0xFF0F172A);
+    const textSub = Color(0xFF475569);
+    const borderSubtle = Color(0x1E000000);
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
+      scaffoldBackgroundColor: bgLight,
+      primaryColor: accentEmerald,
+      colorScheme: const ColorScheme.light(
+        primary: accentEmerald,
+        secondary: accentPrimary,
+        surface: cardLight,
+        error: accentRose,
+        onPrimary: Colors.white,
+        onSurface: textMain,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: bgLight,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: true,
+        titleTextStyle: TextStyle(
+          color: textMain,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.5,
+        ),
+        iconTheme: IconThemeData(color: textMain, size: 24),
+      ),
+      cardTheme: CardThemeData(
+        color: cardLight,
+        elevation: 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: borderSubtle),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: accentEmerald,
+          foregroundColor: Colors.white,
+          elevation: 2,
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          minimumSize: const Size(88, 56),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          textStyle: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: cardLight,
+        hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 16),
+        labelStyle: const TextStyle(color: textSub, fontSize: 16, fontWeight: FontWeight.w500),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: borderSubtle),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: borderSubtle),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: accentEmerald, width: 2),
+        ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: cardLight,
+        elevation: 8,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+          side: const BorderSide(color: borderSubtle),
+        ),
+        titleTextStyle: const TextStyle(
+          color: textMain,
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+        ),
+        contentTextStyle: const TextStyle(
+          color: textSub,
+          fontSize: 16,
+          height: 1.4,
+        ),
+      ),
+    );
+  }
+}
+
+extension ThemeContext on BuildContext {
+  bool get isDark => Theme.of(this).brightness == Brightness.dark;
+  Color get bgPrimary => isDark ? AppTheme.bgPrimary : const Color(0xFFF1F5F9);
+  Color get bgSecondary => isDark ? AppTheme.bgSecondary : const Color(0xFFFFFFFF);
+  Color get bgCard => isDark ? AppTheme.bgCard : const Color(0xFFF8FAFC);
+  Color get textPrimary => isDark ? AppTheme.textPrimary : const Color(0xFF0F172A);
+  Color get textSecondary => isDark ? AppTheme.textSecondary : const Color(0xFF475569);
+  Color get borderGlass => isDark ? AppTheme.borderGlass : const Color(0x1E000000);
 }

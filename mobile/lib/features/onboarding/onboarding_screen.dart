@@ -11,11 +11,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../../core/config/server_config_dialog.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
+import '../settings/settings_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
   final ApiClient apiClient;
@@ -80,10 +80,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         await widget.secureStorage.saveDeviceSecret(returnedSecret);
       }
       await widget.secureStorage.saveDisplayName(name);
+      await DeviceIdentity.getDeviceId(widget.secureStorage);
 
       if (!mounted) return;
 
       final recoveryCode = data['recovery_code'] as String?;
+      if (recoveryCode != null && recoveryCode.isNotEmpty) {
+        await widget.secureStorage.saveRecoveryCode(recoveryCode);
+      }
+      if (!mounted) return;
       if (recoveryCode == null || recoveryCode.isEmpty) {
         // Existing account re-login: go straight to home
         Navigator.of(context).pushReplacementNamed('/home');
@@ -184,13 +189,20 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            tooltip: 'Server Connection',
-            icon: const Icon(Icons.dns_outlined, color: AppTheme.accentPrimary),
+            tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined, color: AppTheme.textPrimary),
             onPressed: () {
-              ServerConfigDialog.show(
+              Navigator.push(
                 context,
-                apiClient: widget.apiClient,
-                secureStorage: widget.secureStorage,
+                MaterialPageRoute(
+                  builder: (_) => SettingsScreen(
+                    apiClient: widget.apiClient,
+                    secureStorage: widget.secureStorage,
+                    onServerUrlChanged: () {
+                      if (mounted) setState(() => _error = null);
+                    },
+                  ),
+                ),
               );
             },
           ),
@@ -285,15 +297,45 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: AppTheme.accentRose.withValues(alpha: 0.5)),
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              const Icon(Icons.error_outline, color: AppTheme.accentRose, size: 20),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _error!,
-                                  style: const TextStyle(color: AppTheme.accentRose, fontSize: 14),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.error_outline, color: AppTheme.accentRose, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _error!,
+                                      style: const TextStyle(color: AppTheme.accentRose, fontSize: 14),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 10),
+                              OutlinedButton.icon(
+                                icon: const Icon(Icons.settings, size: 16),
+                                label: const Text('Change Server in Settings'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppTheme.accentPrimary,
+                                  side: BorderSide(color: AppTheme.accentPrimary.withValues(alpha: 0.5)),
+                                  visualDensity: VisualDensity.compact,
                                 ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => SettingsScreen(
+                                        apiClient: widget.apiClient,
+                                        secureStorage: widget.secureStorage,
+                                        onServerUrlChanged: () {
+                                          if (mounted) setState(() => _error = null);
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                },
                               ),
                             ],
                           ),
@@ -429,6 +471,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
       final name = (data['display_name'] as String?) ?? '';
       if (name.isNotEmpty) await widget.secureStorage.saveDisplayName(name);
+      await widget.secureStorage.saveRecoveryCode(code);
+      await DeviceIdentity.getDeviceId(widget.secureStorage);
       if (mounted) Navigator.of(context).pushReplacementNamed('/home');
     } catch (e) {
       setState(() {

@@ -45,10 +45,18 @@ class WebRTCService:
             return ICEServersResponse(ice_servers=servers)
 
         # Use public-facing STUN URLs if configured, otherwise fallback to internal list
-        stun_urls = settings.PUBLIC_STUN_URLS if settings.PUBLIC_STUN_URLS else settings.STUN_SERVERS
-        servers = [ICEServerEntry(urls=stun_urls)]
+        raw_stun = settings.PUBLIC_STUN_URLS if settings.PUBLIC_STUN_URLS else settings.STUN_SERVERS
+        # Filter out internal Docker-only service hostnames like "coturn" which cause DNS timeouts on real devices
+        clean_stun = [u for u in raw_stun if "coturn" not in u.lower()]
+        if not clean_stun:
+            clean_stun = [
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+            ]
+        servers = [ICEServerEntry(urls=clean_stun)]
 
-        # Use public TURN URL if configured, otherwise fall back to internal TURN
+        # Use public TURN URL if configured, otherwise fall back to internal TURN if resolvable
         if settings.PUBLIC_TURN_URL:
             turn_entry = ICEServerEntry(
                 urls=settings.PUBLIC_TURN_URL,
@@ -56,7 +64,7 @@ class WebRTCService:
                 credential=settings.TURN_SERVER_CREDENTIAL,
             )
             servers.append(turn_entry)
-        elif settings.TURN_SERVER_URL:
+        elif settings.TURN_SERVER_URL and "coturn" not in settings.TURN_SERVER_URL.lower():
             turn_entry = ICEServerEntry(
                 urls=settings.TURN_SERVER_URL,
                 username=settings.TURN_SERVER_USERNAME,

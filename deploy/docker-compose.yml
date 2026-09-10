@@ -29,6 +29,11 @@ services:
       # Optional managed TURN provider for clients on unrelated networks.
       - METERED_API_KEY=${METERED_API_KEY:-}
       - METERED_DOMAIN=${METERED_DOMAIN:-assistme.metered.live}
+      - FIREBASE_SERVICE_ACCOUNT=${FIREBASE_SERVICE_ACCOUNT:-}
+      - AI_PROVIDER=${AI_PROVIDER:-mimo}
+      - AI_MODEL=${AI_MODEL:-xiaomi/mimo-v2.5}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 15s
@@ -38,6 +43,8 @@ services:
     # Nginx remains the public ingress on ports 80/443.
     ports:
       - "8000:8000"
+    volumes:
+      - ../backend/firebase-service-account.json:/app/firebase-service-account.json:ro
     depends_on:
       db:
         condition: service_healthy

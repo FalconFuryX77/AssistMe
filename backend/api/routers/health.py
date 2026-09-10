@@ -30,3 +30,20 @@ async def readiness_check() -> dict[str, str]:
             detail="database unavailable",
         ) from exc
     return {"status": "ok", "environment": settings.APP_ENV}
+
+
+@router.get("/download/apk")
+@router.head("/download/apk")
+async def download_apk():
+    import os
+    from fastapi.responses import FileResponse
+    apk_path = "/app/AssistMe-v1.1.apk"
+    if not os.path.exists(apk_path):
+        apk_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "AssistMe-v1.1.apk")
+    if not os.path.exists(apk_path):
+        raise HTTPException(status_code=404, detail="APK not found on server")
+    return FileResponse(
+        apk_path,
+        media_type="application/vnd.android.package-archive",
+        filename="AssistMe-v1.1.apk",
+    )

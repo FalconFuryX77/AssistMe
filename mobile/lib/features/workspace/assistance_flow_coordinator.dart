@@ -116,6 +116,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   List<Offset>? _pendingPreviewPoints;
   Timer? _overlayTimer;
   Offset _helperDockOffset = const Offset(16, 16);
+  Timer? _disconnectCountdownTimer;
+  int? _disconnectCountdownSeconds;
+  int _totalAloneSeconds = 0;
+  static const int _maxAloneSeconds = 300; // 5 minutes max alone time
 
   bool get _annotationMode => widget.annotationModeSink?.value ?? false;
 
@@ -455,8 +459,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           accessTokenProvider: widget.apiClient.getRealtimeAccessToken,
         );
         _realtime!.onConnected = _handleRealtimeConnected;
-        await _realtime!.connect();
         _realtime!.events.listen(_onEvent);
+        await _realtime!.connect();
       } catch (e) {
         debugPrint('Realtime connect failed: $e');
       }
@@ -569,17 +573,15 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       _engine.onRemoteStream = (stream) {
-        // The helpee publishes screen video and mic audio as separate
-        // streams; keep whichever carries video for the viewport (remote
-        // audio plays through the peer connection regardless).
-        final current = remoteStreamNotifier.value;
-        if (current == null || stream.getVideoTracks().isNotEmpty) {
-          remoteStreamNotifier.value = stream;
+        // Only deliver streams that carry video tracks to the video viewport.
+        // Remote audio is rendered automatically by WebRTC peer connection to the speaker.
+        if (stream.getVideoTracks().isNotEmpty) {
+          if (mounted) remoteStreamNotifier.value = stream;
         }
       };
       await _engine.initialize(iceServers: iceServers);
       // Start microphone immediately for both sides so voice is connected from second 1
-      await _engine.startMicOnly();
+      await _engine.startMicOnly(isHelper: !widget.isHelpee);
       if (mounted) setState(() => _mediaReady = true);
 
       // Helpee: if not auto-starting screen share immediately, send initial audio offer
@@ -688,6 +690,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _pendingIceCandidates.clear();
       final answer = await _engine.createAnswer();
       _realtime?.send({'type': 'signal_answer', 'sdp': answer});
+      if (!widget.isHelpee) {
+        final videoStream = await _engine.getRemoteVideoStream();
+        if (videoStream != null && mounted) {
+          remoteStreamNotifier.value = videoStream;
+        }
+      }
     } catch (e) {
       if (e.toString().contains('m-lines') || e.toString().contains('SDP') || e.toString().contains('setRemoteDescription')) {
         try {
@@ -704,6 +712,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           _pendingIceCandidates.clear();
           final answer = await _engine.createAnswer();
           _realtime?.send({'type': 'signal_answer', 'sdp': answer});
+          if (!widget.isHelpee) {
+            final videoStream = await _engine.getRemoteVideoStream();
+            if (videoStream != null && mounted) {
+              remoteStreamNotifier.value = videoStream;
+            }
+          }
           return;
         } catch (retryError) {
           debugPrint('Retry after peer rebuild also failed: $retryError');
@@ -873,19 +887,78 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'user_disconnected':
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${widget.peerName} disconnected. Waiting briefly for them to reconnect…',
+        _disconnectCountdownTimer?.cancel();
+        _disconnectCountdownTimer = null;
+        if (!widget.isHelpee) {
+          final isReconnecting = event.data['reconnecting'] == true;
+          if (!isReconnecting) {
+            // Helpee permanently disconnected: Disconnection is INSTANT for the helper!
+            _panicStop(isLocalLeave: false);
+            return;
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('${widget.peerName} is reconnecting…'),
+                duration: const Duration(seconds: 2),
               ),
-              duration: const Duration(seconds: 4),
-            ),
-          );
+            );
+          }
+          return;
         }
+        // Helper disconnected: Helpee gets the 10-second countdown with Wait (+30s) button
+        _totalAloneSeconds = 0;
+        setState(() {
+          _disconnectCountdownSeconds = 10;
+        });
+        _disconnectCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+          if (!mounted) {
+            timer.cancel();
+            return;
+          }
+          _totalAloneSeconds++;
+          if (_totalAloneSeconds >= _maxAloneSeconds) {
+            timer.cancel();
+            _disconnectCountdownTimer = null;
+            setState(() {
+              _disconnectCountdownSeconds = null;
+            });
+            _panicStop(isLocalLeave: false);
+            return;
+          }
+          if ((_disconnectCountdownSeconds ?? 0) <= 1) {
+            timer.cancel();
+            _disconnectCountdownTimer = null;
+            setState(() {
+              _disconnectCountdownSeconds = null;
+            });
+            _panicStop(isLocalLeave: false);
+          } else {
+            setState(() {
+              _disconnectCountdownSeconds = (_disconnectCountdownSeconds ?? 1) - 1;
+            });
+          }
+        });
         break;
 
       case 'user_reconnected':
+        _disconnectCountdownTimer?.cancel();
+        _disconnectCountdownTimer = null;
+        _totalAloneSeconds = 0;
+        if (_disconnectCountdownSeconds != null) {
+          setState(() {
+            _disconnectCountdownSeconds = null;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('${widget.peerName} reconnected.'),
+                backgroundColor: AppTheme.accentEmerald,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        }
         // A new WebSocket is not enough to restore an old ICE/DTLS session.
         // Rebuild the media transport on both sides; the helpee is the only
         // side that creates the fresh screen-share offer.
@@ -907,9 +980,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'screen_share_start':
-        if (!widget.isHelpee && remoteStreamNotifier.value == null) {
-          _realtime?.send({'type': 'request_offer'});
-        }
+        // The offer is transmitted immediately alongside screen_share_start;
+        // avoiding an immediate request_offer eliminates SDP collision race.
         break;
 
       // --- WebRTC signaling relay ---
@@ -975,6 +1047,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       case 'user_left':
       case 'session_ended':
       case 'session_closed':
+        _disconnectCountdownTimer?.cancel();
+        _disconnectCountdownTimer = null;
+        _disconnectCountdownSeconds = null;
+        _totalAloneSeconds = 0;
         // VISION: either side shutting down must clear everything for the other – annotations, overlay, control.
         _clearDrawings(notifyOverlay: true);
         stopScreenShare();
@@ -1426,6 +1502,126 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             ),
           ),
 
+        // Disconnect countdown banner with immediate Leave Now action
+        if (_disconnectCountdownSeconds != null)
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Material(
+              elevation: 8,
+              borderRadius: BorderRadius.circular(16),
+              color: AppTheme.bgSecondary,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppTheme.accentAmber.withValues(alpha: 0.6),
+                    width: 1.5,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accentAmber.withValues(alpha: 0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.wifi_off_rounded,
+                        color: AppTheme.accentAmber,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${widget.peerName} disconnected',
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Auto-leaving in ${_disconnectCountdownSeconds}s…',
+                            style: const TextStyle(
+                              color: AppTheme.accentAmber,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    if (_totalAloneSeconds + 30 <= _maxAloneSeconds) ...[
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.accentEmerald,
+                          side: BorderSide(color: AppTheme.accentEmerald.withValues(alpha: 0.6)),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          visualDensity: VisualDensity.compact,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        onPressed: () {
+                          final remainingAllowed = _maxAloneSeconds - _totalAloneSeconds;
+                          final addSeconds = remainingAllowed < 30 ? remainingAllowed : 30;
+                          setState(() {
+                            _disconnectCountdownSeconds = (_disconnectCountdownSeconds ?? 0) + addSeconds;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Added $addSeconds seconds. Max wait: 5 min.'),
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          'Wait (+30s)',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.accentRose,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        visualDensity: VisualDensity.compact,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      onPressed: () {
+                        _disconnectCountdownTimer?.cancel();
+                        _disconnectCountdownTimer = null;
+                        setState(() {
+                          _disconnectCountdownSeconds = null;
+                        });
+                        _panicStop(isLocalLeave: false);
+                      },
+                      child: const Text(
+                        'Leave Now',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
         // Helper: incoming assistance request popup
         if (_pendingRequestId != null)
           Positioned.fill(
@@ -1626,6 +1822,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   @override
   void dispose() {
     widget.annotationModeSink?.removeListener(_onAnnotationModeChanged);
+    _disconnectCountdownTimer?.cancel();
     _previewTimer?.cancel();
     _overlayTimer?.cancel();
     _realtime?.disconnect();

@@ -33,7 +33,7 @@ router = APIRouter()
 _connections: dict[str, dict[str, WebSocket]] = {}
 _pending_signals: dict[str, list[dict]] = {}
 _disconnect_tasks: dict[tuple[str, str], asyncio.Task] = {}
-_DISCONNECT_GRACE_SECONDS = 30
+_DISCONNECT_GRACE_SECONDS = 300
 _session_bus_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -168,6 +168,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     if session_id not in _connections:
         _connections[session_id] = {}
     _connections[session_id][user.id] = websocket
+    print(f"[WS-DEBUG] User {user.id} ({user.display_name}) connected to session {session_id}. Room members: {list(_connections.get(session_id, {}).keys())}")
+    print(f"[WS-DEBUG] Pending signals for session: {len(_pending_signals.get(session_id, []))}")
+
     _ensure_session_bus(session_id)
     pending_disconnect = _disconnect_tasks.pop((session_id, user.id), None)
     if pending_disconnect:
@@ -275,6 +278,8 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
 
             elif msg_type in ("signal_offer", "signal_answer", "signal_ice_candidate"):
                 # Forward WebRTC signaling payload to target user or broadcast
+                room = _connections.get(session_id, {})
+                print(f"[WS-DEBUG] {msg_type} from user {user.id}. Room: {list(room.keys())}")
                 target_user_id = msg.get("target_user_id")
                 payload = {
                     "type": msg_type,
