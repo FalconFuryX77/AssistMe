@@ -59,7 +59,10 @@ class RealtimeService {
       final token = await (accessTokenProvider?.call() ?? Future.value(accessToken));
       if (token == null || token.isEmpty) return;
       final uri = '${AppConfig.wsUrl}/ws/session/$sessionId?token=$token';
-      final socket = await WebSocket.connect(uri);
+      final socket = await WebSocket.connect(
+        uri,
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
       if (_disposed) {
         await socket.close();
         return;

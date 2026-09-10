@@ -41,7 +41,10 @@ class DeviceChannelService {
       final token = await (accessTokenProvider?.call() ?? Future.value(accessToken));
       if (token == null || token.isEmpty) return;
       final uri = '${AppConfig.wsUrl}/ws/device?token=$token';
-      _socket = await WebSocket.connect(uri);
+      _socket = await WebSocket.connect(
+        uri,
+        headers: {'ngrok-skip-browser-warning': 'true'},
+      );
       _sub = _socket!.listen(
         (raw) {
           try {

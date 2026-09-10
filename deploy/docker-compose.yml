@@ -1,15 +1,17 @@
+name: assistme-current
+
 services:
   # --- FastAPI Backend Service ---
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: assistme_backend
+    container_name: assistme_current_backend
     restart: unless-stopped
     environment:
-      - APP_ENV=${APP_ENV:-development}
+      - APP_ENV=${APP_ENV:-production}
       - AUTO_CREATE_TABLES=${AUTO_CREATE_TABLES:-false}
-      - DATABASE_URL=postgresql+asyncpg://assistme:assistme_secret_pass@db:5432/assistmedb
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-assistme}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-assistmedb}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-a1b2c3d4e5f6}
       # Internal Docker-network STUN/TURN (backend health / internal signaling)
@@ -34,6 +36,8 @@ services:
       - AI_MODEL=${AI_MODEL:-xiaomi/mimo-v2.5}
       - AI_API_KEY=${AI_API_KEY:-}
       - AI_BASE_URL=${AI_BASE_URL:-}
+      - ASSISTME_KEK_V1=${ASSISTME_KEK_V1:-}
+      - ASSISTME_BIK_V1=${ASSISTME_BIK_V1:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health/ready"]
       interval: 15s
@@ -61,13 +65,15 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
-    container_name: assistme_migrate
+    container_name: assistme_current_migrate
     restart: "no"
     environment:
-      - APP_ENV=${APP_ENV:-development}
+      - APP_ENV=${APP_ENV:-production}
       - AUTO_CREATE_TABLES=false
-      - DATABASE_URL=postgresql+asyncpg://assistme:assistme_secret_pass@db:5432/assistmedb
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-assistme}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-assistmedb}
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production-a1b2c3d4e5f6}
+      - ASSISTME_KEK_V1=${ASSISTME_KEK_V1:-}
+      - ASSISTME_BIK_V1=${ASSISTME_BIK_V1:-}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       db:
@@ -78,12 +84,12 @@ services:
   # --- PostgreSQL 16 Database ---
   db:
     image: postgres:16-alpine
-    container_name: assistme_db
+    container_name: assistme_current_db
     restart: unless-stopped
     environment:
-      - POSTGRES_USER=assistme
-      - POSTGRES_PASSWORD=assistme_secret_pass
-      - POSTGRES_DB=assistmedb
+      - POSTGRES_USER=${POSTGRES_USER:-assistme}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in deploy/.env}
+      - POSTGRES_DB=${POSTGRES_DB:-assistmedb}
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
