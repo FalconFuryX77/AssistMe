@@ -566,20 +566,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       runSpacing: 6,
                       children: [
                         ActionChip(
-                          avatar: const Icon(Icons.bolt, size: 16, color: AppTheme.accentEmerald),
-                          label: const Text('Public Tunnel (ngrok)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          label: const Text('Wi-Fi example', style: TextStyle(fontSize: 12)),
                           onPressed: () {
                             setState(() {
-                              _serverUrlController.text = 'https://arcane-unserviceably-tosha.ngrok-free.dev';
-                              _testResult = null;
-                            });
-                          },
-                        ),
-                        ActionChip(
-                          label: const Text('Wi-Fi (192.168.1.39)', style: TextStyle(fontSize: 12)),
-                          onPressed: () {
-                            setState(() {
-                              _serverUrlController.text = 'http://192.168.1.39:8000';
+                              _serverUrlController.text = 'http://192.168.1.100:8000';
                               _testResult = null;
                             });
                           },

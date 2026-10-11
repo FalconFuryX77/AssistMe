@@ -4,17 +4,16 @@
 class AppConfig {
   AppConfig._();
 
-  /// Compile-time default. The emulator host is useful for local Android
-  /// development; release builds should provide DEFAULT_SERVER_URL.
+  /// Use a build-time value for release builds; do not bake a developer's
+  /// LAN address or a temporary tunnel hostname into the application.
   static const String defaultBackendHost = String.fromEnvironment(
     'BACKEND_HOST',
-    defaultValue: '192.168.1.39',
+    defaultValue: '',
   );
 
   static const String defaultServerUrl = String.fromEnvironment(
     'DEFAULT_SERVER_URL',
-    // Default to the active public tunnel so mobile data devices can connect immediately.
-    defaultValue: 'https://arcane-unserviceably-tosha.ngrok-free.dev',
+    defaultValue: '',
   );
 
   static const int backendPort = 8000;

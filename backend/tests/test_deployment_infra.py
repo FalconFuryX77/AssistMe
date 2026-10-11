@@ -40,6 +40,20 @@ def test_docker_compose_service_orchestration() -> None:
     assert "assistme_net" in content
 
 
+def test_production_compose_requires_secrets_and_keeps_api_private() -> None:
+    """Production Compose must not ship dev credentials or publish the API port."""
+    content = (REPO_ROOT / "deploy" / "docker-compose.yml").read_text(encoding="utf-8")
+    backend_service = content.split("  # --- PostgreSQL", maxsplit=1)[0]
+
+    assert "SECRET_KEY=${SECRET_KEY:?" in backend_service
+    assert "ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?" in backend_service
+    assert "dev-secret-key-change-in-production" not in content
+    assert '"8000:8000"' not in backend_service
+
+    local_override = (REPO_ROOT / "deploy" / "docker-compose.local.yml").read_text(encoding="utf-8")
+    assert '"${BACKEND_BIND_PORT:-8000}:8000"' in local_override
+
+
 def test_coturn_configuration_syntax() -> None:
     """Verify Coturn turnserver.conf contains listening ports, realm, and credential mechanisms."""
     coturn_path = REPO_ROOT / "deploy" / "coturn" / "turnserver.conf"
