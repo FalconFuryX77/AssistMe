@@ -542,8 +542,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
     List<Map<String, dynamic>> iceServers = const [
       {'urls': 'stun:stun.l.google.com:19302'},
-      {'urls': 'turns:in.relay.metered.ca:443?transport=tcp'},
-      {'urls': 'turn:in.relay.metered.ca:80?transport=tcp'},
     ];
     try {
       final resp = await widget.apiClient.getIceServers(widget.sessionId);
@@ -558,7 +556,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }).toList();
       }
     } catch (_) {
-      // fall back to default STUN+TURN config
+      // fall back to default STUN-only config
     }
 
     try {
@@ -575,15 +573,17 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       _engine.onRemoteStream = (stream) {
-        // Only deliver streams that carry video tracks to the video viewport.
-        // Remote audio is rendered automatically by WebRTC peer connection to the speaker.
-        if (stream.getVideoTracks().isNotEmpty) {
-          if (mounted) remoteStreamNotifier.value = stream;
+        // The helpee publishes screen video and mic audio as separate
+        // streams; keep whichever carries video for the viewport (remote
+        // audio plays through the peer connection regardless).
+        final current = remoteStreamNotifier.value;
+        if (current == null || stream.getVideoTracks().isNotEmpty) {
+          remoteStreamNotifier.value = stream;
         }
       };
       await _engine.initialize(iceServers: iceServers);
       // Start microphone immediately for both sides so voice is connected from second 1
-      await _engine.startMicOnly(isHelper: !widget.isHelpee);
+      await _engine.startMicOnly();
       if (mounted) setState(() => _mediaReady = true);
 
       // Helpee: if not auto-starting screen share immediately, send initial audio offer
@@ -680,11 +680,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       return;
     }
     try {
-      // Set remote description FIRST so transceivers match the incoming offer's m-line order
-      await _engine.setRemoteDescription(sdp);
       if (!widget.isHelpee) {
         await _engine.startMicOnly();
       }
+      await _engine.setRemoteDescription(sdp);
       _remoteDescriptionSet = true;
       for (final candidate in _pendingIceCandidates) {
         await _engine.addIceCandidate(candidate);
@@ -692,39 +691,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _pendingIceCandidates.clear();
       final answer = await _engine.createAnswer();
       _realtime?.send({'type': 'signal_answer', 'sdp': answer});
-      if (!widget.isHelpee && remoteStreamNotifier.value == null) {
-        final videoStream = await _engine.getRemoteVideoStream();
-        if (videoStream != null && mounted) {
-          remoteStreamNotifier.value = videoStream;
-        }
-      }
     } catch (e) {
-      if (e.toString().contains('m-lines') || e.toString().contains('SDP') || e.toString().contains('setRemoteDescription')) {
-        try {
-          debugPrint('m-line mismatch on incoming offer, rebuilding peer connection cleanly: $e');
-          await _engine.rebuildPeerConnection();
-          await _engine.setRemoteDescription(sdp);
-          if (!widget.isHelpee) {
-            await _engine.startMicOnly();
-          }
-          _remoteDescriptionSet = true;
-          for (final candidate in _pendingIceCandidates) {
-            await _engine.addIceCandidate(candidate);
-          }
-          _pendingIceCandidates.clear();
-          final answer = await _engine.createAnswer();
-          _realtime?.send({'type': 'signal_answer', 'sdp': answer});
-          if (!widget.isHelpee && remoteStreamNotifier.value == null) {
-            final videoStream = await _engine.getRemoteVideoStream();
-            if (videoStream != null && mounted) {
-              remoteStreamNotifier.value = videoStream;
-            }
-          }
-          return;
-        } catch (retryError) {
-          debugPrint('Retry after peer rebuild also failed: $retryError');
-        }
-      }
       debugPrint('Answering offer failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -982,8 +949,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'screen_share_start':
-        // The offer is transmitted immediately alongside screen_share_start;
-        // avoiding an immediate request_offer eliminates SDP collision race.
+        // The matching offer is sent immediately before this event. Requesting
+        // another offer here can collide with the first negotiation.
         break;
 
       // --- WebRTC signaling relay ---

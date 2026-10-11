@@ -90,22 +90,26 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
       }
       return;
     }
-
-    final videoTracks = (stream is MediaStream) ? stream.getVideoTracks() : <MediaStreamTrack>[];
+    final videoTracks = stream is MediaStream
+        ? stream.getVideoTracks()
+        : <MediaStreamTrack>[];
     final trackId = videoTracks.isNotEmpty ? videoTracks.first.id : null;
-
-    if (identical(stream, _attachedStream) && _renderer.srcObject != null && trackId == _attachedTrackId) return;
+    if (identical(stream, _attachedStream) &&
+        _renderer.srcObject != null &&
+        trackId == _attachedTrackId) {
+      return;
+    }
 
     if (!_rendererInitialized) {
       await _renderer.initialize();
       _rendererInitialized = true;
     }
+    if (!mounted) return;
     _attachedStream = stream;
     _attachedTrackId = trackId;
 
-    // On Android WebRTC, native JNI track binding may take a few ms.
-    // Use async setSrcObject with trackId for direct, reliable native track binding.
-    for (int attempt = 0; attempt < 6; attempt++) {
+    // Android may need a short delay before a remote native track is bound.
+    for (var attempt = 0; attempt < 6; attempt++) {
       if (!mounted) return;
       try {
         await _renderer.setSrcObject(
@@ -113,16 +117,16 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
           trackId: trackId,
         );
         if (mounted) setState(() {});
-        break;
-      } catch (e) {
-        debugPrint('[RemoteScreenView] setSrcObject attempt $attempt error: $e');
+        return;
+      } catch (_) {
         if (attempt == 5) {
           try {
             _renderer.srcObject = stream is MediaStream ? stream : null;
           } catch (_) {}
-          break;
+          if (mounted) setState(() {});
+        } else {
+          await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
         }
-        await Future.delayed(Duration(milliseconds: 150 * (attempt + 1)));
       }
     }
   }

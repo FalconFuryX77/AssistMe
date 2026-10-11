@@ -13,7 +13,6 @@ library;
 
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -38,11 +37,20 @@ class WebRTCEngine {
   MediaStream? _micStream;
   MediaStream? _screenStream;
 
-  Function(Map<String, dynamic>)? onLocalCandidate;
-  Function(MediaStream)? onRemoteStream;
-  Function(Map<String, dynamic>)? onDataChannelMessage;
-  Function(bool)? onDataChannelState;
-  Function(WebRTCEngineState)? onStateChanged;
+  /// Remote media (helper's mic / helpee sees nothing video-side) arrives here.
+  void Function(MediaStream stream)? onRemoteStream;
+
+  /// Trickle ICE candidates generated locally; relay to the remote peer.
+  void Function(Map<String, dynamic> candidate)? onLocalCandidate;
+
+  /// Peer connection state transitions for UI status display.
+  void Function(WebRTCEngineState state)? onStateChanged;
+
+  /// Direct P2P data channel messages (annotations, gestures) for sub-15ms latency.
+  void Function(Map<String, dynamic> data)? onDataChannelMessage;
+
+  /// P2P DataChannel state changes.
+  void Function(bool isOpen)? onDataChannelState;
 
   WebRTCEngineState get state => _state;
   bool get isScreenSharing => _isScreenSharing;
@@ -88,48 +96,33 @@ class WebRTCEngine {
     );
 
     _pc!.onIceCandidate = (candidate) {
-      if (candidate.candidate != null && candidate.candidate!.isNotEmpty) {
+      final value = candidate.candidate;
+      if (value != null && value.isNotEmpty) {
         onLocalCandidate?.call(candidate.toMap());
       }
     };
-    _pc!.onIceConnectionState = (state) {
-      debugPrint('[WebRTCEngine] onIceConnectionState: $state');
-      if (state == RTCIceConnectionState.RTCIceConnectionStateConnected ||
-          state == RTCIceConnectionState.RTCIceConnectionStateCompleted) {
-        _setState(WebRTCEngineState.connected);
-      } else if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
-        _setState(WebRTCEngineState.failed);
-      }
-    };
-    _pc!.onIceGatheringState = (state) {
-      debugPrint('[WebRTCEngine] onIceGatheringState: $state');
-    };
     _pc!.onTrack = (event) async {
-      try {
-        final track = event.track;
-        debugPrint('[WebRTCEngine] onTrack: kind=${track.kind}, id=${track.id}, streams=${event.streams.length}');
-        if (event.streams.isNotEmpty) {
-          final stream = event.streams.first;
+      if (event.streams.isNotEmpty) {
+        onRemoteStream?.call(event.streams.first);
+      } else {
+        // Some Android WebRTC builds emit a track without a bundled stream.
+        // Synthesize a MediaStream so the helper's viewport never stays black.
+        try {
+          final stream = await createLocalMediaStream('assistme-remote-${event.track.kind}');
+          await stream.addTrack(event.track, addToNative: true);
           onRemoteStream?.call(stream);
-        } else {
-          // Synthesize real native MediaStream in Android WebRTC so FlutterRTCVideoRenderer can bind it
-          final stream = await createLocalMediaStream('assistme-remote-${track.kind}-${track.id}');
-          await stream.addTrack(track, addToNative: true);
-          onRemoteStream?.call(stream);
+        } catch (_) {
+          // Fallback: the coordinator also registers onAddStream.
         }
-      } catch (e) {
-        debugPrint('[WebRTCEngine] onTrack error: $e');
       }
     };
     _pc!.onAddStream = (stream) {
-      debugPrint('[WebRTCEngine] onAddStream: id=${stream.id}, tracks=${stream.getTracks().length}');
       onRemoteStream?.call(stream);
     };
     _pc!.onDataChannel = (channel) {
       _setupDataChannel(channel);
     };
     _pc!.onConnectionState = (state) {
-      debugPrint('[WebRTCEngine] onConnectionState: $state');
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _setState(WebRTCEngineState.connected);
@@ -146,15 +139,16 @@ class WebRTCEngine {
       }
     };
 
-    // Reattach existing local tracks: audio first (m-line 0), video second (m-line 1)
-    for (final track
-        in _micStream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
-      await _pc!.addTrack(track, _micStream!);
-    }
+    // Reattach existing local tracks when a transient transport reconnect
+    // replaces the peer connection. The MediaProjection stream stays alive.
     for (final track
         in _screenStream?.getVideoTracks() ?? const <MediaStreamTrack>[]) {
       await _pc!.addTrack(track, _screenStream!);
       await _tuneVideoSender(track);
+    }
+    for (final track
+        in _micStream?.getAudioTracks() ?? const <MediaStreamTrack>[]) {
+      await _pc!.addTrack(track, _micStream!);
     }
   }
 
@@ -266,42 +260,22 @@ class WebRTCEngine {
     }
     _screenStream = screen;
 
-    // Strict Unified Plan ordering: attach audio first (m-line 0), video second (m-line 1)
-    await _addMicrophone();
-
-    final videoTracks = screen.getVideoTracks();
-    if (videoTracks.isNotEmpty) {
-      final track = videoTracks.first;
+    for (final track in screen.getVideoTracks()) {
       await _pc!.addTrack(track, screen);
       await _tuneVideoSender(track);
     }
     _isScreenSharing = true;
+
+    await _addMicrophone();
   }
 
-  /// Join with microphone only (helper receives video, helpee prepares send).
-  Future<void> startMicOnly({bool isHelper = true}) async {
+  /// Join with microphone only (helper side — receives video, sends voice).
+  Future<void> startMicOnly() async {
     if (_pc == null) {
       throw StateError('initialize() must be called before startMicOnly()');
     }
     await _ensurePermissions();
-    // 1. Audio track always added first (m-line 0)
     await _addMicrophone();
-
-    // 2. Video transceiver added for helper to receive incoming screen share
-    if (isHelper) {
-      try {
-        final transceivers = await _pc!.getTransceivers();
-        final hasVideo = transceivers.any((t) => t.receiver.track?.kind == 'video' || t.sender.track?.kind == 'video');
-        if (!hasVideo) {
-          await _pc!.addTransceiver(
-            kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
-            init: RTCRtpTransceiverInit(
-              direction: TransceiverDirection.RecvOnly,
-            ),
-          );
-        }
-      } catch (_) {}
-    }
   }
 
   Future<void> _addMicrophone() async {
@@ -365,14 +339,6 @@ class WebRTCEngine {
       _screenStream = null;
     }
     _isScreenSharing = false;
-    try {
-      final senders = await _pc?.getSenders() ?? const <RTCRtpSender>[];
-      for (final s in senders) {
-        if (s.track?.kind == 'video') {
-          await _pc?.removeTrack(s);
-        }
-      }
-    } catch (_) {}
     try { await _mediaProjectionChannel.invokeMethod('stopForeground'); } catch (_) {}
   }
 
@@ -391,22 +357,15 @@ class WebRTCEngine {
   Future<void> createDataChannel([String label = 'assistme_channel']) async {
     if (_pc == null) return;
     try {
-      final init = RTCDataChannelInit()
-        ..ordered = true
-        ..negotiated = true
-        ..id = 1;
+      final init = RTCDataChannelInit()..ordered = true;
       final channel = await _pc!.createDataChannel(label, init);
       _setupDataChannel(channel);
-    } catch (e) {
-      debugPrint('createDataChannel error: $e');
-    }
+    } catch (_) {}
   }
 
   void _setupDataChannel(RTCDataChannel channel) {
     _dataChannel = channel;
-    debugPrint('WebRTC DataChannel attached, state: ${channel.state}');
     channel.onDataChannelState = (state) {
-      debugPrint('WebRTC DataChannel state: $state');
       onDataChannelState?.call(state == RTCDataChannelState.RTCDataChannelOpen);
     };
     channel.onMessage = (RTCDataChannelMessage msg) {
@@ -451,10 +410,6 @@ class WebRTCEngine {
   }
 
   Future<Map<String, dynamic>> createAnswer() async {
-    // Answerer side: prepare pre-negotiated data channel so both sides match
-    if (_dataChannel == null) {
-      await createDataChannel();
-    }
     final answer = await _pc!.createAnswer({});
     await _pc!.setLocalDescription(answer);
     final desc = await _pc!.getLocalDescription();
@@ -462,36 +417,30 @@ class WebRTCEngine {
   }
 
   Future<void> setRemoteDescription(Map<String, dynamic> sdp) async {
-    if (_pc == null) return;
+    final peer = _pc;
     final type = sdp['type'] as String?;
-    final sdpStr = sdp['sdp'] as String?;
-    if (type == null || sdpStr == null) return;
-    final state = await _pc!.getSignalingState();
-    if (type == 'answer' && state == RTCSignalingState.RTCSignalingStateStable) {
-      debugPrint('Ignoring redundant answer while signaling state is already stable');
+    final description = sdp['sdp'] as String?;
+    if (peer == null || type == null || description == null) return;
+    final signalingState = await peer.getSignalingState();
+    if (type == 'answer' &&
+        signalingState == RTCSignalingState.RTCSignalingStateStable) {
       return;
     }
-    await _pc!.setRemoteDescription(
-      RTCSessionDescription(sdpStr, type),
-    );
+    await peer.setRemoteDescription(RTCSessionDescription(description, type));
   }
 
   Future<void> addIceCandidate(Map<String, dynamic> candidate) async {
-    try {
-      final cand = candidate['candidate'] as String?;
-      if (cand == null || cand.trim().isEmpty) return;
-      final mLine = candidate['sdpMLineIndex'];
-      final sdpMLineIndex = (mLine is num) ? mLine.toInt() : null;
-      await _pc?.addCandidate(
-        RTCIceCandidate(
-          cand,
-          candidate['sdpMid'] as String?,
-          sdpMLineIndex,
-        ),
-      );
-    } catch (e) {
-      debugPrint('[WebRTCEngine] addIceCandidate error: $e');
-    }
+    final peer = _pc;
+    final value = candidate['candidate'] as String?;
+    if (peer == null || value == null || value.trim().isEmpty) return;
+    final line = candidate['sdpMLineIndex'];
+    await peer.addCandidate(
+      RTCIceCandidate(
+        value,
+        candidate['sdpMid'] as String?,
+        line is num ? line.toInt() : null,
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -516,8 +465,9 @@ class WebRTCEngine {
     }
   }
 
-  /// Captures a single image frame from the active video track.
-  /// Supports both local screen stream (helpee) or remote incoming stream (helper).
+  /// Captures a single image frame from the active screen video track.
+  /// Used by the silent visual-guide keyframe manager; never on the hot
+  /// media path, so it cannot add startup or streaming latency.
   Future<Uint8List?> captureScreenFrame({MediaStream? remoteStream}) async {
     try {
       final stream = remoteStream ?? _screenStream;
@@ -530,25 +480,6 @@ class WebRTCEngine {
     } catch (e) {
       return null;
     }
-  }
-
-  /// Retrieves the active remote video stream, either from existing transceivers or remote streams.
-  Future<MediaStream?> getRemoteVideoStream() async {
-    if (_pc == null) return null;
-    try {
-      final transceivers = await _pc!.getTransceivers();
-      for (final t in transceivers) {
-        final track = t.receiver.track;
-        if (track != null && track.kind == 'video') {
-          final stream = await createLocalMediaStream('assistme-remote-video-${track.id}');
-          await stream.addTrack(track, addToNative: true);
-          return stream;
-        }
-      }
-    } catch (e) {
-      debugPrint('[WebRTCEngine] getRemoteVideoStream error: $e');
-    }
-    return null;
   }
 
   Future<void> dispose() async {
