@@ -88,13 +88,13 @@ async def test_cold_start_suggestion(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_repeated_task_suggestion(client: AsyncClient) -> None:
-    """Repeated task patterns produce a repeated_task suggestion."""
+    """Repeated, admissible task patterns produce a repeated_task suggestion."""
     helper = await _register(client)
     session = await _create_session(client, helper["headers"])
     payload = {
         "foreground_app": "com.android.settings",
         "platform": "android",
-        "action": "remote_control",
+        "action": "voice",
     }
 
     # Record the task twice so it counts as repeated.
@@ -118,14 +118,14 @@ async def test_repeated_task_suggestion(client: AsyncClient) -> None:
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_preferred_mode_reminder(client: AsyncClient) -> None:
-    """Setting a preferred mode produces a preferred_mode suggestion."""
+    """An admissible preferred mode produces a preferred_mode suggestion."""
     helper = await _register(client)
     session = await _create_session(client, helper["headers"])
 
     # Set preferred mode
     await client.put(
         "/users/me/assistance/preferred-mode",
-        json={"mode": "tap"},
+        json={"mode": "voice"},
         headers=helper["headers"],
     )
 

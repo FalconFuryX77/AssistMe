@@ -276,9 +276,17 @@ class IntelligentAssistanceService:
 
         # --- 2. Sequence recommender ---------------------------------------
         last_action = await IntelligentAssistanceService._last_action(user_id, db)
-        for recommendation in IntelligentAssistanceService._recommendations(
-            user_id, last_action, allowed
-        ):
+        # The sequence model has a global cold-start prior. Showing that prior
+        # as personal guidance before this user has recorded any action makes
+        # the cold-start response noisy and falsely personalized.
+        recommendations = (
+            IntelligentAssistanceService._recommendations(
+                user_id, last_action, allowed
+            )
+            if last_action is not None
+            else []
+        )
+        for recommendation in recommendations:
             action = recommendation["action"]
             existing = candidates.get(action)
             # Blend rather than overwrite: agreement between two independent
