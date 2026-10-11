@@ -47,6 +47,7 @@ def test_production_compose_requires_secrets_and_keeps_api_private() -> None:
 
     assert "SECRET_KEY=${SECRET_KEY:?" in backend_service
     assert "ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?" in backend_service
+    assert "TURN_SERVER_CREDENTIAL=${TURN_CREDENTIAL:?" in backend_service
     assert "dev-secret-key-change-in-production" not in content
     assert '"8000:8000"' not in backend_service
 
@@ -63,6 +64,7 @@ def test_coturn_configuration_syntax() -> None:
     assert "listening-port=3478" in content
     assert "tls-listening-port=5349" in content
     assert "lt-cred-mech" in content
+    assert "user=${TURN_USERNAME}:${TURN_CREDENTIAL}" in content
     assert "realm=assistme.net" in content
     assert "min-port=" in content
     assert "max-port=" in content

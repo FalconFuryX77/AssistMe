@@ -18,8 +18,8 @@ services:
       - STUN_SERVER_1=stun:coturn:3478
       - STUN_SERVER_2=stun:stun.l.google.com:19302
       - TURN_SERVER_URL=turn:coturn:3478
-      - TURN_SERVER_USERNAME=${TURN_USERNAME:-assistme_turn_user}
-      - TURN_SERVER_CREDENTIAL=${TURN_CREDENTIAL:-}
+      - TURN_SERVER_USERNAME=${TURN_USERNAME:?Set TURN_USERNAME in deploy/.env}
+      - TURN_SERVER_CREDENTIAL=${TURN_CREDENTIAL:?Set TURN_CREDENTIAL in deploy/.env}
       # Public-facing URLs returned to mobile/web clients over the internet
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:?Set ALLOWED_ORIGINS in deploy/.env}
       # Public URLs are deployment inputs. Leave empty for local-only testing;
@@ -130,6 +130,8 @@ services:
         exec turnserver -c /etc/coturn/turnserver.conf
     environment:
       - EXTERNAL_IP=${EXTERNAL_IP:-0.0.0.0}
+      - TURN_USERNAME=${TURN_USERNAME:?Set TURN_USERNAME in deploy/.env}
+      - TURN_CREDENTIAL=${TURN_CREDENTIAL:?Set TURN_CREDENTIAL in deploy/.env}
     volumes:
       - ./coturn/turnserver.conf:/etc/coturn/turnserver.conf.template:ro
     ports:
