@@ -40,6 +40,13 @@ credentials must be valid. If Nginx already uses TCP 443 on the same public IP,
 use a managed TURN/TLS endpoint or a separate public IP for Coturn because both
 services cannot bind the same address and port.
 
+The bundled Compose Coturn service currently exposes TLS on port 5349, but its
+checked-in configuration does not mount or name a TLS certificate/private-key
+pair. Treat that listener as unverified until certificates are configured and
+tested. For a campus network that only permits outbound TCP 443, use the
+managed provider's `turns:...:443?transport=tcp` endpoint, or configure a
+separate Coturn public IP with a valid certificate and a TLS listener on 443.
+
 The mobile client first tries normal ICE candidate selection to preserve the
 lowest-latency direct path. When ICE fails and TURN was included in the server
 configuration, both clients make one bounded retry that forces relay candidates
