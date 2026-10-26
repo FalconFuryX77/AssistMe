@@ -1,0 +1,7 @@
+# The Firebase Android API key is client configuration shipped in the app,
+# not a service-account credential. Keep this exception scoped to that file;
+# restrict the key to the Android package/signing certificate and required APIs
+# in Google Cloud before distributing public builds.
+[[allowlists]]
+description = "Firebase Android client configuration"
+paths = ['''mobile/android/app/google-services\.json''']
