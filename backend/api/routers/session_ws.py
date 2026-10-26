@@ -87,34 +87,36 @@ def _ensure_session_bus(session_id: str) -> None:
 
 
 async def _authenticate_ws(websocket: WebSocket) -> User | None:
-    """Authenticate a WebSocket connection using the token query parameter.
+    """Authenticate a WebSocket from its Authorization bearer header.
 
-    Expected URL: /ws/session/{session_id}?token=<JWT>
+    Query-string credentials are deliberately rejected because request URLs
+    are commonly retained by reverse-proxy and access logs.
     """
-    token = websocket.query_params.get("token")
-    if not token:
+    authorization = websocket.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
         return None
 
-    payload = decode_access_token(token)
+    payload = decode_access_token(token.strip())
     if payload is None:
         return None
 
     user_id = payload.get("sub")
-    if not user_id:
+    if not isinstance(user_id, str) or not user_id:
         return None
 
     async with async_session_factory() as db:
         result = await db.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
 
-    return user
+    return user if user is not None and user.is_active else None
 
 
 @router.websocket("/ws/session/{session_id}")
 async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     """WebSocket endpoint for real-time session communication.
 
-    Authentication is via `?token=<JWT>` query parameter.
+    Authentication is via an `Authorization: Bearer <JWT>` request header.
 
     Inbound messages (client → server):
         {"type": "heartbeat"}
@@ -168,9 +170,6 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     if session_id not in _connections:
         _connections[session_id] = {}
     _connections[session_id][user.id] = websocket
-    print(f"[WS-DEBUG] User {user.id} ({user.display_name}) connected to session {session_id}. Room members: {list(_connections.get(session_id, {}).keys())}")
-    print(f"[WS-DEBUG] Pending signals for session: {len(_pending_signals.get(session_id, []))}")
-
     _ensure_session_bus(session_id)
     pending_disconnect = _disconnect_tasks.pop((session_id, user.id), None)
     if pending_disconnect:
@@ -279,7 +278,6 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
             elif msg_type in ("signal_offer", "signal_answer", "signal_ice_candidate"):
                 # Forward WebRTC signaling payload to target user or broadcast
                 room = _connections.get(session_id, {})
-                print(f"[WS-DEBUG] {msg_type} from user {user.id}. Room: {list(room.keys())}")
                 target_user_id = msg.get("target_user_id")
                 payload = {
                     "type": msg_type,

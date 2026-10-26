@@ -1,6 +1,6 @@
 /// Realtime WebSocket client for the assistance flow.
 ///
-/// Connects to `/ws/session/{sessionId}?token=<JWT>` and emits parsed events
+/// Connects to `/ws/session/{sessionId}` with a bearer auth header and emits parsed events
 /// for the one-click help flow (request/respond/escalation) and drawing.
 library;
 
@@ -56,12 +56,16 @@ class RealtimeService {
     if (!AppConfig.isConfigured) return;
     _connecting = true;
     try {
-      final token = await (accessTokenProvider?.call() ?? Future.value(accessToken));
+      final token =
+          await (accessTokenProvider?.call() ?? Future.value(accessToken));
       if (token == null || token.isEmpty) return;
-      final uri = '${AppConfig.wsUrl}/ws/session/$sessionId?token=$token';
+      final uri = '${AppConfig.wsUrl}/ws/session/$sessionId';
       final socket = await WebSocket.connect(
         uri,
-        headers: {'ngrok-skip-browser-warning': 'true'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'ngrok-skip-browser-warning': 'true',
+        },
       );
       if (_disposed) {
         await socket.close();

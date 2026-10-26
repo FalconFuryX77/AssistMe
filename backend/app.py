@@ -45,6 +45,9 @@ app = FastAPI(
     version=settings.APP_VERSION,
     description="One-tap remote assistance for trusted family and friends: screen sharing, voice, drawing, and optional helpee-approved control.",
     lifespan=lifespan,
+    docs_url=None if settings.IS_PRODUCTION else "/docs",
+    redoc_url=None if settings.IS_PRODUCTION else "/redoc",
+    openapi_url=None if settings.IS_PRODUCTION else "/openapi.json",
 )
 
 # --- CORS Middleware for Internet Deployment ---

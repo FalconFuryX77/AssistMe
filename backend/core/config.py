@@ -43,8 +43,12 @@ class Settings:
     SECRET_KEY: str = os.getenv(
         "SECRET_KEY", "dev-secret-key-change-in-production-a1b2c3d4e5f6"
     )
-    if IS_PRODUCTION and SECRET_KEY.startswith("dev-"):
-        raise RuntimeError("SECRET_KEY must be configured in production")
+    if IS_PRODUCTION and (
+        SECRET_KEY.startswith("dev-") or len(SECRET_KEY.encode("utf-8")) < 32
+    ):
+        raise RuntimeError(
+            "Production SECRET_KEY must be a unique random value of at least 32 bytes"
+        )
 
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = _env_int("ACCESS_TOKEN_EXPIRE_MINUTES", 30)
@@ -107,6 +111,8 @@ class Settings:
     ALLOWED_ORIGINS: list[str] = _csv_env(
         "ALLOWED_ORIGINS", ["*"] if not IS_PRODUCTION else []
     )
+    if IS_PRODUCTION and "*" in ALLOWED_ORIGINS:
+        raise RuntimeError("Production ALLOWED_ORIGINS must not contain '*'")
     PUBLIC_API_BASE_URL: str | None = os.getenv("PUBLIC_API_BASE_URL")
     PUBLIC_WS_BASE_URL: str | None = os.getenv("PUBLIC_WS_BASE_URL")
     PUBLIC_TURN_URL: str | None = os.getenv("PUBLIC_TURN_URL")

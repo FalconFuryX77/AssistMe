@@ -100,7 +100,11 @@ def decode_access_token(token: str) -> dict | None:
     and legacy tokens (without aud/iss) seamlessly during migration.
     """
     try:
-        try:
+        # Do not let a malformed modern token evade issuer/audience checks by
+        # being retried as a legacy token. Only payloads that genuinely lack
+        # both claims enter the short-lived compatibility path.
+        unverified = jwt.get_unverified_claims(token)
+        if "iss" in unverified or "aud" in unverified:
             payload = jwt.decode(
                 token,
                 settings.SECRET_KEY,
@@ -109,8 +113,8 @@ def decode_access_token(token: str) -> dict | None:
                 issuer=JWT_ISSUER,
                 options={"leeway": LEEWAY_SECONDS},
             )
-        except JWTError:
-            # Fallback for legacy tokens without aud / iss claims
+        else:
+            # Expiring tokens from the prior release did not carry iss/aud.
             payload = jwt.decode(
                 token,
                 settings.SECRET_KEY,

@@ -41,6 +41,9 @@ dependencies:
   firebase_messaging: ^16.5.0
   flutter_local_notifications: ^19.4.0
   permission_handler: 11.3.1
+  flutter_secure_storage: 9.2.4
+  path_provider: 2.1.5
+  cryptography: 2.7.0
 
 dev_dependencies:
   flutter_test:

@@ -9,9 +9,12 @@ removes the session-code dance from the product.
 import asyncio
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
+from core.database import async_session_factory
 from core.realtime_bus import listen, publish
 from core.security import decode_access_token
+from models.user import User
 
 router = APIRouter()
 
@@ -82,17 +85,8 @@ def _drop(user_id: str, ws: WebSocket) -> None:
 
 @router.websocket("/ws/device")
 async def device_channel(websocket: WebSocket) -> None:
-    """Persistent ring channel: /ws/device?token=<JWT>."""
-    token = websocket.query_params.get("token")
-    if not token:
-        await websocket.close(code=4001, reason="Missing token")
-        return
-
-    try:
-        payload = decode_access_token(token)
-    except Exception:
-        payload = None
-    user_id = (payload or {}).get("sub") if isinstance(payload, dict) else None
+    """Persistent ring channel, authenticated by a bearer request header."""
+    user_id = await _authenticated_user_id(websocket)
     if not user_id:
         await websocket.close(code=4001, reason="Authentication failed")
         return
@@ -112,3 +106,26 @@ async def device_channel(websocket: WebSocket) -> None:
         pass
     finally:
         _drop(user_id, websocket)
+
+
+async def _authenticated_user_id(websocket: WebSocket) -> str | None:
+    """Return the active account bound to the request bearer token."""
+    authorization = websocket.headers.get("authorization", "")
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+
+    try:
+        payload = decode_access_token(token.strip())
+    except Exception:
+        payload = None
+    user_id = (payload or {}).get("sub") if isinstance(payload, dict) else None
+    if not isinstance(user_id, str) or not user_id:
+        return None
+
+    async with async_session_factory() as db:
+        result = await db.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    return str(user.id)

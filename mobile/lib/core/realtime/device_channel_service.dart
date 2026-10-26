@@ -38,22 +38,27 @@ class DeviceChannelService {
     if (_socket != null || _disposed) return;
     if (!AppConfig.isConfigured) return;
     try {
-      final token = await (accessTokenProvider?.call() ?? Future.value(accessToken));
+      final token =
+          await (accessTokenProvider?.call() ?? Future.value(accessToken));
       if (token == null || token.isEmpty) return;
-      final uri = '${AppConfig.wsUrl}/ws/device?token=$token';
+      final uri = '${AppConfig.wsUrl}/ws/device';
       _socket = await WebSocket.connect(
         uri,
-        headers: {'ngrok-skip-browser-warning': 'true'},
+        headers: {
+          'Authorization': 'Bearer $token',
+          'ngrok-skip-browser-warning': 'true',
+        },
       );
       _sub = _socket!.listen(
         (raw) {
           try {
             final data = jsonDecode(raw as String) as Map<String, dynamic>;
-            _controller.add(DeviceChannelEvent(
-              data['type'] as String? ?? 'unknown',
-              data,
-            ));
-          } catch (_) {/* ignore malformed frames */}
+            _controller.add(
+              DeviceChannelEvent(data['type'] as String? ?? 'unknown', data),
+            );
+          } catch (_) {
+            /* ignore malformed frames */
+          }
         },
         onDone: _scheduleReconnect,
         onError: (err) {

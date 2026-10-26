@@ -11,7 +11,7 @@ import '../security/secure_storage_service.dart';
 class DeviceIdentity {
   DeviceIdentity._();
 
-  static const String _key = 'assistme_device_fingerprint';
+  static const String _key = SecureStorageService.keyDeviceFingerprint;
 
   static String _generate() {
     final rand = Random.secure();

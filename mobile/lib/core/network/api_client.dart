@@ -62,7 +62,11 @@ class ApiClient {
         // Try transparent device re-bootstrap if device credentials exist
         final secret = await secureStorage.getDeviceSecret();
         if (secret != null && secret.isNotEmpty) {
-          final fingerprint = await secureStorage.read(key: 'device_fingerprint') ?? '';
+          final fingerprint =
+              await secureStorage.read(
+                key: SecureStorageService.keyDeviceFingerprint,
+              ) ??
+              '';
           final name = await secureStorage.getDisplayName();
           final bResp = await deviceBootstrap(
             deviceFingerprint: fingerprint,
@@ -85,7 +89,11 @@ class ApiClient {
         // If refresh failed, attempt device bootstrap with stored secret before clearing
         final secret = await secureStorage.getDeviceSecret();
         if (secret != null && secret.isNotEmpty) {
-          final fingerprint = await secureStorage.read(key: 'device_fingerprint') ?? '';
+          final fingerprint =
+              await secureStorage.read(
+                key: SecureStorageService.keyDeviceFingerprint,
+              ) ??
+              '';
           final name = await secureStorage.getDisplayName();
           final bResp = await deviceBootstrap(
             deviceFingerprint: fingerprint,
@@ -337,7 +345,9 @@ class ApiClient {
       '/sessions/$sessionId/assistance/request/$requestId/respond',
       body: {
         'accept': accept,
-        ...?helperDeviceFingerprint == null ? null : {'helper_device_fingerprint': helperDeviceFingerprint},
+        ...?helperDeviceFingerprint == null
+            ? null
+            : {'helper_device_fingerprint': helperDeviceFingerprint},
       },
     );
   }
