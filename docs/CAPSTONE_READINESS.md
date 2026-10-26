@@ -84,6 +84,23 @@ promising automatic detection will catch every secret.
    dropped under congestion by design; completed strokes must still arrive
    reliably and must not appear after a newer committed stroke.
 
+## Deployment security checks
+
+- The session ICE endpoint returns TURN username/password values to an
+  authenticated participant. That is required for WebRTC, so treat any
+  long-lived static `TURN_SERVER_CREDENTIAL` as disclosed to every caller.
+  Prefer short-lived Metered credentials or mint per-session coturn REST
+  credentials; verify the provider expiry and cache duration before a public
+  demo.
+- `mobile/android/app/google-services.json` contains a Firebase client API key.
+  It is part of the mobile client configuration, not the service-account key
+  from Google's alert. Restrict it to the Android package/signing identity and
+  only the APIs the app uses; keep Firebase authorization in Security Rules.
+- Review other configured credentials in the deployment secret manager. The
+  repository scan of tracked files found no service-account private-key marker,
+  GitHub token, AWS access key, or other GCP API-key pattern beyond the
+  Firebase client key.
+
 ## Remaining implementation and acceptance work
 
 - Upgrade and pin Flutter to 3.44/Dart 3.12, set Android API 30/arm64 and iOS
