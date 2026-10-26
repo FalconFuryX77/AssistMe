@@ -513,19 +513,32 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final recording = await _guideAudioCapture.stop();
       if (recording == null) return;
       if (discard) {
+        _pendingGuideAudioRecording = recording;
         await recording.delete();
+        _pendingGuideAudioRecording = null;
       } else {
-        await _pendingGuideAudioRecording?.delete();
+        final previous = _pendingGuideAudioRecording;
+        if (previous != null) {
+          await previous.delete();
+          _pendingGuideAudioRecording = null;
+        }
         _pendingGuideAudioRecording = recording;
       }
     } catch (_) {
-      await _pendingGuideAudioRecording?.delete();
-      _pendingGuideAudioRecording = null;
+      final pending = _pendingGuideAudioRecording;
+      if (pending != null) {
+        try {
+          await pending.delete();
+          _pendingGuideAudioRecording = null;
+        } catch (_) {
+          // Keep the file handle so teardown or app-start cleanup can retry.
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Temporary audio could not be finalized and was discarded.',
+              'Temporary audio cleanup could not be confirmed. It remains in app-private cache and will be retried.',
             ),
           ),
         );
