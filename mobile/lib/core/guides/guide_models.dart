@@ -1,4 +1,4 @@
-/// Models for session visual guides and step-by-step recall.
+/// Models for local session transcripts and visual recall guides.
 library;
 
 class GuideStepItem {
@@ -7,6 +7,7 @@ class GuideStepItem {
   final String title;
   final String instruction;
   final String? imageUrl;
+  final String? localImagePath;
   final DateTime createdAt;
 
   const GuideStepItem({
@@ -15,6 +16,7 @@ class GuideStepItem {
     required this.title,
     required this.instruction,
     this.imageUrl,
+    this.localImagePath,
     required this.createdAt,
   });
 
@@ -25,9 +27,22 @@ class GuideStepItem {
       title: json['title'] as String? ?? '',
       instruction: json['instruction'] as String? ?? '',
       imageUrl: json['image_url'] as String?,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
+      localImagePath: json['local_image_path'] as String?,
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'step_number': stepNumber,
+    'title': title,
+    'instruction': instruction,
+    'image_url': imageUrl,
+    'local_image_path': localImagePath,
+    'created_at': createdAt.toIso8601String(),
+  };
 }
 
 class SessionGuideItem {
@@ -39,6 +54,8 @@ class SessionGuideItem {
   final int stepsCount;
   final DateTime createdAt;
   final List<GuideStepItem> steps;
+  final String transcript;
+  final bool isLocal;
 
   const SessionGuideItem({
     required this.id,
@@ -49,6 +66,8 @@ class SessionGuideItem {
     required this.stepsCount,
     required this.createdAt,
     this.steps = const [],
+    this.transcript = '',
+    this.isLocal = false,
   });
 
   factory SessionGuideItem.fromJson(Map<String, dynamic> json) {
@@ -60,8 +79,27 @@ class SessionGuideItem {
       summary: json['summary'] as String? ?? '',
       category: json['category'] as String? ?? 'general',
       stepsCount: (json['steps_count'] as num?)?.toInt() ?? rawSteps.length,
-      createdAt: DateTime.tryParse(json['created_at'] as String? ?? '') ?? DateTime.now(),
-      steps: rawSteps.map((s) => GuideStepItem.fromJson(s as Map<String, dynamic>)).toList(),
+      createdAt:
+          DateTime.tryParse(json['created_at'] as String? ?? '') ??
+          DateTime.now(),
+      steps: rawSteps
+          .map((s) => GuideStepItem.fromJson(s as Map<String, dynamic>))
+          .toList(),
+      transcript: json['transcript'] as String? ?? '',
+      isLocal: json['is_local'] as bool? ?? false,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'session_id': sessionId,
+    'title': title,
+    'summary': summary,
+    'category': category,
+    'steps_count': steps.length,
+    'created_at': createdAt.toIso8601String(),
+    'steps': steps.map((step) => step.toJson()).toList(),
+    'transcript': transcript,
+    'is_local': isLocal,
+  };
 }

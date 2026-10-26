@@ -17,6 +17,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/guides/session_keyframe_manager.dart';
+import '../../core/guides/local_guide_store.dart';
 import '../../core/network/api_client.dart';
 import '../../core/platform/accessibility_bridge.dart';
 import '../../core/platform/annotation_overlay_service.dart';
@@ -28,6 +29,7 @@ import '../../theme/app_theme.dart';
 import 'drawing_overlay.dart';
 import 'incoming_help_request_popup.dart';
 import 'risk_disclaimer_modal.dart';
+import 'local_guide_save_dialog.dart';
 
 class AssistanceFlowCoordinator extends StatefulWidget {
   final String sessionId;
@@ -121,6 +123,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Timer? _disconnectCountdownTimer;
   int? _disconnectCountdownSeconds;
   int _totalAloneSeconds = 0;
+  bool _sessionTerminationHandled = false;
+  bool _guideReviewShown = false;
   static const int _maxAloneSeconds = 300; // 5 minutes max alone time
 
   bool get _annotationMode => widget.annotationModeSink?.value ?? false;
@@ -186,10 +190,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _sendPreviewRealtimeOrP2P({
         'type': 'draw_preview',
         'points': latest
-            .map((p) => {
-                  'x': double.parse(p.dx.toStringAsFixed(4)),
-                  'y': double.parse(p.dy.toStringAsFixed(4)),
-                })
+            .map(
+              (p) => {
+                'x': double.parse(p.dx.toStringAsFixed(4)),
+                'y': double.parse(p.dy.toStringAsFixed(4)),
+              },
+            )
             .toList(),
         'color': _annotationColor.toARGB32(),
         'width': _annotationWidth,
@@ -213,10 +219,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _sendRealtimeOrP2P({
       'type': 'draw_stroke',
       'points': points
-          .map((p) => {
-                'x': double.parse(p.dx.toStringAsFixed(4)),
-                'y': double.parse(p.dy.toStringAsFixed(4)),
-              })
+          .map(
+            (p) => {
+              'x': double.parse(p.dx.toStringAsFixed(4)),
+              'y': double.parse(p.dy.toStringAsFixed(4)),
+            },
+          )
           .toList(),
       'color': color.toARGB32(),
       'width': width,
@@ -289,7 +297,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       AnnotationOverlayService.initialize(
         onPanic: _panicStop,
         onClear: () async => _clearDrawings(notifyOverlay: false),
-        onDrawStroke: (points, color, width) => _handleNativeHelpeeStroke(points, color, width),
+        onDrawStroke: (points, color, width) =>
+            _handleNativeHelpeeStroke(points, color, width),
         onErase: (point) => _eraseAt(point),
         onUndo: _undoDrawing,
         onRedo: _redoDrawing,
@@ -298,7 +307,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _bootstrap();
   }
 
-  void _handleNativeHelpeeStroke(List<Offset> points, int colorValue, double width) {
+  void _handleNativeHelpeeStroke(
+    List<Offset> points,
+    int colorValue,
+    double width,
+  ) {
     // Helpee drew on the system overlay – use the native-selected color
     // (not the helper's currently selected color) so both sides see the same.
     final color = Color(colorValue);
@@ -313,10 +326,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _sendRealtimeOrP2P({
       'type': 'draw_stroke',
       'points': points
-          .map((p) => {
-                'x': double.parse(p.dx.toStringAsFixed(4)),
-                'y': double.parse(p.dy.toStringAsFixed(4)),
-              })
+          .map(
+            (p) => {
+              'x': double.parse(p.dx.toStringAsFixed(4)),
+              'y': double.parse(p.dy.toStringAsFixed(4)),
+            },
+          )
           .toList(),
       'color': colorValue,
       'width': width,
@@ -418,6 +433,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   /// both sides (screen, annotations, control, overlay) so helper never sees
   /// stale docs after helpee closed the app or tapped STOP.
   Future<void> _panicStop({bool isLocalLeave = false}) async {
+    if (_sessionTerminationHandled) return;
+    _sessionTerminationHandled = true;
     _sendRealtimeOrP2P({'type': 'session_ended'});
     _sendRealtimeOrP2P({'type': 'draw_clear'});
     try {
@@ -427,18 +444,67 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     widget.remoteControlSink?.value = false;
     await _clearDrawings(notifyOverlay: true);
     await stopScreenShare();
-    try { await AnnotationOverlayService.stop(); } catch (_) {}
+    try {
+      await AnnotationOverlayService.stop();
+    } catch (_) {}
     _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
 
-    // Guide captures contain whatever is visible on the shared screen. Keep
-    // them on-device; cloud guide generation must never happen implicitly when
-    // the call ends. The local Gemma guide flow will be an explicit user action.
+    await _offerLocalGuideSave();
 
     if (!isLocalLeave) {
       await widget.onSessionEnded?.call();
     }
     await widget.onSessionClosed?.call();
+  }
+
+  Future<void> _offerLocalGuideSave() async {
+    if (_guideReviewShown || !mounted || _keyframeManager.count == 0) return;
+    _guideReviewShown = true;
+    final now = DateTime.now();
+    final input = await showDialog<LocalGuideSaveInput>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => LocalGuideSaveDialog(
+        frames: _keyframeManager.keyframes,
+        suggestedTitle:
+            'Help guide ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
+      ),
+    );
+    if (input == null || !mounted) return;
+    try {
+      final transcript = input.transcript;
+      final includedFrames = _keyframeManager.keyframes
+          .where((frame) => input.includedFrameIds.contains(frame.id))
+          .toList(growable: false);
+      final guide = await LocalGuideStore(secureStorage: widget.secureStorage)
+          .saveSession(
+            title: input.title,
+            summary: transcript.isEmpty
+                ? includedFrames.isEmpty
+                      ? 'Notes from an assistance session.'
+                      : 'Saved screenshots from an assistance session. Add or refine the instructions before relying on them.'
+                : transcript.length > 320
+                ? '${transcript.substring(0, 317)}…'
+                : transcript,
+            transcript: transcript,
+            frames: includedFrames,
+            sessionId: widget.sessionId,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Saved “${guide.title}” on this device.')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not encrypt and save this guide.'),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> leave() => _panicStop(isLocalLeave: true);
@@ -628,7 +694,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
       // Helpee: if not auto-starting screen share immediately, send initial audio offer
       // so two-way voice works while deciding when to share screen.
-      if (widget.isHelpee && !_screenShareStarted && !widget.autoStartScreenShare) {
+      if (widget.isHelpee &&
+          !_screenShareStarted &&
+          !widget.autoStartScreenShare) {
         try {
           final offer = await _engine.createOffer();
           _realtime?.send({'type': 'signal_offer', 'sdp': offer});
@@ -664,10 +732,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Future<void> _retryUsingRelay() async {
     // A bounded fallback avoids repeatedly rebuilding a call when the TURN
     // service itself is unavailable. The helpee remains the offerer.
-    await _recoverMedia(
-      sendOffer: widget.isHelpee,
-      forceRelayOnly: true,
-    );
+    await _recoverMedia(sendOffer: widget.isHelpee, forceRelayOnly: true);
     if (!widget.isHelpee && mounted) {
       _realtime?.send({'type': 'request_relay_offer'});
     }
@@ -932,7 +997,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         setState(() {
           _disconnectCountdownSeconds = 10;
         });
-        _disconnectCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+        _disconnectCountdownTimer = Timer.periodic(const Duration(seconds: 1), (
+          timer,
+        ) {
           if (!mounted) {
             timer.cancel();
             return;
@@ -956,7 +1023,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             _panicStop(isLocalLeave: false);
           } else {
             setState(() {
-              _disconnectCountdownSeconds = (_disconnectCountdownSeconds ?? 1) - 1;
+              _disconnectCountdownSeconds =
+                  (_disconnectCountdownSeconds ?? 1) - 1;
             });
           }
         });
@@ -1075,6 +1143,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       case 'user_left':
       case 'session_ended':
       case 'session_closed':
+        if (_sessionTerminationHandled) break;
+        _sessionTerminationHandled = true;
         _disconnectCountdownTimer?.cancel();
         _disconnectCountdownTimer = null;
         _disconnectCountdownSeconds = null;
@@ -1082,17 +1152,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // VISION: either side shutting down must clear everything for the other – annotations, overlay, control.
         _clearDrawings(notifyOverlay: true);
         stopScreenShare();
-        try { await AnnotationOverlayService.stop(); } catch (_) {}
+        try {
+          await AnnotationOverlayService.stop();
+        } catch (_) {}
         _remoteControlGranted = false;
         widget.remoteControlSink?.value = false;
+        await _offerLocalGuideSave();
         remoteStreamNotifier.value = null;
         _helpeeOverlayRunning = false;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Help session ended.',
-              ),
+              content: Text('Help session ended.'),
               duration: Duration(seconds: 2),
             ),
           );
@@ -1470,7 +1541,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // canvas shows everything.
         if (!widget.isHelpee && _draftStroke != null)
           ValueListenableBuilder<double>(
-            valueListenable: widget.contentAspectRatioNotifier ?? ValueNotifier<double>(9 / 16),
+            valueListenable:
+                widget.contentAspectRatioNotifier ??
+                ValueNotifier<double>(9 / 16),
             builder: (context, aspect, _) => Positioned.fill(
               child: DrawingOverlay(
                 strokes: [_draftStroke!],
@@ -1486,7 +1559,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             builder: (context, stream, _) {
               if (stream == null) return const SizedBox.shrink();
               return ValueListenableBuilder<double>(
-                valueListenable: widget.contentAspectRatioNotifier ?? ValueNotifier<double>(9 / 16),
+                valueListenable:
+                    widget.contentAspectRatioNotifier ??
+                    ValueNotifier<double>(9 / 16),
                 builder: (context, aspect, _) => Positioned.fill(
                   child: DrawingInputOverlay(
                     onStroke: _sendDrawStroke,
@@ -1541,7 +1616,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               borderRadius: BorderRadius.circular(16),
               color: AppTheme.bgSecondary,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
@@ -1594,29 +1672,45 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.accentEmerald,
-                          side: BorderSide(color: AppTheme.accentEmerald.withValues(alpha: 0.6)),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          side: BorderSide(
+                            color: AppTheme.accentEmerald.withValues(
+                              alpha: 0.6,
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
                           visualDensity: VisualDensity.compact,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
                         onPressed: () {
-                          final remainingAllowed = _maxAloneSeconds - _totalAloneSeconds;
-                          final addSeconds = remainingAllowed < 30 ? remainingAllowed : 30;
+                          final remainingAllowed =
+                              _maxAloneSeconds - _totalAloneSeconds;
+                          final addSeconds = remainingAllowed < 30
+                              ? remainingAllowed
+                              : 30;
                           setState(() {
-                            _disconnectCountdownSeconds = (_disconnectCountdownSeconds ?? 0) + addSeconds;
+                            _disconnectCountdownSeconds =
+                                (_disconnectCountdownSeconds ?? 0) + addSeconds;
                           });
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text('Added $addSeconds seconds. Max wait: 5 min.'),
+                              content: Text(
+                                'Added $addSeconds seconds. Max wait: 5 min.',
+                              ),
                               duration: const Duration(seconds: 2),
                             ),
                           );
                         },
                         child: const Text(
                           'Wait (+30s)',
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 12,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -1625,7 +1719,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.accentRose,
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         visualDensity: VisualDensity.compact,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
@@ -1641,7 +1738,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                       },
                       child: const Text(
                         'Leave Now',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ],

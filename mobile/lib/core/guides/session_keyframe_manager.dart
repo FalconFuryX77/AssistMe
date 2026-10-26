@@ -2,6 +2,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
@@ -62,7 +63,8 @@ class SessionKeyframeManager {
     _settleTimer = Timer(const Duration(milliseconds: 750), () async {
       await _captureSettledFrame(
         title: 'Step ${_keyframes.length + 1}',
-        instruction: 'Tap the highlighted section indicated by your helper.',
+        instruction:
+            'This screenshot marks a step in the call. Use the saved notes for the exact action.',
       );
     });
   }
@@ -75,7 +77,9 @@ class SessionKeyframeManager {
     _settleTimer?.cancel();
     return _captureSettledFrame(
       title: title ?? 'Step ${_keyframes.length + 1}',
-      instruction: instruction ?? 'Follow the step shown on screen.',
+      instruction:
+          instruction ??
+          'This screenshot marks a step in the call. Use the saved notes for the exact action.',
     );
   }
 
@@ -115,7 +119,7 @@ class SessionKeyframeManager {
       }
 
       final kf = CapturedKeyframe(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        id: '${DateTime.now().microsecondsSinceEpoch}_${Random.secure().nextInt(1 << 32)}',
         timestamp: DateTime.now(),
         imageBytes: bytes,
         title: title,
@@ -135,7 +139,9 @@ class SessionKeyframeManager {
 
   /// Computes a 64-bit difference hash from a 9x8 grayscale thumbnail. This
   /// catches visually identical captures even if JPEG byte encodings differ.
-  Future<({int difference, int color})?> _differenceHash(Uint8List bytes) async {
+  Future<({int difference, int color})?> _differenceHash(
+    Uint8List bytes,
+  ) async {
     Codec? codec;
     Image? image;
     try {
@@ -203,9 +209,11 @@ class SessionKeyframeManager {
     final redDistance = ((left >> 16) & 0xff) - ((right >> 16) & 0xff);
     final greenDistance = ((left >> 8) & 0xff) - ((right >> 8) & 0xff);
     final blueDistance = (left & 0xff) - (right & 0xff);
-    return [redDistance.abs(), greenDistance.abs(), blueDistance.abs()].reduce(
-      (largest, distance) => distance > largest ? distance : largest,
-    );
+    return [
+      redDistance.abs(),
+      greenDistance.abs(),
+      blueDistance.abs(),
+    ].reduce((largest, distance) => distance > largest ? distance : largest);
   }
 
   void dispose() {

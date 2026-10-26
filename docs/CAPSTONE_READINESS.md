@@ -8,8 +8,13 @@ Updated 2026-10-26.
   uploaded when a call ends, and the backend rejects new guide image uploads.
 - Screenshots are captured in memory on each participant's device when a step
   is bookmarked or annotation settles. They are deduplicated and bounded by a
-  byte budget, then discarded with the session. There is no persistent local
-  guide yet, and no transcript is collected.
+  byte budget. A session-end review can save them with user-entered transcript
+  notes in an encrypted, app-private local guide library. There is still no
+  automatic audio transcription or model-generated captions/instructions.
+- Guide screenshots and notes use AES-GCM with a random key held in OS secure
+  storage. Android app backup is disabled. On iOS the guide directory is
+  excluded from backup and receives platform file protection. Saving screenshots
+  requires a review acknowledgement; screenshots are not automatically blurred.
 - Live audio and screen video still travel to the other call participant over
   WebRTC as part of assistance. The local-only guarantee applies to the future
   guide-generation path; it does not hide a shared screen from the helper.
@@ -81,11 +86,12 @@ promising automatic detection will catch every secret.
 
 ## Remaining implementation and acceptance work
 
-- Upgrade and pin the Flutter toolchain supported by the selected LiteRT
-  package, then add a local Gemma model manager and an explicit download flow.
-- Build the on-device transcript-to-guide pipeline and local guide library;
-  confirm no screenshot, transcript, or prompt is sent to AssistMe's backend.
-- Add local OCR redaction and a review screen, then test it with synthetic
+- Upgrade and pin Flutter to 3.44/Dart 3.12, set Android API 30/arm64 and iOS
+  15 minimums, then add the local Gemma model manager and explicit download flow.
+- Add on-device audio transcription and Gemma captions/instructions. The current
+  end-of-call field accepts only user-entered transcript/notes; it does not
+  capture or transcribe call audio.
+- Add local OCR redaction and per-step review/edit controls, then test it with synthetic
   passwords, email addresses, phone numbers, and account IDs.
 - Run a long call on the capstone device and measure memory, heat, battery,
   model latency, and output quality. The 2.6 GB bundle and memory use may make

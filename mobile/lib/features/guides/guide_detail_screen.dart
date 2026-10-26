@@ -6,12 +6,18 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../../core/guides/guide_models.dart';
+import '../../core/guides/local_guide_store.dart';
 import '../../theme/app_theme.dart';
 
 class GuideDetailScreen extends StatefulWidget {
   final SessionGuideItem guide;
+  final LocalGuideStore guideStore;
 
-  const GuideDetailScreen({super.key, required this.guide});
+  const GuideDetailScreen({
+    super.key,
+    required this.guide,
+    required this.guideStore,
+  });
 
   @override
   State<GuideDetailScreen> createState() => _GuideDetailScreenState();
@@ -22,14 +28,15 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
   bool _speaking = false;
 
   List<GuideStepItem> get _steps => widget.guide.steps;
-  GuideStepItem get _currentStep =>
-      _steps.isNotEmpty ? _steps[_currentStepIndex] : GuideStepItem(
-        id: '',
-        stepNumber: 1,
-        title: 'Overview',
-        instruction: widget.guide.summary,
-        createdAt: DateTime.now(),
-      );
+  GuideStepItem get _currentStep => _steps.isNotEmpty
+      ? _steps[_currentStepIndex]
+      : GuideStepItem(
+          id: '',
+          stepNumber: 1,
+          title: 'Overview',
+          instruction: widget.guide.summary,
+          createdAt: DateTime.now(),
+        );
 
   void _nextStep() {
     if (_currentStepIndex < _steps.length - 1) {
@@ -53,28 +60,38 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
     setState(() => _speaking = !_speaking);
   }
 
-  Widget _buildStepImage(String? imageUrl) {
-    if (imageUrl == null || imageUrl.isEmpty) {
-      return Container(
-        height: 220,
-        decoration: BoxDecoration(
-          color: AppTheme.bgSecondary,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.touch_app, size: 48, color: AppTheme.accentEmerald),
-              SizedBox(height: 8),
-              Text(
-                'Follow the step on your device',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+  Widget _buildStepImage(String? imageUrl, String? localImagePath) {
+    if (localImagePath != null) {
+      return FutureBuilder<Uint8List?>(
+        future: widget.guideStore.readImage(localImagePath),
+        builder: (context, snapshot) {
+          final bytes = snapshot.data;
+          if (snapshot.hasError ||
+              (snapshot.connectionState == ConnectionState.done &&
+                  bytes == null)) {
+            return _imagePlaceholder(
+              Icons.broken_image,
+              'Saved screenshot unavailable',
+            );
+          }
+          if (bytes == null) {
+            return const SizedBox(
+              height: 220,
+              child: Center(
+                child: CircularProgressIndicator(color: AppTheme.accentEmerald),
               ),
-            ],
-          ),
-        ),
+            );
+          }
+          return _imageFrame(
+            Image.memory(bytes, fit: BoxFit.contain, width: double.infinity),
+          );
+        },
+      );
+    }
+    if (imageUrl == null || imageUrl.isEmpty) {
+      return _imagePlaceholder(
+        Icons.touch_app,
+        'Follow the step on your device',
       );
     }
 
@@ -88,40 +105,69 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
       } catch (_) {}
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        constraints: const BoxConstraints(maxHeight: 380),
-        decoration: BoxDecoration(
-          color: Colors.black,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.accentEmerald.withValues(alpha: 0.3), width: 1.5),
-        ),
-        child: imageBytes != null
-            ? Image.memory(
-                imageBytes,
-                fit: BoxFit.contain,
-                width: double.infinity,
-              )
-            : Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                width: double.infinity,
-                errorBuilder: (context, error, stackTrace) => const Center(
-                  child: Padding(
-                    padding: EdgeInsets.all(24.0),
-                    child: Icon(Icons.broken_image, size: 48, color: AppTheme.textMuted),
-                  ),
-                ),
+    return _imageFrame(
+      imageBytes != null
+          ? Image.memory(
+              imageBytes,
+              fit: BoxFit.contain,
+              width: double.infinity,
+            )
+          : Image.network(
+              imageUrl,
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) => const Icon(
+                Icons.broken_image,
+                size: 48,
+                color: AppTheme.textMuted,
               ),
-      ),
+            ),
     );
   }
+
+  Widget _imagePlaceholder(IconData icon, String message) => Container(
+    height: 220,
+    decoration: BoxDecoration(
+      color: AppTheme.bgSecondary,
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: Colors.white12),
+    ),
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: AppTheme.accentEmerald),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _imageFrame(Widget child) => ClipRRect(
+    borderRadius: BorderRadius.circular(16),
+    child: Container(
+      constraints: const BoxConstraints(maxHeight: 380),
+      decoration: BoxDecoration(
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppTheme.accentEmerald.withValues(alpha: 0.3),
+          width: 1.5,
+        ),
+      ),
+      child: child,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final totalSteps = _steps.length;
-    final progress = totalSteps > 0 ? (_currentStepIndex + 1) / totalSteps : 1.0;
+    final progress = totalSteps > 0
+        ? (_currentStepIndex + 1) / totalSteps
+        : 1.0;
 
     return Scaffold(
       backgroundColor: AppTheme.bgPrimary,
@@ -160,10 +206,16 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         ),
                       ),
                       IconButton(
-                        tooltip: _speaking ? 'Stop listening' : 'Listen to step instructions',
+                        tooltip: _speaking
+                            ? 'Stop listening'
+                            : 'Listen to step instructions',
                         icon: Icon(
-                          _speaking ? Icons.volume_up : Icons.volume_up_outlined,
-                          color: _speaking ? AppTheme.accentEmerald : AppTheme.textSecondary,
+                          _speaking
+                              ? Icons.volume_up
+                              : Icons.volume_up_outlined,
+                          color: _speaking
+                              ? AppTheme.accentEmerald
+                              : AppTheme.textSecondary,
                           size: 28,
                         ),
                         onPressed: _toggleSpeak,
@@ -176,7 +228,9 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     child: LinearProgressIndicator(
                       value: progress,
                       backgroundColor: Colors.white12,
-                      valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.accentEmerald),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        AppTheme.accentEmerald,
+                      ),
                       minHeight: 6,
                     ),
                   ),
@@ -188,7 +242,10 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
             if (_speaking)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.accentEmerald.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
@@ -196,7 +253,10 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.record_voice_over, color: AppTheme.accentEmerald),
+                    const Icon(
+                      Icons.record_voice_over,
+                      color: AppTheme.accentEmerald,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
@@ -253,7 +313,37 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     const SizedBox(height: 18),
 
                     // Visual Screenshot Frame
-                    _buildStepImage(_currentStep.imageUrl),
+                    _buildStepImage(
+                      _currentStep.imageUrl,
+                      _currentStep.localImagePath,
+                    ),
+                    if (widget.guide.transcript.isNotEmpty) ...[
+                      const SizedBox(height: 20),
+                      ExpansionTile(
+                        tilePadding: EdgeInsets.zero,
+                        collapsedIconColor: AppTheme.accentEmerald,
+                        iconColor: AppTheme.accentEmerald,
+                        title: const Text(
+                          'Session transcript',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: SelectableText(
+                              widget.guide.transcript,
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                height: 1.45,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -264,7 +354,13 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(
                 color: AppTheme.bgSecondary,
-                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, -2))],
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 8,
+                    offset: Offset(0, -2),
+                  ),
+                ],
               ),
               child: Row(
                 children: [
@@ -272,12 +368,17 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     Expanded(
                       child: OutlinedButton.icon(
                         icon: const Icon(Icons.chevron_left),
-                        label: const Text('Previous', style: TextStyle(fontSize: 16)),
+                        label: const Text(
+                          'Previous',
+                          style: TextStyle(fontSize: 16),
+                        ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: Colors.white,
                           side: const BorderSide(color: Colors.white24),
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         onPressed: _prevStep,
                       ),
@@ -286,16 +387,27 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                   Expanded(
                     flex: 2,
                     child: ElevatedButton.icon(
-                      icon: Icon(_currentStepIndex == totalSteps - 1 ? Icons.check_circle : Icons.chevron_right),
+                      icon: Icon(
+                        _currentStepIndex == totalSteps - 1
+                            ? Icons.check_circle
+                            : Icons.chevron_right,
+                      ),
                       label: Text(
-                        _currentStepIndex == totalSteps - 1 ? 'Finish Guide' : 'Next Step',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                        _currentStepIndex == totalSteps - 1
+                            ? 'Finish Guide'
+                            : 'Next Step',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.accentEmerald,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       onPressed: () {
                         if (_currentStepIndex == totalSteps - 1) {
