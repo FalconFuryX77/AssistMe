@@ -476,6 +476,22 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final transcript = input.transcript;
       final includedFrames = _keyframeManager.keyframes
           .where((frame) => input.includedFrameIds.contains(frame.id))
+          .map((frame) {
+            final generatedInstruction =
+                input.generatedInstructions[frame.id]?.trim();
+            return CapturedKeyframe(
+              id: frame.id,
+              timestamp: frame.timestamp,
+              imageBytes: frame.imageBytes,
+              title: input.generatedTitles[frame.id] ?? frame.title,
+              instruction: generatedInstruction == null ||
+                      generatedInstruction.isEmpty
+                  ? frame.instruction
+                  : generatedInstruction,
+              perceptualHash: frame.perceptualHash,
+              colorSignature: frame.colorSignature,
+            );
+          })
           .toList(growable: false);
       final guide = await LocalGuideStore(secureStorage: widget.secureStorage)
           .saveSession(
@@ -483,7 +499,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             summary: transcript.isEmpty
                 ? includedFrames.isEmpty
                       ? 'Notes from an assistance session.'
-                      : 'Saved screenshots from an assistance session. Add or refine the instructions before relying on them.'
+                      : 'Draft guide from an assistance session. Review each step before relying on it.'
                 : transcript.length > 320
                 ? '${transcript.substring(0, 317)}…'
                 : transcript,

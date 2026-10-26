@@ -59,8 +59,8 @@ void main() {
             id: 'frame-1',
             timestamp: DateTime.utc(2026, 10, 26),
             imageBytes: image,
-            title: 'Step 1',
-            instruction: 'Open network settings.',
+            title: 'Open Wi-Fi settings',
+            instruction: 'Select the network menu and choose your Wi-Fi.',
             perceptualHash: 1,
             colorSignature: 1,
           ),
@@ -84,6 +84,11 @@ void main() {
       final listed = await store.listGuides();
       expect(listed, hasLength(1));
       expect(listed.single.transcript, transcript);
+      expect(listed.single.steps.single.title, 'Open Wi-Fi settings');
+      expect(
+        listed.single.steps.single.instruction,
+        'Select the network menu and choose your Wi-Fi.',
+      );
       expect(await store.readImage(guide.steps.single.localImagePath), image);
     },
   );

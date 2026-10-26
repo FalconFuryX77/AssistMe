@@ -26,7 +26,9 @@ android {
         applicationId = "com.assistme"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // LiteRT-LM (local Gemma 4 inference) requires Android 11+ and arm64.
+        minSdk = 30
+        ndk { abiFilters += listOf("arm64-v8a") }
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

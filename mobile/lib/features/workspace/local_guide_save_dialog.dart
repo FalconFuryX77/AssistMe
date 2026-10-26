@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_edge_ai/flutter_edge_ai.dart' show CancelToken;
 
 import '../../core/guides/session_keyframe_manager.dart';
+import '../../core/guides/local_guide_ai_service.dart';
 import '../../theme/app_theme.dart';
 
 class LocalGuideSaveInput {
   final String title;
   final String transcript;
   final Set<String> includedFrameIds;
+  final Map<String, String> generatedInstructions;
+  final Map<String, String> generatedTitles;
 
   const LocalGuideSaveInput({
     required this.title,
     required this.transcript,
     required this.includedFrameIds,
+    required this.generatedInstructions,
+    required this.generatedTitles,
   });
 }
 
@@ -35,11 +41,20 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   );
   final TextEditingController _transcript = TextEditingController();
   final Set<String> _includedFrameIds = <String>{};
+  final Map<String, TextEditingController> _stepControllers = {};
+  final Map<String, String> _stepTitles = {};
+  bool _generating = false;
+  double? _downloadProgress;
+  String? _generationError;
+  CancelToken? _downloadCancelToken;
 
   @override
   void dispose() {
     _title.dispose();
     _transcript.dispose();
+    for (final controller in _stepControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -51,6 +66,58 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
       ),
     ),
   );
+
+  Future<void> _generateGuide() async {
+    final selectedFrames = widget.frames
+        .where((frame) => _includedFrameIds.contains(frame.id))
+        .toList(growable: false);
+    if (selectedFrames.isEmpty || _generating) return;
+    final sessionNotes = _transcript.text;
+    setState(() {
+      _generating = true;
+      _generationError = null;
+      _downloadCancelToken = CancelToken();
+    });
+    try {
+      await LocalGuideAiService.installModel(
+        cancelToken: _downloadCancelToken!,
+        onProgress: (progress) {
+          if (mounted) setState(() => _downloadProgress = progress / 100);
+        },
+      );
+      if (!mounted) return;
+      if (mounted) setState(() => _downloadProgress = null);
+      for (var index = 0; index < selectedFrames.length; index++) {
+        final frame = selectedFrames[index];
+        final generated = await LocalGuideAiService.generateStep(
+          imageBytes: frame.imageBytes,
+          transcript: sessionNotes,
+          stepNumber: index + 1,
+        );
+        if (!mounted) return;
+        final title = RegExp(r'^TITLE:\s*(.+)$', multiLine: true)
+            .firstMatch(generated)?.group(1)?.trim();
+        final action = RegExp(r'^ACTION:\s*([\s\S]+)$', multiLine: true)
+            .firstMatch(generated)?.group(1)?.trim();
+        _stepTitles[frame.id] = title == null || title.isEmpty
+            ? 'Step ${index + 1}'
+            : title.substring(0, title.length.clamp(0, 100));
+        final controller = _stepControllers.putIfAbsent(
+          frame.id,
+          () => TextEditingController(),
+        );
+        controller.text = action == null || action.isEmpty ? generated : action;
+        if (mounted) setState(() {});
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _generationError =
+            'Local generation failed. Your screenshots and notes remain on this device. You can save the notes and try again later.');
+      }
+    } finally {
+      if (mounted) setState(() => _generating = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -64,7 +131,7 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'The guide and notes will be encrypted and saved on this device. Nothing is uploaded. Screenshots are currently unredacted: inspect each one and deselect any that show sensitive information.',
+              'The guide and notes are encrypted and saved on this device. Nothing is uploaded. The model runs on this device. Screenshots are unredacted: inspect and deselect sensitive ones before generating or saving.',
               style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
             ),
             const SizedBox(height: 14),
@@ -83,7 +150,7 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
               decoration: const InputDecoration(
                 labelText: 'Transcript or notes (optional)',
                 hintText:
-                    'Type or paste key points; call audio is not transcribed yet.',
+                    'Type or paste session notes. Audio transcription is not enabled yet.',
               ),
               onChanged: (_) => setState(() {}),
             ),
@@ -135,6 +202,51 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                   },
                 ),
               ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _includedFrameIds.isEmpty || _generating
+                    ? null
+                    : _generateGuide,
+                icon: _generating
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.auto_awesome),
+                label: Text(_generating
+                    ? (_downloadProgress == null
+                        ? 'Generating on this device…'
+                        : 'Downloading Gemma 4 · ${(_downloadProgress! * 100).round()}%')
+                    : 'Generate guide locally with Gemma 4'),
+              ),
+              if (_downloadProgress != null) ...[
+                const SizedBox(height: 6),
+                LinearProgressIndicator(value: _downloadProgress),
+                const Text(
+                  'First setup downloads about 2.6 GB of model files. This download contains no session data.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                ),
+              ],
+              if (_generationError != null) ...[
+                const SizedBox(height: 8),
+                Text(_generationError!, style: const TextStyle(color: Colors.redAccent)),
+              ],
+              for (final frame in widget.frames)
+                if (_includedFrameIds.contains(frame.id) &&
+                    _stepControllers.containsKey(frame.id)) ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _stepControllers[frame.id],
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    decoration: InputDecoration(
+                      labelText: _stepTitles[frame.id] ?? frame.title,
+                      helperText: 'Review and edit this generated draft.',
+                    ),
+                  ),
+                ],
             ],
           ],
         ),
@@ -142,12 +254,16 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
     ),
     actions: [
       TextButton(
-        onPressed: () => Navigator.pop(context),
-        child: const Text('Discard'),
+        onPressed: () {
+          _downloadCancelToken?.cancel('User closed the guide review.');
+          Navigator.pop(context);
+        },
+        child: Text(_generating ? 'Cancel' : 'Discard'),
       ),
       ElevatedButton(
         onPressed:
-            _title.text.trim().isEmpty ||
+            _generating ||
+                _title.text.trim().isEmpty ||
                 (_includedFrameIds.isEmpty && _transcript.text.trim().isEmpty)
             ? null
             : () => Navigator.pop(
@@ -156,6 +272,11 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                   title: _title.text.trim(),
                   transcript: _transcript.text.trim(),
                   includedFrameIds: Set.unmodifiable(_includedFrameIds),
+                  generatedInstructions: Map.unmodifiable({
+                    for (final entry in _stepControllers.entries)
+                      entry.key: entry.value.text.trim(),
+                  }),
+                  generatedTitles: Map.unmodifiable(_stepTitles),
                 ),
               ),
         child: const Text('Save on this device'),
