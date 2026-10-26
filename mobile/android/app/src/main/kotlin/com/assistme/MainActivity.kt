@@ -108,6 +108,40 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        val guideAudioChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.assistme/local_guide_audio"
+        )
+        guideAudioChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "decodeToPcm16kMono" -> {
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        result.error("INVALID_PATH", "Audio path is required.", null)
+                    } else {
+                        Thread {
+                            try {
+                                val pcm = LocalGuideAudioDecoder.decodeToPcm16kMono(
+                                    cacheDir,
+                                    path
+                                )
+                                runOnUiThread { result.success(pcm) }
+                            } catch (_: Exception) {
+                                runOnUiThread {
+                                    result.error(
+                                        "DECODE_FAILED",
+                                        "Could not decode temporary guide audio.",
+                                        null
+                                    )
+                                }
+                            }
+                        }.start()
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     private fun isAccessibilityEnabled(): Boolean {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,8 @@ import 'package:flutter_edge_ai/flutter_edge_ai.dart' show CancelToken;
 
 import '../../core/guides/session_keyframe_manager.dart';
 import '../../core/guides/local_guide_ai_service.dart';
+import '../../core/guides/local_guide_audio_capture.dart';
+import '../../core/guides/local_guide_transcription_service.dart';
 import '../../theme/app_theme.dart';
 import 'screenshot_redaction_editor.dart';
 
@@ -29,11 +32,13 @@ class LocalGuideSaveInput {
 class LocalGuideSaveDialog extends StatefulWidget {
   final List<CapturedKeyframe> frames;
   final String suggestedTitle;
+  final LocalGuideAudioRecording? audioRecording;
 
   const LocalGuideSaveDialog({
     super.key,
     required this.frames,
     required this.suggestedTitle,
+    this.audioRecording,
   });
 
   @override
@@ -44,15 +49,20 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   late final TextEditingController _title = TextEditingController(
     text: widget.suggestedTitle,
   );
-  final TextEditingController _transcript = TextEditingController();
+  late final TextEditingController _transcript = TextEditingController();
   final Set<String> _includedFrameIds = <String>{};
   final Set<String> _reviewedFrameIds = <String>{};
   final Map<String, Uint8List> _reviewedImages = <String, Uint8List>{};
   final Map<String, TextEditingController> _stepControllers = {};
   final Map<String, String> _stepTitles = {};
   bool _generating = false;
+  bool _transcribing = false;
+  bool _speechInferenceStarted = false;
+  bool _transcriptionCompleted = false;
   double? _downloadProgress;
+  double? _speechDownloadProgress;
   String? _generationError;
+  String? _transcriptionError;
   CancelToken? _downloadCancelToken;
 
   bool get _selectedFramesReviewed =>
@@ -65,6 +75,8 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   void dispose() {
     _title.dispose();
     _transcript.dispose();
+    _downloadCancelToken?.cancel('The local guide dialog was closed.');
+    unawaited(widget.audioRecording?.delete());
     for (final controller in _stepControllers.values) {
       controller.dispose();
     }
@@ -88,7 +100,10 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
     final selectedFrames = widget.frames
         .where((frame) => _includedFrameIds.contains(frame.id))
         .toList(growable: false);
-    if (selectedFrames.isEmpty || !_selectedFramesReviewed || _generating) {
+    if (selectedFrames.isEmpty ||
+        !_selectedFramesReviewed ||
+        _generating ||
+        _transcribing) {
       return;
     }
     final sessionNotes = _transcript.text;
@@ -144,8 +159,115 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
     }
   }
 
+  Future<void> _transcribeCallAudio() async {
+    final recording = widget.audioRecording;
+    if (recording == null || _transcribing || _transcriptionCompleted) return;
+    setState(() {
+      _transcribing = true;
+      _transcriptionError = null;
+      _downloadCancelToken = CancelToken();
+    });
+    try {
+      await LocalGuideTranscriptionService.installModel(
+        cancelToken: _downloadCancelToken!,
+        onProgress: (progress) {
+          if (mounted) {
+            setState(() => _speechDownloadProgress = progress / 100);
+          }
+        },
+      );
+      if (!mounted) return;
+      setState(() => _speechDownloadProgress = null);
+      setState(() => _speechInferenceStarted = true);
+      final generated =
+          await LocalGuideTranscriptionService.transcribeRecording(
+            recording,
+            language: 'en',
+          );
+      if (!mounted) return;
+      final existingNotes = _transcript.text.trim();
+      _transcript.text = [
+        if (generated.isNotEmpty) generated,
+        if (existingNotes.isNotEmpty) 'Additional notes:\n$existingNotes',
+      ].join('\n\n');
+      _transcriptionCompleted = true;
+      setState(() {});
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _transcriptionError =
+              'Local transcription failed. The audio was not uploaded. You can retry or save your notes without it.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _transcribing = false;
+          _speechInferenceStarted = false;
+          _speechDownloadProgress = null;
+        });
+      }
+    }
+  }
+
+  Future<bool> _deleteTemporaryAudio() async {
+    final recording = widget.audioRecording;
+    if (recording == null) return true;
+    try {
+      await recording.delete();
+      return true;
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => _transcriptionError =
+              'Could not remove the temporary audio file. Retry discard or save after cleanup succeeds.',
+        );
+      }
+      return false;
+    }
+  }
+
+  Future<void> _discardGuide() async {
+    if (_transcribing) {
+      _downloadCancelToken?.cancel('Cancel local transcription.');
+      return;
+    }
+    if (_generating) {
+      _downloadCancelToken?.cancel('Cancel local guide generation.');
+    }
+    if (!await _deleteTemporaryAudio() || !mounted) return;
+    Navigator.pop(context);
+  }
+
+  Future<void> _saveGuide() async {
+    if (_generating || _transcribing || !await _deleteTemporaryAudio() || !mounted) {
+      return;
+    }
+    Navigator.pop(
+      context,
+      LocalGuideSaveInput(
+        title: _title.text.trim(),
+        transcript: _transcript.text.trim(),
+        includedFrameIds: Set.unmodifiable(_includedFrameIds),
+        redactedImages: Map.unmodifiable({
+          for (final id in _includedFrameIds)
+            if (_reviewedImages.containsKey(id)) id: _reviewedImages[id]!,
+        }),
+        generatedInstructions: Map.unmodifiable({
+          for (final entry in _stepControllers.entries)
+            entry.key: entry.value.text.trim(),
+        }),
+        generatedTitles: Map.unmodifiable(_stepTitles),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
+  Widget build(BuildContext context) => PopScope(
+    // Keep the temporary recording alive until native decode and on-device
+    // inference finish; the explicit dialog action is disabled during inference.
+    canPop: !_speechInferenceStarted,
+    child: AlertDialog(
     backgroundColor: AppTheme.bgSecondary,
     title: const Text('Save a private guide?'),
     content: SizedBox(
@@ -172,13 +294,73 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
               minLines: 3,
               maxLines: 7,
               maxLength: 20000,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Transcript or notes (optional)',
-                hintText:
-                    'Type or paste session notes. Audio transcription is not enabled yet.',
+                hintText: widget.audioRecording == null
+                    ? 'Type or paste session notes.'
+                    : 'Type notes here, or transcribe the opted-in call locally below.',
               ),
               onChanged: (_) => setState(() {}),
             ),
+            if (widget.audioRecording != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.bgCard,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.borderGlass),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Call audio is temporary and stays on this device. Downloading Whisper sends only model requests; audio is deleted after transcription or when this guide is discarded.',
+                      style: TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    OutlinedButton.icon(
+                      onPressed: _transcribing || _transcriptionCompleted
+                          ? null
+                          : _transcribeCallAudio,
+                      icon: _transcribing
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              _transcriptionCompleted
+                                  ? Icons.verified
+                                  : Icons.graphic_eq,
+                            ),
+                      label: Text(
+                        _transcriptionCompleted
+                            ? 'Transcribed locally'
+                            : _transcribing
+                            ? (_speechDownloadProgress == null
+                                  ? 'Transcribing on this device…'
+                                  : 'Downloading speech model · ${(_speechDownloadProgress! * 100).round()}%')
+                            : 'Transcribe call locally',
+                      ),
+                    ),
+                    if (_speechDownloadProgress != null) ...[
+                      const SizedBox(height: 5),
+                      LinearProgressIndicator(value: _speechDownloadProgress),
+                    ],
+                    if (_transcriptionError != null)
+                      Text(
+                        _transcriptionError!,
+                        style: const TextStyle(color: Colors.redAccent),
+                      ),
+                  ],
+                ),
+              ),
+            ],
             if (widget.frames.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
@@ -251,7 +433,8 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                 onPressed:
                     _includedFrameIds.isEmpty ||
                         !_selectedFramesReviewed ||
-                        _generating
+                        _generating ||
+                        _transcribing
                     ? null
                     : _generateGuide,
                 icon: _generating
@@ -262,10 +445,14 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                       )
                     : const Icon(Icons.auto_awesome),
                 label: Text(
-                  _generating
-                      ? (_downloadProgress == null
-                            ? 'Generating on this device…'
-                            : 'Downloading Gemma 4 · ${(_downloadProgress! * 100).round()}%')
+                  _generating || _transcribing
+                      ? (_transcribing
+                            ? (_speechDownloadProgress == null
+                                  ? 'Transcribing on this device…'
+                                  : 'Downloading speech model · ${(_speechDownloadProgress! * 100).round()}%')
+                            : (_downloadProgress == null
+                                  ? 'Generating on this device…'
+                                  : 'Downloading Gemma 4 · ${(_downloadProgress! * 100).round()}%'))
                       : _selectedFramesReviewed
                       ? 'Generate guide locally with Gemma 4'
                       : 'Review selected screenshots first',
@@ -308,39 +495,29 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
     ),
     actions: [
       TextButton(
-        onPressed: () {
-          _downloadCancelToken?.cancel('User closed the guide review.');
-          Navigator.pop(context);
-        },
-        child: Text(_generating ? 'Cancel' : 'Discard'),
+        onPressed: _transcribing && _speechInferenceStarted
+            ? null
+            : _discardGuide,
+        child: Text(
+          _transcribing && _speechInferenceStarted
+              ? 'Transcribing…'
+              : _generating || _transcribing
+              ? 'Cancel'
+              : 'Discard',
+        ),
       ),
       ElevatedButton(
         onPressed:
             _generating ||
+                _transcribing ||
                 !_selectedFramesReviewed ||
                 _title.text.trim().isEmpty ||
                 (_includedFrameIds.isEmpty && _transcript.text.trim().isEmpty)
             ? null
-            : () => Navigator.pop(
-                context,
-                LocalGuideSaveInput(
-                  title: _title.text.trim(),
-                  transcript: _transcript.text.trim(),
-                  includedFrameIds: Set.unmodifiable(_includedFrameIds),
-                  redactedImages: Map.unmodifiable({
-                    for (final id in _includedFrameIds)
-                      if (_reviewedImages.containsKey(id))
-                        id: _reviewedImages[id]!,
-                  }),
-                  generatedInstructions: Map.unmodifiable({
-                    for (final entry in _stepControllers.entries)
-                      entry.key: entry.value.text.trim(),
-                  }),
-                  generatedTitles: Map.unmodifiable(_stepTitles),
-                ),
-              ),
+            : _saveGuide,
         child: const Text('Save on this device'),
       ),
     ],
+    ),
   );
 }

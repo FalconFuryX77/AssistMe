@@ -9,8 +9,15 @@ Updated 2026-10-26.
 - Screenshots are captured in memory on each participant's device when a step
   is bookmarked or annotation settles. They are deduplicated and bounded by a
   byte budget. A session-end review can save them with user-entered transcript
-  notes in an encrypted, app-private local guide library. There is still no
-  automatic audio transcription or model-generated captions/instructions.
+  notes in an encrypted, app-private local guide library. Gemma 4 E2B can draft
+  screenshot steps locally after the user downloads the model. Android now has
+  an explicit two-person opt-in path to capture microphone and call playback
+  audio and transcribe it locally with Whisper Tiny after the call. The audio
+  recording itself is temporary in app-private cache and is deleted after
+  transcription or discard; the user can review/edit the transcript before it
+  is saved in the encrypted guide library. This new native audio path still
+  needs validation on two physical Android devices. iOS audio capture is not
+  implemented.
 - Guide screenshots and notes use AES-GCM with a random key held in OS secure
   storage. Android app backup is disabled. On iOS the guide directory is
   excluded from backup and receives platform file protection. Saving screenshots
@@ -46,9 +53,11 @@ guide creation can then work offline. Do not fall back to cloud inference.
 2. Prefer explicit bookmarks for meaningful steps. The current automatic
    capture after every settled drawing can still save near-duplicate or
    context-free screens even with perceptual deduplication.
-3. Add explicit, opt-in on-device transcription of the helper's instructions.
-   AssistMe currently streams call audio but does not create a transcript.
-   Keep only the text needed for the guide; discard raw audio after processing.
+3. On Android, explicitly opt in on both participants' devices to local audio
+   capture. AssistMe records the microphone and received call audio to temporary
+   app-private cache, then decodes and transcribes them on-device after the call.
+   Consent is exchanged only on the open encrypted peer data channel. Keep only
+   reviewed text in the encrypted guide; discard raw audio after processing.
 4. Give Gemma the nearby bookmarked screenshot and corresponding transcript
    segment, not the entire call. Ask for a concise action, visible evidence,
    and uncertainty. Never let the model invent taps or labels that are not
@@ -107,19 +116,26 @@ promising automatic detection will catch every secret.
   generation, draft editing, and manual opaque redaction are implemented. Test
   inference, memory, thermal load, battery, download resume/cancel, and output
   quality on the actual capstone devices; model downloads are about 2.6 GB.
-- Automatic call-audio capture/transcription is not implemented. The current
-  end-of-call field accepts user-entered notes. Integrating STT is feasible with
-  a local LiteRT speech model, but reliable capture of both local and remote
-  WebRTC audio must be added for Android and iOS. Make recording opt-in with
-  clear consent, keep audio temporary/on-device, and run inference after the call
-  so it cannot add work to the live media path. Do not label typed notes as an
-  audio transcript.
+- Android local call-audio capture/transcription is implemented but is not yet
+  accepted as device-validated. It requires explicit consent on both devices,
+  captures microphone and remote playback into temporary app-private cache,
+  transcribes sequentially with locally downloaded Whisper Tiny after the call,
+  and lets the user edit the transcript before encrypted storage. Confirm on
+  physical Android devices that both channels record correctly, consent stops
+  capture promptly, audio is deleted on every exit path, and transcription does
+  not affect live-call latency. iOS capture/transcription is not implemented.
+  Typed notes remain available and must not be presented as a transcript.
 - Automatic OCR-based sensitive-data detection/redaction is not implemented;
   redaction is manual. Test the review flow with synthetic passwords, email
   addresses, phone numbers, and account IDs before relying on it for privacy.
 - Run a long call on the capstone device and measure memory, heat, battery,
   model latency, and output quality. The 2.6 GB bundle and memory use may make
   Gemma 4 E2B unsuitable on lower-memory phones.
+- Validate local Whisper transcription with representative call audio, accent
+  and noise conditions, both audio channels, cancellation, and low-storage
+  conditions. Temporary audio is not encrypted at rest while in Android cache;
+  it remains app-private and is deleted after use, but this is a residual
+  privacy limitation until encrypted temporary recording is added.
 - Run the two-device campus Wi-Fi test with a real TURN/TLS 443 provider. The
   code change alone cannot confirm that the relay endpoint is reachable.
 - Apply database migration `e5b7a2d91c40` in deployed environments to purge

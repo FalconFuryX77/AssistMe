@@ -230,6 +230,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.18.0"
+  flutter_edge_ai_speech:
+    dependency: "direct main"
+    description:
+      name: flutter_edge_ai_speech
+      sha256: d825b8aca6c0e1df7b26b0aff30d78398e2e6f26e6e398adfd03481ac1b984f8
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.5.11"
   flutter_lints:
     dependency: "direct dev"
     description:

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import '../../core/guides/local_guide_audio_capture.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../theme/app_theme.dart';
@@ -34,16 +37,25 @@ class MobileWorkspaceScreen extends StatefulWidget {
   State<MobileWorkspaceScreen> createState() => _MobileWorkspaceScreenState();
 }
 
-class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with WidgetsBindingObserver {
+class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
+    with WidgetsBindingObserver {
   final _flowCoordinatorKey = GlobalKey<AssistanceFlowCoordinatorState>();
 
   // Live remote media stream, published by the flow coordinator's WebRTC
   // engine and consumed by the remote viewport.
-  final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(null);
+  final ValueNotifier<dynamic> _remoteStreamNotifier = ValueNotifier<dynamic>(
+    null,
+  );
   final ValueNotifier<bool> _remoteControlNotifier = ValueNotifier<bool>(false);
-  final ValueNotifier<bool> _annotationModeNotifier = ValueNotifier<bool>(false);
-  final ValueNotifier<double> _aspectRatioNotifier = ValueNotifier<double>(9 / 16);
+  final ValueNotifier<bool> _annotationModeNotifier = ValueNotifier<bool>(
+    false,
+  );
+  final ValueNotifier<double> _aspectRatioNotifier = ValueNotifier<double>(
+    9 / 16,
+  );
   final ValueNotifier<bool> _screenShareNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<GuideAudioCaptureStatus> _guideAudioStatusNotifier =
+      ValueNotifier<GuideAudioCaptureStatus>(GuideAudioCaptureStatus.off);
   bool _leaving = false;
   bool _allowPop = false;
   Offset _voiceBarOffset = Offset.zero;
@@ -81,7 +93,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
             child: const Text('Stay in call', style: TextStyle(fontSize: 16)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRose),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accentRose,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('End Call'),
           ),
@@ -128,7 +142,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
         backgroundColor: AppTheme.bgPrimary,
         appBar: AppBar(
           title: Text(
-            widget.isHelpee ? 'Help from ${widget.peerName}' : 'Helping ${widget.peerName}',
+            widget.isHelpee
+                ? 'Help from ${widget.peerName}'
+                : 'Helping ${widget.peerName}',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
           ),
           backgroundColor: AppTheme.bgSecondary,
@@ -153,23 +169,24 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               builder: (context, allowRemoteControl, _) =>
                                   ValueListenableBuilder<bool>(
                                     valueListenable: _annotationModeNotifier,
-                                    builder: (context, annotationMode, _) => RemoteScreenView(
-                                      sessionId: widget.sessionId,
-                                      apiClient: widget.apiClient,
-                                      remoteStreamNotifier: _remoteStreamNotifier,
-                                      allowRemoteControl:
-                                          allowRemoteControl &&
-                                          !annotationMode &&
-                                          !widget.isHelpee,
-                                      onAspectRatioChanged: (aspect) {
-                                        _aspectRatioNotifier.value = aspect;
-                                      },
-                                      onRemoteInput: (event) {
-                                        _flowCoordinatorKey.currentState?.sendRemoteInput(
-                                          event,
-                                        );
-                                      },
-                                    ),
+                                    builder: (context, annotationMode, _) =>
+                                        RemoteScreenView(
+                                          sessionId: widget.sessionId,
+                                          apiClient: widget.apiClient,
+                                          remoteStreamNotifier:
+                                              _remoteStreamNotifier,
+                                          allowRemoteControl:
+                                              allowRemoteControl &&
+                                              !annotationMode &&
+                                              !widget.isHelpee,
+                                          onAspectRatioChanged: (aspect) {
+                                            _aspectRatioNotifier.value = aspect;
+                                          },
+                                          onRemoteInput: (event) {
+                                            _flowCoordinatorKey.currentState
+                                                ?.sendRemoteInput(event);
+                                          },
+                                        ),
                                   ),
                             )
                           else
@@ -178,7 +195,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               child: Center(
                                 child: ValueListenableBuilder<bool>(
                                   valueListenable: _screenShareNotifier,
-                                  builder: (context, sharing, _) => _helpeeSharingPlaceholder(sharing),
+                                  builder: (context, sharing, _) =>
+                                      _helpeeSharingPlaceholder(sharing),
                                 ),
                               ),
                             ),
@@ -200,6 +218,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               annotationModeSink: _annotationModeNotifier,
                               contentAspectRatioNotifier: _aspectRatioNotifier,
                               screenSharingSink: _screenShareNotifier,
+                              guideAudioStatusSink: _guideAudioStatusNotifier,
                             ),
                           ),
 
@@ -211,7 +230,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                               right: 14,
                               child: ValueListenableBuilder<bool>(
                                 valueListenable: _screenShareNotifier,
-                                builder: (context, sharing, _) => _helpeeStatusBanner(sharing),
+                                builder: (context, sharing, _) =>
+                                    _helpeeStatusBanner(sharing),
                               ),
                             ),
                         ],
@@ -242,9 +262,14 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                         apiClient: widget.apiClient,
                         onLeaveSession: _handleLeaveSession,
                         onMuteChanged: (muted) async {
-                          await _flowCoordinatorKey.currentState?.toggleAudioMute(
-                            muted,
-                          );
+                          await _flowCoordinatorKey.currentState
+                              ?.toggleAudioMute(muted);
+                        },
+                        guideAudioStatus: _guideAudioStatusNotifier,
+                        showGuideAudioControl: Platform.isAndroid,
+                        onGuideAudioConsentChanged: (consented) async {
+                          await _flowCoordinatorKey.currentState
+                              ?.setGuideAudioConsent(consented);
                         },
                       ),
                     ),
@@ -262,18 +287,32 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: sharing ? AppTheme.accentEmerald.withValues(alpha: 0.95) : AppTheme.accentAmber.withValues(alpha: 0.95),
+        color: sharing
+            ? AppTheme.accentEmerald.withValues(alpha: 0.95)
+            : AppTheme.accentAmber.withValues(alpha: 0.95),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2))],
+        boxShadow: const [
+          BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2)),
+        ],
       ),
       child: Row(
         children: [
-          Icon(sharing ? Icons.videocam : Icons.videocam_off, size: 20, color: Colors.white),
+          Icon(
+            sharing ? Icons.videocam : Icons.videocam_off,
+            size: 20,
+            color: Colors.white,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              sharing ? 'Your screen is live — helper can see and guide you' : 'Tap Start Sharing below to begin',
-              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
+              sharing
+                  ? 'Your screen is live — helper can see and guide you'
+                  : 'Tap Start Sharing below to begin',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
         ],
@@ -290,7 +329,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: (sharing ? AppTheme.accentEmerald : AppTheme.accentAmber).withValues(alpha: 0.15),
+              color: (sharing ? AppTheme.accentEmerald : AppTheme.accentAmber)
+                  .withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(
@@ -302,7 +342,11 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
           const SizedBox(height: 20),
           Text(
             sharing ? 'Screen Sharing Active' : 'Ready to Share',
-            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
           ),
           const SizedBox(height: 10),
           Text(
@@ -310,20 +354,31 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
                 ? 'Your helper can see your screen. You can use your phone normally.\nTap Stop Sharing below to end sharing.'
                 : 'Tap Start Sharing below so your helper can view and guide your screen.',
             textAlign: TextAlign.center,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 15, height: 1.4),
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 15,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            icon: Icon(sharing ? Icons.stop_screen_share : Icons.screen_share, size: 22),
+            icon: Icon(
+              sharing ? Icons.stop_screen_share : Icons.screen_share,
+              size: 22,
+            ),
             label: Text(
               sharing ? 'Stop Sharing' : 'Start Sharing',
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: sharing ? AppTheme.accentRose : AppTheme.accentEmerald,
+              backgroundColor: sharing
+                  ? AppTheme.accentRose
+                  : AppTheme.accentEmerald,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               elevation: 4,
             ),
             onPressed: () {
@@ -355,26 +410,41 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
           child: Row(
             children: [
               if (!granted) ...[
-                const Icon(Icons.visibility, size: 18, color: AppTheme.accentEmerald),
+                const Icon(
+                  Icons.visibility,
+                  size: 18,
+                  color: AppTheme.accentEmerald,
+                ),
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Text(
                     'Viewing Screen',
-                    style: TextStyle(color: AppTheme.textPrimary, fontSize: 14, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      color: AppTheme.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.touch_app, size: 16),
-                  label: const Text('Request Control', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+                  label: const Text(
+                    'Request Control',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.accentPrimary,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     minimumSize: Size.zero,
                   ),
-                  onPressed: () => _flowCoordinatorKey.currentState?.requestControl(),
+                  onPressed: () =>
+                      _flowCoordinatorKey.currentState?.requestControl(),
                 ),
               ] else ...[
                 Expanded(
@@ -433,6 +503,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen> with Widg
     _remoteControlNotifier.dispose();
     _annotationModeNotifier.dispose();
     _screenShareNotifier.dispose();
+    _guideAudioStatusNotifier.dispose();
     super.dispose();
   }
 }

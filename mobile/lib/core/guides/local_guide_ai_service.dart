@@ -11,6 +11,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_edge_ai/flutter_edge_ai.dart';
 import 'package:flutter_edge_ai_litertlm/flutter_edge_ai_litertlm.dart';
+import 'package:flutter_edge_ai_speech/flutter_edge_ai_speech.dart';
 
 class LocalGuideAiService {
   static const String _modelRepository =
@@ -31,6 +32,7 @@ class LocalGuideAiService {
     try {
       await FlutterEdgeAi.initialize(
         inferenceEngines: const [LiteRtLmEngine()],
+        sttBackends: const [LiteRtSttBackend()],
       );
       _initialized = true;
     } catch (_) {
@@ -58,9 +60,10 @@ class LocalGuideAiService {
     await initialize();
     if (isModelInstalled) return;
     await FlutterEdgeAi.installModel(
-      modelType: ModelType.gemma4,
-      fileType: ModelFileType.litertlm,
-    ).fromHuggingFace(_modelRepository)
+          modelType: ModelType.gemma4,
+          fileType: ModelFileType.litertlm,
+        )
+        .fromHuggingFace(_modelRepository)
         .withProgress(onProgress)
         .withCancelToken(cancelToken)
         .install();
@@ -105,15 +108,14 @@ Return exactly two lines: TITLE: a short action-oriented title; ACTION: a short 
           ? '[No transcript or notes provided]'
           : transcript.trim().substring(
               0,
-              transcript.trim().length > 6000
-                  ? 6000
-                  : transcript.trim().length,
+              transcript.trim().length > 6000 ? 6000 : transcript.trim().length,
             );
       await chat.addQueryChunk(
         Message.withImage(
           imageBytes: imageBytes,
           isUser: true,
-          text: '''Draft step $stepNumber using this screenshot and the session notes below.
+          text:
+              '''Draft step $stepNumber using this screenshot and the session notes below.
 
 SESSION NOTES (may contain sensitive information; do not repeat secrets):
 $safeTranscript''',
@@ -125,7 +127,9 @@ $safeTranscript''',
       }
       final generated = output.toString().trim();
       if (generated.isEmpty || generated.length > 4000) {
-        throw StateError('The local model returned an empty or oversized step.');
+        throw StateError(
+          'The local model returned an empty or oversized step.',
+        );
       }
       return generated;
     } finally {

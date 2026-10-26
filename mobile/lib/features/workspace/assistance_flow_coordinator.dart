@@ -10,6 +10,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/guides/session_keyframe_manager.dart';
 import '../../core/guides/local_guide_store.dart';
+import '../../core/guides/local_guide_audio_capture.dart';
 import '../../core/network/api_client.dart';
 import '../../core/platform/accessibility_bridge.dart';
 import '../../core/platform/annotation_overlay_service.dart';
@@ -51,6 +53,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
   final ValueNotifier<bool>? annotationModeSink;
   final ValueNotifier<double>? contentAspectRatioNotifier;
   final ValueNotifier<bool>? screenSharingSink;
+  final ValueNotifier<GuideAudioCaptureStatus>? guideAudioStatusSink;
 
   const AssistanceFlowCoordinator({
     super.key,
@@ -67,6 +70,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
     this.annotationModeSink,
     this.contentAspectRatioNotifier,
     this.screenSharingSink,
+    this.guideAudioStatusSink,
   });
 
   @override
@@ -125,6 +129,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   int _totalAloneSeconds = 0;
   bool _sessionTerminationHandled = false;
   bool _guideReviewShown = false;
+  final LocalGuideAudioCapture _guideAudioCapture = LocalGuideAudioCapture();
+  bool _localGuideAudioConsent = false;
+  bool _peerGuideAudioConsent = false;
+  LocalGuideAudioRecording? _pendingGuideAudioRecording;
+  Timer? _guideAudioLimitTimer;
+  static const Duration _maxGuideAudioDuration = Duration(minutes: 20);
   static const int _maxAloneSeconds = 300; // 5 minutes max alone time
 
   bool get _annotationMode => widget.annotationModeSink?.value ?? false;
@@ -288,10 +298,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   bool get isMediaReady => _mediaReady;
   bool get isScreenShareStarted => _screenShareStarted;
   bool get remoteControlGranted => _remoteControlGranted;
+  bool get canOptIntoGuideAudio =>
+      Platform.isAndroid && _mediaReady && _engine.isDataChannelOpen;
 
   @override
   void initState() {
     super.initState();
+    unawaited(LocalGuideAudioCapture.clearStaleRecordings());
+    widget.guideAudioStatusSink?.value = GuideAudioCaptureStatus.off;
     widget.annotationModeSink?.addListener(_onAnnotationModeChanged);
     if (widget.isHelpee) {
       AnnotationOverlayService.initialize(
@@ -343,8 +357,180 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   }
 
   Future<void> toggleAudioMute(bool mute) async {
+    if (mute &&
+        (_localGuideAudioConsent ||
+            _peerGuideAudioConsent ||
+            _guideAudioCapture.isRecording)) {
+      _localGuideAudioConsent = false;
+      _peerGuideAudioConsent = false;
+      _sendGuideAudioConsent(false);
+      await _stopGuideAudioCapture(discard: true);
+      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+    }
     await _engine.toggleAudioMute(mute);
     _sendRealtimeOrP2P({'type': 'audio_mute_toggle', 'is_muted': mute});
+  }
+
+  /// Captures call audio only after both people opt in on their own device.
+  /// Recording is local, temporary, Android-only, and never enters signaling.
+  Future<void> setGuideAudioConsent(bool consented) async {
+    if (!Platform.isAndroid) return;
+    if (!_mediaReady) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Wait for the call audio connection before opting in.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (consented && _engine.isAudioMuted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unmute your microphone before opting in to guide audio capture.'),
+        ),
+      );
+      return;
+    }
+    if (!_engine.isDataChannelOpen) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Secure peer connection is not ready; no audio will be recorded.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (!consented) {
+      _localGuideAudioConsent = false;
+      _sendGuideAudioConsent(false);
+      await _stopGuideAudioCapture(discard: true);
+      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+      return;
+    }
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Include audio in a private guide?'),
+        content: const Text(
+          'AssistMe will temporarily record this call’s microphone and playback audio in this Android device’s private cache. Both people must opt in before capture starts. The recording is not sent to AssistMe servers or an AI service; live WebRTC audio still travels to the other participant and may pass through the configured TURN relay. The temporary recording is deleted after local transcription or when discarded. Capture stops after 20 minutes, and you can stop it sooner.',
+          style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Not now'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('I agree for this device'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+
+    _localGuideAudioConsent = true;
+    if (!_sendGuideAudioConsent(true)) {
+      _localGuideAudioConsent = false;
+      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+      return;
+    }
+    if (_peerGuideAudioConsent) {
+      await _startGuideAudioCaptureIfConsented();
+    } else {
+      _setGuideAudioStatus(GuideAudioCaptureStatus.waitingForPeer);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Waiting for the other person to opt in. No audio is being recorded yet.',
+          ),
+        ),
+      );
+    }
+  }
+
+  void _setGuideAudioStatus(GuideAudioCaptureStatus status) {
+    widget.guideAudioStatusSink?.value = status;
+  }
+
+  bool _sendGuideAudioConsent(bool consented) =>
+      _engine.sendData({'type': 'guide_audio_consent', 'consented': consented});
+
+  Future<void> _startGuideAudioCaptureIfConsented() async {
+    if (!_localGuideAudioConsent ||
+        !_peerGuideAudioConsent ||
+        _guideAudioCapture.isRecording ||
+        !mounted) {
+      return;
+    }
+    try {
+      await _guideAudioCapture.start();
+      _guideAudioLimitTimer?.cancel();
+      _guideAudioLimitTimer = Timer(_maxGuideAudioDuration, () async {
+        _localGuideAudioConsent = false;
+        _sendGuideAudioConsent(false);
+        await _stopGuideAudioCapture(discard: true);
+        _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Audio capture stopped at the 20 minute limit.'),
+            ),
+          );
+        }
+      });
+      _setGuideAudioStatus(GuideAudioCaptureStatus.recording);
+    } catch (_) {
+      _localGuideAudioConsent = false;
+      _sendGuideAudioConsent(false);
+      await _stopGuideAudioCapture(discard: true);
+      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not start private audio capture. The call continues without recording.',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopGuideAudioCapture({required bool discard}) async {
+    _guideAudioLimitTimer?.cancel();
+    _guideAudioLimitTimer = null;
+    try {
+      final recording = await _guideAudioCapture.stop();
+      if (recording == null) return;
+      if (discard) {
+        await recording.delete();
+      } else {
+        await _pendingGuideAudioRecording?.delete();
+        _pendingGuideAudioRecording = recording;
+      }
+    } catch (_) {
+      await _pendingGuideAudioRecording?.delete();
+      _pendingGuideAudioRecording = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Temporary audio could not be finalized and was discarded.',
+            ),
+          ),
+        );
+      }
+    }
   }
 
   Future<void> sendRemoteInput(Map<String, dynamic> event) async {
@@ -461,12 +647,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Future<void> _offerLocalGuideSave() async {
     if (_guideReviewShown || !mounted) return;
     _guideReviewShown = true;
+    _localGuideAudioConsent = false;
+    _peerGuideAudioConsent = false;
+    await _stopGuideAudioCapture(discard: false);
+    if (!mounted) return;
+    _setGuideAudioStatus(GuideAudioCaptureStatus.off);
     final now = DateTime.now();
     final input = await showDialog<LocalGuideSaveInput>(
       context: context,
       barrierDismissible: false,
       builder: (_) => LocalGuideSaveDialog(
         frames: _keyframeManager.keyframes,
+        audioRecording: _pendingGuideAudioRecording,
         suggestedTitle:
             'Help guide ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
       ),
@@ -692,6 +884,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         final type = data['type'] as String?;
         if (type != null) {
           _onEvent(RealtimeEvent(type, data));
+        }
+      };
+      _engine.onDataChannelState = (isOpen) {
+        if (!isOpen &&
+            (_localGuideAudioConsent ||
+                _peerGuideAudioConsent ||
+                _guideAudioCapture.isRecording)) {
+          // Consent travels only over this encrypted P2P channel. If it closes,
+          // stop recording because the other participant can no longer revoke.
+          _localGuideAudioConsent = false;
+          _peerGuideAudioConsent = false;
+          unawaited(_stopGuideAudioCapture(discard: true));
+          _setGuideAudioStatus(GuideAudioCaptureStatus.off);
         }
       };
       _engine.onRemoteStream = (stream) {
@@ -1094,6 +1299,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       case 'screen_share_start':
         // The matching offer is sent immediately before this event. Requesting
         // another offer here can collide with the first negotiation.
+        break;
+
+      case 'guide_audio_consent':
+        final consented = event.data['consented'] == true;
+        _peerGuideAudioConsent = consented;
+        if (!consented) {
+          // A participant withdrawing consent stops and deletes both local
+          // channels immediately. Fresh consent is required to resume.
+          _localGuideAudioConsent = false;
+          await _stopGuideAudioCapture(discard: true);
+          _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+        } else if (_localGuideAudioConsent) {
+          await _startGuideAudioCaptureIfConsented();
+        }
         break;
 
       // --- WebRTC signaling relay ---
@@ -1977,6 +2196,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _disconnectCountdownTimer?.cancel();
     _previewTimer?.cancel();
     _overlayTimer?.cancel();
+    _guideAudioLimitTimer?.cancel();
+    unawaited(_guideAudioCapture.dispose());
+    unawaited(_pendingGuideAudioRecording?.delete());
     _realtime?.disconnect();
     _engine.dispose();
     _keyframeManager.dispose();

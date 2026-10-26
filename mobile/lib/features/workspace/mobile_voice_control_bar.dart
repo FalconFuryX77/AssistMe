@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
+import '../../core/guides/local_guide_audio_capture.dart';
 import '../../core/network/api_client.dart';
 import '../../theme/app_theme.dart';
 
@@ -7,6 +9,9 @@ class MobileVoiceControlBar extends StatefulWidget {
   final ApiClient apiClient;
   final VoidCallback onLeaveSession;
   final Future<void> Function(bool muted)? onMuteChanged;
+  final ValueListenable<GuideAudioCaptureStatus>? guideAudioStatus;
+  final bool showGuideAudioControl;
+  final Future<void> Function(bool consented)? onGuideAudioConsentChanged;
 
   const MobileVoiceControlBar({
     super.key,
@@ -14,6 +19,9 @@ class MobileVoiceControlBar extends StatefulWidget {
     required this.apiClient,
     required this.onLeaveSession,
     this.onMuteChanged,
+    this.guideAudioStatus,
+    this.showGuideAudioControl = false,
+    this.onGuideAudioConsentChanged,
   });
 
   @override
@@ -68,6 +76,41 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
             tooltip: _isMuted ? 'Unmute' : 'Mute',
             onPressed: _toggleMute,
           ),
+          if (widget.showGuideAudioControl &&
+              widget.guideAudioStatus != null) ...[
+            const SizedBox(width: 8),
+            ValueListenableBuilder<GuideAudioCaptureStatus>(
+              valueListenable: widget.guideAudioStatus!,
+              builder: (context, status, _) {
+                final isRecording = status == GuideAudioCaptureStatus.recording;
+                final isWaiting =
+                    status == GuideAudioCaptureStatus.waitingForPeer;
+                return IconButton(
+                  icon: Icon(
+                    isRecording
+                        ? Icons.fiber_manual_record
+                        : isWaiting
+                        ? Icons.hourglass_top
+                        : Icons.mic_none,
+                    size: 26,
+                  ),
+                  color: isRecording
+                      ? AppTheme.accentRose
+                      : isWaiting
+                      ? AppTheme.accentAmber
+                      : AppTheme.textSecondary,
+                  tooltip: isRecording
+                      ? 'Stop local guide audio capture'
+                      : isWaiting
+                      ? 'Cancel audio consent request'
+                      : 'Opt in to local guide audio capture',
+                  onPressed: () => widget.onGuideAudioConsentChanged?.call(
+                    status == GuideAudioCaptureStatus.off,
+                  ),
+                );
+              },
+            ),
+          ],
           const SizedBox(width: 16),
           Container(width: 1, height: 28, color: AppTheme.borderGlass),
           const SizedBox(width: 16),
