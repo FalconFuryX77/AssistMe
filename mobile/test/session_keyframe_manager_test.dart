@@ -25,7 +25,8 @@ void main() {
       expect(manager.count, 7);
 
       nextFrame = distinctFrames.length - 1;
-      await manager.manualBookmark();
+      final duplicateResult = await manager.manualBookmark();
+      expect(duplicateResult, KeyframeCaptureResult.duplicate);
       expect(manager.count, 7);
 
       manager.dispose();

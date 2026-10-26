@@ -1763,12 +1763,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                 icon: const Icon(Icons.bookmark_add_outlined),
                 color: AppTheme.accentAmber,
                 onPressed: () async {
-                  await _keyframeManager.manualBookmark();
+                  final result = await _keyframeManager.manualBookmark();
                   if (mounted) {
+                    final message = switch (result) {
+                      KeyframeCaptureResult.saved =>
+                        'Step saved on this device.',
+                      KeyframeCaptureResult.duplicate =>
+                        'This screen already appears in the guide.',
+                      KeyframeCaptureResult.unavailable =>
+                        'Could not capture this screen.',
+                    };
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('📸 Step bookmarked for visual guide'),
-                        duration: Duration(seconds: 1),
+                      SnackBar(
+                        content: Text(message),
+                        duration: const Duration(seconds: 2),
                       ),
                     );
                   }

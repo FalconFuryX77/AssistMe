@@ -5,6 +5,8 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
+enum KeyframeCaptureResult { saved, duplicate, unavailable }
+
 class CapturedKeyframe {
   final String id;
   final DateTime timestamp;
@@ -66,21 +68,26 @@ class SessionKeyframeManager {
   }
 
   /// Explicit manual capture triggered when helper or helpee taps "Bookmark Step".
-  Future<void> manualBookmark({String? title, String? instruction}) async {
+  Future<KeyframeCaptureResult> manualBookmark({
+    String? title,
+    String? instruction,
+  }) async {
     _settleTimer?.cancel();
-    await _captureSettledFrame(
+    return _captureSettledFrame(
       title: title ?? 'Step ${_keyframes.length + 1}',
       instruction: instruction ?? 'Follow the step shown on screen.',
     );
   }
 
-  Future<void> _captureSettledFrame({
+  Future<KeyframeCaptureResult> _captureSettledFrame({
     required String title,
     required String instruction,
   }) async {
     try {
       final bytes = await captureFrameCallback();
-      if (bytes == null || bytes.isEmpty) return;
+      if (bytes == null || bytes.isEmpty) {
+        return KeyframeCaptureResult.unavailable;
+      }
 
       final fingerprint = await _differenceHash(bytes);
       if (fingerprint != null &&
@@ -95,9 +102,11 @@ class SessionKeyframeManager {
                     2 &&
                 _colorDistance(frame.colorSignature!, fingerprint.color) <= 12,
           )) {
-        return;
+        return KeyframeCaptureResult.duplicate;
       }
-      if (bytes.length > _maxRetainedBytes) return;
+      if (bytes.length > _maxRetainedBytes) {
+        return KeyframeCaptureResult.unavailable;
+      }
 
       while (_keyframes.isNotEmpty &&
           _retainedBytes + bytes.length > _maxRetainedBytes) {
@@ -117,8 +126,10 @@ class SessionKeyframeManager {
 
       _keyframes.add(kf);
       _retainedBytes += bytes.length;
+      return KeyframeCaptureResult.saved;
     } catch (e) {
       debugPrint('SessionKeyframeManager capture error: $e');
+      return KeyframeCaptureResult.unavailable;
     }
   }
 
