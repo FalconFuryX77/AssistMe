@@ -459,7 +459,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   }
 
   Future<void> _offerLocalGuideSave() async {
-    if (_guideReviewShown || !mounted || _keyframeManager.count == 0) return;
+    if (_guideReviewShown || !mounted) return;
     _guideReviewShown = true;
     final now = DateTime.now();
     final input = await showDialog<LocalGuideSaveInput>(
