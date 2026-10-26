@@ -39,6 +39,8 @@ class LocalGuideAudioRecording {
 }
 
 class LocalGuideAudioCapture {
+  static Future<void>? _staleCleanupOperation;
+
   MediaRecorder? _microphoneRecorder;
   MediaRecorder? _remoteAudioRecorder;
   String? _microphonePath;
@@ -108,7 +110,10 @@ class LocalGuideAudioCapture {
   }
 
   /// Removes only files created by this feature after an interrupted app run.
-  static Future<void> clearStaleRecordings() async {
+  static Future<void> clearStaleRecordings() =>
+      _staleCleanupOperation ??= _clearStaleRecordings();
+
+  static Future<void> _clearStaleRecordings() async {
     try {
       final cache = await getTemporaryDirectory();
       await for (final entity in cache.list(followLinks: false)) {
