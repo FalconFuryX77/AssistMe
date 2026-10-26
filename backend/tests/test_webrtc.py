@@ -65,13 +65,18 @@ async def test_webrtc_service_turn_config(monkeypatch) -> None:
     monkeypatch.setattr(svc_settings, "TURN_SERVER_CREDENTIAL", "testpass")
     # Ensure PUBLIC_TURN_URL is cleared so the legacy TURN_SERVER_URL path is used
     monkeypatch.setattr(svc_settings, "PUBLIC_TURN_URL", None)
+    monkeypatch.setattr(WebRTCService, "_fetch_metered", staticmethod(_empty_metered))
 
-    ice_config = WebRTCService.get_ice_servers()
+    ice_config = await WebRTCService.get_ice_servers()
     assert len(ice_config.ice_servers) == 2
     turn_entry = ice_config.ice_servers[1]
     assert turn_entry.urls == "turn:turn.example.com:3478"
     assert turn_entry.username == "testuser"
     assert turn_entry.credential == "testpass"
+
+
+async def _empty_metered() -> None:
+    return None
 
 
 def test_webrtc_sdp_offer_schema_validation() -> None:

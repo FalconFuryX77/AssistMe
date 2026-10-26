@@ -25,6 +25,10 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 DEPLOY_DIR = BACKEND_DIR.parent / "deploy"
 
 
+async def _empty_turn_credentials() -> None:
+    return None
+
+
 @pytest.fixture
 def app():
     """Import a fresh FastAPI app instance."""
@@ -131,15 +135,19 @@ class TestAllowedOriginsConfig:
 class TestICEServersPublicURLs:
     """ICE servers endpoint must return public (not Docker-internal) URLs."""
 
-    def test_ice_servers_use_public_turn_url(self):
+    @pytest.mark.asyncio
+    async def test_ice_servers_use_public_turn_url(self):
         """When PUBLIC_TURN_URL is set, it must appear in the ICE response."""
         import importlib
         import core.config
         import api.services.webrtc_service
 
-        public_turn = "turn:my-public-server.example.com:3478"
+        public_turns = [
+            "turn:my-public-server.example.com:3478?transport=udp",
+            "turns:my-public-server.example.com:443?transport=tcp",
+        ]
         env_patch = {
-            "PUBLIC_TURN_URL": public_turn,
+            "PUBLIC_TURN_URL": ",".join(public_turns),
             "PUBLIC_STUN_URLS": "stun:my-public-server.example.com:3478",
             "TURN_SERVER_USERNAME": "user",
             "TURN_SERVER_CREDENTIAL": "pass",
@@ -149,21 +157,27 @@ class TestICEServersPublicURLs:
                 importlib.reload(core.config)
                 importlib.reload(api.services.webrtc_service)
                 from api.services.webrtc_service import WebRTCService
-                response = WebRTCService.get_ice_servers()
+                with patch.object(
+                    WebRTCService,
+                    "_fetch_metered",
+                    staticmethod(_empty_turn_credentials),
+                ):
+                    response = await WebRTCService.get_ice_servers()
 
                 turn_urls = []
                 for server in response.ice_servers:
                     urls = server.urls if isinstance(server.urls, list) else [server.urls]
                     turn_urls.extend(urls)
-                assert public_turn in turn_urls, (
-                    f"Public TURN URL '{public_turn}' not found in ICE servers: {turn_urls}"
+                assert all(url in turn_urls for url in public_turns), (
+                    f"Expected TURN fallback URLs were not found in ICE servers: {turn_urls}"
                 )
         finally:
             # Restore defaults so subsequent tests are not polluted
             importlib.reload(core.config)
             importlib.reload(api.services.webrtc_service)
 
-    def test_ice_servers_no_docker_hostnames(self):
+    @pytest.mark.asyncio
+    async def test_ice_servers_no_docker_hostnames(self):
         """Docker-internal hostnames like 'coturn' must NOT appear in client responses."""
         import importlib
         import core.config
@@ -180,7 +194,12 @@ class TestICEServersPublicURLs:
                 importlib.reload(core.config)
                 importlib.reload(api.services.webrtc_service)
                 from api.services.webrtc_service import WebRTCService
-                response = WebRTCService.get_ice_servers()
+                with patch.object(
+                    WebRTCService,
+                    "_fetch_metered",
+                    staticmethod(_empty_turn_credentials),
+                ):
+                    response = await WebRTCService.get_ice_servers()
 
                 for server in response.ice_servers:
                     urls = server.urls if isinstance(server.urls, list) else [server.urls]

@@ -166,7 +166,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
       },
       ...?durationMs == null ? null : {'duration_ms': durationMs},
     };
-    // Instantly dispatch over WebRTC DataChannel (UDP, sub-15ms latency)
+    // Dispatch through the WebRTC data channel when the peer connection is up.
     widget.onRemoteInput?.call(payload);
   }
 

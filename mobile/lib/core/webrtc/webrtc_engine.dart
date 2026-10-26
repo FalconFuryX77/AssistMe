@@ -12,6 +12,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -34,6 +35,8 @@ class WebRTCEngine {
 
   RTCPeerConnection? _pc;
   RTCDataChannel? _dataChannel;
+  RTCDataChannel? _previewDataChannel;
+  Timer? _diagnosticsTimer;
   MediaStream? _micStream;
   MediaStream? _screenStream;
 
@@ -46,11 +49,16 @@ class WebRTCEngine {
   /// Peer connection state transitions for UI status display.
   void Function(WebRTCEngineState state)? onStateChanged;
 
-  /// Direct P2P data channel messages (annotations, gestures) for sub-15ms latency.
+  /// Direct P2P data channel messages (annotations and gestures).
   void Function(Map<String, dynamic> data)? onDataChannelMessage;
 
   /// P2P DataChannel state changes.
   void Function(bool isOpen)? onDataChannelState;
+
+  /// Periodic transport metrics for diagnosing network and relay behavior.
+  /// The payload omits IP addresses, candidate IDs and other identifying data.
+  void Function(Map<String, Object?> metrics)? onDiagnosticsUpdated;
+  void Function(String state)? onIceStateChanged;
 
   WebRTCEngineState get state => _state;
   bool get isScreenSharing => _isScreenSharing;
@@ -58,6 +66,8 @@ class WebRTCEngine {
   bool get isDataChannelOpen =>
       _dataChannel != null &&
       _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
+  bool get isPreviewDataChannelOpen => _previewDataChannel != null &&
+      _previewDataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
   RTCPeerConnection? get peerConnection => _pc;
   MediaStream? get micStream => _micStream;
 
@@ -126,17 +136,23 @@ class WebRTCEngine {
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _setState(WebRTCEngineState.connected);
+          _startDiagnostics();
           break;
         case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
           _setState(WebRTCEngineState.failed);
+          _stopDiagnostics();
           break;
         case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
         case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
           _setState(WebRTCEngineState.disconnected);
+          _stopDiagnostics();
           break;
         default:
           break;
       }
+    };
+    _pc!.onIceConnectionState = (state) {
+      onIceStateChanged?.call(state.toString());
     };
 
     // Reattach existing local tracks when a transient transport reconnect
@@ -170,7 +186,11 @@ class WebRTCEngine {
       try {
         await _dataChannel?.close();
       } catch (_) {}
+      try {
+        await _previewDataChannel?.close();
+      } catch (_) {}
       _dataChannel = null;
+      _previewDataChannel = null;
       await old?.close();
       await _createPeerConnection();
       _setState(WebRTCEngineState.connected);
@@ -305,8 +325,8 @@ class WebRTCEngine {
     }
   }
 
-  /// Low-latency real-time video sender tuning: maintain smooth 30fps cadence
-  /// with bounded bitrate to avoid jitter buffer bloat and queue lag during remote control.
+  /// Bounds the sender bitrate and lets WebRTC balance resolution and frame
+  /// rate under congestion instead of insisting on a fixed frame cadence.
   Future<void> _tuneVideoSender(MediaStreamTrack track) async {
     try {
       final senders = await _pc?.getSenders() ?? const <RTCRtpSender>[];
@@ -315,14 +335,12 @@ class WebRTCEngine {
       final encodings = parameters.encodings ?? [RTCRtpEncoding()];
       for (final encoding in encodings) {
         encoding.maxBitrate = 2500000;
-        encoding.minBitrate = 500000;
         encoding.maxFramerate = 30;
         encoding.scaleResolutionDownBy = 1.0;
         encoding.active = true;
       }
       parameters.encodings = encodings;
-      parameters.degradationPreference =
-          RTCDegradationPreference.MAINTAIN_FRAMERATE;
+      parameters.degradationPreference = RTCDegradationPreference.BALANCED;
       await sender.setParameters(parameters);
     } catch (_) {
       // Some Android WebRTC builds do not expose sender parameters. The
@@ -357,16 +375,39 @@ class WebRTCEngine {
   Future<void> createDataChannel([String label = 'assistme_channel']) async {
     if (_pc == null) return;
     try {
-      final init = RTCDataChannelInit()..ordered = true;
-      final channel = await _pc!.createDataChannel(label, init);
-      _setupDataChannel(channel);
+      if (_dataChannel == null) {
+        final reliable = await _pc!.createDataChannel(
+          label,
+          RTCDataChannelInit()..ordered = true,
+        );
+        _setupDataChannel(reliable);
+      }
+      if (_previewDataChannel == null) {
+        // Drawing previews are replaceable state; do not let retransmits block
+        // committed strokes or control messages on the reliable channel.
+        final preview = await _pc!.createDataChannel(
+          '${label}_preview',
+          RTCDataChannelInit()
+            ..ordered = false
+            // The native plugin omits maxRetransmits=0 from its serialized
+            // config; a short packet lifetime gives previews bounded retries.
+            ..maxRetransmitTime = 50,
+        );
+        _setupDataChannel(preview);
+      }
     } catch (_) {}
   }
 
   void _setupDataChannel(RTCDataChannel channel) {
-    _dataChannel = channel;
+    if (channel.label?.endsWith('_preview') == true) {
+      _previewDataChannel = channel;
+    } else {
+      _dataChannel = channel;
+    }
     channel.onDataChannelState = (state) {
-      onDataChannelState?.call(state == RTCDataChannelState.RTCDataChannelOpen);
+      if (identical(channel, _dataChannel)) {
+        onDataChannelState?.call(state == RTCDataChannelState.RTCDataChannelOpen);
+      }
     };
     channel.onMessage = (RTCDataChannelMessage msg) {
       if (msg.isBinary) return;
@@ -379,7 +420,7 @@ class WebRTCEngine {
     };
   }
 
-  /// Sends a JSON payload directly over P2P DataChannel (UDP, sub-15ms latency).
+  /// Sends a JSON payload directly over the open P2P data channel.
   /// Returns true if successfully queued on the open data channel.
   bool sendData(Map<String, dynamic> data) {
     if (_dataChannel != null &&
@@ -394,13 +435,100 @@ class WebRTCEngine {
     return false;
   }
 
+  /// Sends replaceable drawing previews without allowing a congested queue to
+  /// grow behind the user's current pen position.
+  bool sendPreviewData(Map<String, dynamic> data) {
+    final channel = _previewDataChannel;
+    if (channel == null || channel.state != RTCDataChannelState.RTCDataChannelOpen) {
+      return false;
+    }
+    try {
+      final bufferedAmount = channel.bufferedAmount;
+      if (bufferedAmount != null && bufferedAmount > 64 * 1024) return false;
+      channel.send(RTCDataChannelMessage(jsonEncode(data)));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  void _startDiagnostics() {
+    _diagnosticsTimer ??= Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _collectDiagnostics(),
+    );
+    _collectDiagnostics();
+  }
+
+  void _stopDiagnostics() {
+    _diagnosticsTimer?.cancel();
+    _diagnosticsTimer = null;
+  }
+
+  Future<void> _collectDiagnostics() async {
+    final peerConnection = _pc;
+    if (peerConnection == null) return;
+    try {
+      final reports = await peerConnection.getStats();
+      final reportsById = {for (final report in reports) report.id: report};
+      StatsReport? pair;
+      for (final report in reports) {
+        if (report.type == 'candidate-pair' &&
+            (report.values['selected'] == true ||
+                (report.values['nominated'] == true &&
+                    report.values['state'] == 'succeeded'))) {
+          pair = report;
+          break;
+        }
+      }
+      if (pair == null) return;
+
+      final local = reportsById[pair.values['localCandidateId']];
+      final remote = reportsById[pair.values['remoteCandidateId']];
+      final inbound = reports.where((report) => report.type == 'inbound-rtp');
+      final outbound = reports.where((report) => report.type == 'outbound-rtp');
+      final roundTripSeconds = pair.values['currentRoundTripTime'] as num?;
+      final jitterSeconds = inbound
+          .map((report) => report.values['jitter'] as num?)
+          .whereType<num>()
+          .fold<num>(0, (largest, value) => value > largest ? value : largest);
+      final lost = inbound
+          .map((report) => report.values['packetsLost'] as num?)
+          .whereType<num>()
+          .fold<num>(0, (sum, value) => sum + value);
+      final videoFps = inbound
+          .map((report) => report.values['framesPerSecond'] as num?)
+          .whereType<num>()
+          .fold<num>(0, (largest, value) => value > largest ? value : largest);
+
+      onDiagnosticsUpdated?.call({
+        'localCandidateType': local?.values['candidateType'],
+        'remoteCandidateType': remote?.values['candidateType'],
+        'protocol': local?.values['protocol'],
+        'roundTripTimeMs': roundTripSeconds == null
+            ? null
+            : (roundTripSeconds * 1000).round(),
+        'jitterMs': (jitterSeconds * 1000).round(),
+        'packetsLost': lost.round(),
+        'incomingVideoFps': videoFps.round(),
+        'outboundBytes': outbound
+            .map((report) => report.values['bytesSent'] as num?)
+            .whereType<num>()
+            .fold<num>(0, (sum, value) => sum + value)
+            .round(),
+      });
+    } catch (_) {
+      // Stats are optional; do not interrupt the media path on plugin gaps.
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Signaling primitives (plain maps so RealtimeService can relay them)
   // ---------------------------------------------------------------------------
 
   Future<Map<String, dynamic>> createOffer() async {
     // Automatically prepare data channel on offerer side
-    if (_dataChannel == null) {
+    if (_dataChannel == null || _previewDataChannel == null) {
       await createDataChannel();
     }
     final offer = await _pc!.createOffer({});
@@ -483,12 +611,17 @@ class WebRTCEngine {
   }
 
   Future<void> dispose() async {
+    _stopDiagnostics();
     try {
       await stopScreenCapture();
       try {
         await _dataChannel?.close();
       } catch (_) {}
+      try {
+        await _previewDataChannel?.close();
+      } catch (_) {}
       _dataChannel = null;
+      _previewDataChannel = null;
       if (_micStream != null) {
         for (final track in _micStream!.getTracks()) {
           await track.stop();

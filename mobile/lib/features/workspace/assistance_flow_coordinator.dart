@@ -11,6 +11,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -150,11 +151,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   }
 
   void _sendRealtimeOrP2P(Map<String, dynamic> payload) {
-    // Send over sub-15ms P2P WebRTC DataChannel first; fallback to WebSocket
+    // Reliable events (committed strokes, control and session state) use P2P
+    // first, then the WebSocket signaling path as a fallback.
     final sentP2P = _engine.sendData(payload);
     if (!sentP2P) {
       _realtime?.send(payload);
     }
+  }
+
+  void _sendPreviewRealtimeOrP2P(Map<String, dynamic> payload) {
+    if (_engine.sendPreviewData(payload)) return;
+    // If the unreliable channel is open but congested, drop this transient
+    // preview instead of queuing stale points behind the current pen position.
+    if (_engine.isPreviewDataChannelOpen) return;
+    _realtime?.send(payload);
   }
 
   void _sendDrawPreview(List<Offset> points) {
@@ -167,12 +177,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     setState(() => _draftStroke = draft);
     _pendingPreviewPoints = points;
     if (_previewTimer?.isActive == true) return;
-    _previewTimer = Timer(const Duration(milliseconds: 16), () {
+    _previewTimer = Timer(const Duration(milliseconds: 32), () {
       _previewTimer = null;
       final latest = _pendingPreviewPoints;
       _pendingPreviewPoints = null;
       if (latest == null || latest.isEmpty) return;
-      _sendRealtimeOrP2P({
+      _sendPreviewRealtimeOrP2P({
         'type': 'draw_preview',
         'points': latest
             .map((p) => {
@@ -420,21 +430,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
 
-    // Asynchronously dispatch captured keyframes to synthesize visual step guide
-    final keyframesPayload = _keyframeManager.toPayloadList();
-    if (keyframesPayload.isNotEmpty) {
-      unawaited(() async {
-        try {
-          await widget.apiClient.post(
-            '/sessions/${widget.sessionId}/guide/generate',
-            body: {
-              'title': widget.isHelpee ? 'Help from ${widget.peerName}' : 'Helping ${widget.peerName}',
-              'keyframes': keyframesPayload,
-            },
-          );
-        } catch (_) {}
-      }());
-    }
+    // Guide captures contain whatever is visible on the shared screen. Keep
+    // them on-device; cloud guide generation must never happen implicitly when
+    // the call ends. The local Gemma guide flow will be an explicit user action.
 
     if (!isLocalLeave) {
       await widget.onSessionEnded?.call();
@@ -554,12 +552,43 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           m.removeWhere((k, v) => v == null);
           return m;
         }).toList();
+        final hasRelay = iceServers.any((server) {
+          final urls = server['urls'];
+          return urls is String
+              ? urls.startsWith('turn:') || urls.startsWith('turns:')
+              : urls is List &&
+                    urls.any(
+                      (url) =>
+                          url is String &&
+                          (url.startsWith('turn:') || url.startsWith('turns:')),
+                    );
+        });
+        if (!hasRelay) {
+          debugPrint(
+            'ICE configuration has no TURN relay; calls may fail behind UDP-blocking firewalls.',
+          );
+        }
+      } else {
+        debugPrint(
+          'ICE configuration request returned ${resp.statusCode}; trying STUN-only.',
+        );
       }
-    } catch (_) {
-      // fall back to default STUN-only config
+    } catch (error) {
+      // STUN-only is useful on permissive networks, but cannot relay media
+      // through firewalls that block peer-to-peer UDP.
+      debugPrint('ICE configuration request failed; trying STUN-only: $error');
     }
 
     try {
+      _engine.onStateChanged = (state) {
+        if (kDebugMode) debugPrint('WebRTC peer state: ${state.name}');
+      };
+      _engine.onIceStateChanged = (state) {
+        if (kDebugMode) debugPrint('WebRTC ICE state: $state');
+      };
+      _engine.onDiagnosticsUpdated = (metrics) {
+        if (kDebugMode) debugPrint('WebRTC transport metrics: $metrics');
+      };
       _engine.onLocalCandidate = (candidate) {
         _realtime?.send({
           'type': 'signal_ice_candidate',

@@ -1,9 +1,7 @@
 """Session Guides API routes."""
 
-import uuid
 from typing import Any
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_current_user
@@ -17,14 +15,6 @@ from core.database import get_db
 from models.user import User
 
 router = APIRouter(tags=["guides"])
-
-
-class SessionGuideSynthesizePayload(BaseModel):
-    """Payload to trigger post-session guide synthesis."""
-
-    title: str | None = None
-    transcript_text: str | None = None
-    keyframes: list[dict[str, Any]] | None = None
 
 
 def _format_guide(guide) -> dict[str, Any]:
@@ -45,7 +35,9 @@ def _format_guide(guide) -> dict[str, Any]:
                 "step_number": s.step_number,
                 "title": s.title,
                 "instruction": s.instruction,
-                "image_url": s.image_url,
+                # Legacy guide rows may still hold screenshots from earlier
+                # releases. Never return those images through the cloud API.
+                "image_url": None,
                 "created_at": s.created_at,
             }
             for s in (guide.steps or [])
@@ -81,6 +73,11 @@ async def create_guide(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     """Manually create or save a step-by-step guide."""
+    if any(step.image_url for step in payload.steps):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Guide images must stay on-device and cannot be uploaded.",
+        )
     steps_data = [step.model_dump() for step in payload.steps]
     guide = await GuideService.create_guide(
         db=db,
@@ -94,23 +91,16 @@ async def create_guide(
     return _format_guide(guide)
 
 
-@router.post("/sessions/{session_id}/guide/generate", response_model=GuideResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/sessions/{session_id}/guide/generate", status_code=status.HTTP_410_GONE)
 async def synthesize_guide(
     session_id: str,
-    payload: SessionGuideSynthesizePayload,
     current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """Synthesize a structured guide after an assistance session."""
-    guide = await GuideService.synthesize_guide_from_session(
-        db=db,
-        session_id=session_id,
-        user_id=str(current_user.id),
-        transcript_text=payload.transcript_text,
-        keyframes=payload.keyframes,
-        custom_title=payload.title,
+) -> None:
+    """Reject legacy cloud synthesis so screenshots never leave the device."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Cloud guide synthesis is disabled. Use on-device guide generation.",
     )
-    return _format_guide(guide)
 
 
 @router.delete("/guides/{guide_id}", status_code=status.HTTP_204_NO_CONTENT)

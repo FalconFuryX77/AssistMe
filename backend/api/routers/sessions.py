@@ -63,7 +63,7 @@ async def get_session(session_id: str, current_user: User = Depends(get_current_
 @router.get("/{session_id}/ice-servers", response_model=ICEServersResponse, response_model_exclude_none=True)
 async def get_ice_servers(session_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> ICEServersResponse:
     await SessionService.get_session(session_id=session_id, user_id=current_user.id, db=db)
-    return WebRTCService.get_ice_servers()
+    return await WebRTCService.get_ice_servers()
 
 
 @router.post("/{session_id}/leave", response_model=SessionResponse)

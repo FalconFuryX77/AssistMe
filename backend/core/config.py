@@ -113,11 +113,4 @@ class Settings:
     PUBLIC_STUN_URLS: list[str] | None = (
         _csv_env("PUBLIC_STUN_URLS", []) if os.getenv("PUBLIC_STUN_URLS") else None
     )
-    # AI Guide Synthesis Provider (e.g., MiMo-V2.5, OpenRouter, or local)
-    AI_PROVIDER: str = os.getenv("AI_PROVIDER", "mimo").strip().lower()
-    AI_MODEL: str = os.getenv("AI_MODEL", "xiaomi/mimo-v2.5")
-    AI_API_KEY: str | None = os.getenv("AI_API_KEY", os.getenv("OPENROUTER_API_KEY"))
-    AI_BASE_URL: str = os.getenv("AI_BASE_URL", "https://openrouter.ai/api/v1")
-
-
 settings = Settings()

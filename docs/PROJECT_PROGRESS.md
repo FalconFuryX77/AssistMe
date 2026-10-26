@@ -2,9 +2,8 @@
 
 ## Current baseline
 
-- Working branch: `codex/restore-80e5e0a`
-- Source baseline: `80e5e0a4f7e83d63d83a4db56a1cecb186c23697`
-- The later `codex/codebase-cleanup-vision-alignment` branch was inspected for context only. It is not merged or cherry-picked.
+- Working branch: `main`
+- The GitHub default branch is `main`.
 - Product direction: device-first, two-person help between an older adult and a trusted helper. Email/password login, group collaboration, chat/files, and a web client are outside the current product path.
 
 ## Implemented product path
@@ -36,12 +35,15 @@
 
 ## Verification
 
-Passed locally on 2026-08-26 with Python 3.12:
+Latest focused checks passed locally:
 
 ```text
-python -m compileall -q backend       PASS
-pytest tests/test_vision_contract.py tests/test_device_first_e2e.py -q
-6 passed
+pytest tests/test_guides.py tests/test_webrtc.py tests/test_internet_connectivity.py -q
+33 passed
+flutter test --no-pub
+2 passed
+dart analyze [changed mobile files]
+No issues found
 ```
 
 The repository also contains an older broad test suite for the removed
@@ -49,17 +51,26 @@ email/password, web, chat/file, and multi-party roadmap. Running that suite
 produces failures because those tests expect routes intentionally absent from
 the device-first app. It is not the acceptance gate for this product path.
 
-Flutter/Dart was not installed on the development machine, so `flutter
-analyze` and `flutter test` still need to run in CI or on a Flutter-equipped
-machine. GitHub Actions now runs the focused backend tests, backend compile,
-Flutter dependency resolution, analysis, and Flutter tests.
+The installed SDK is Flutter 3.38.5 / Dart 3.10.4. GitHub Actions uses the
+current stable Flutter channel and runs backend checks, dependency resolution,
+analysis, and Flutter tests.
 
 ## Security follow-up
 
-- The inherited exact-base history tracked `backend/firebase-service-account.json`.
-- It has been removed from the working tree and added to ignore rules; FCM now requires an explicit runtime `FIREBASE_SERVICE_ACCOUNT` path.
-- Because the key remains in Git history, the Firebase service-account key must be revoked and replaced. Removing the file in a new commit does not rewrite old history.
+- Google identified the historical `backend/firebase-service-account.json` service-account credential associated with project `assistme-8332b`.
+- The file is absent from the current tree and all fetched Git branches/tags scanned locally. The commit in Google's alert is not present in the local object database after the prior history cleanup.
+- Confirm in Google Cloud that the reported service-account key is disabled/deleted; source cleanup cannot revoke a cloud credential or erase copies held by forks/caches.
+- `mobile/android/app/google-services.json` contains a Firebase client configuration key. It is delivered to the app by design; restrict its API usage and Android app identity in Google Cloud/Firebase. It is not the service-account private key identified in the alert.
 - Production deployment should use a strong `SECRET_KEY`, explicit allowed origins, HTTPS/WSS, Redis-backed rate-limit counters, and a mounted Firebase credential if FCM is enabled.
+
+## Current guide and network follow-up
+
+- Guide screenshots are captured in memory only. Repeated visual frames are deduplicated, memory is bounded by a byte budget, and screenshots are no longer uploaded automatically at call end.
+- Guide APIs reject new image uploads, hide legacy image URLs, and the new database migration clears previously stored guide screenshots when applied.
+- The legacy cloud MiMo/OpenRouter synthesis route is disabled and its backend settings/deployment variables are removed. The local Gemma 4 guide generator, local transcription, sensitive-text masking, and local guide persistence are not implemented yet.
+- Current Flutter LiteRT-LM packages require Flutter 3.44/Dart 3.12 and Android API 30. The installed local SDK is older, so integrate Gemma only after the app/toolchain minimums and target-device support are decided and CI can build it.
+- Annotation previews now use a separate unordered, short-lived data channel; committed strokes and control messages remain reliable. WebRTC can balance resolution and frame rate under congestion, and debug builds log selected relay type, RTT, jitter, loss, and receive FPS without IP addresses.
+- Metered credential retrieval is asynchronous and bounded. Static `PUBLIC_TURN_URL` accepts a comma-separated list, including a TURN/TLS TCP 443 relay for restrictive networks. The public endpoint still needs to be configured and tested from the actual college Wi-Fi; code changes alone cannot make an unreachable relay pass the firewall.
 
 ## Next validation step
 

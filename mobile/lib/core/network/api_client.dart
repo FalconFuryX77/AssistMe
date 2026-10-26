@@ -1,6 +1,7 @@
 /// Mobile API Client with Automatic JWT Bearer Token Injection & Token Refresh.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../security/secure_storage_service.dart';
@@ -243,7 +244,10 @@ class ApiClient {
   }
 
   Future<http.Response> getIceServers(String sessionId) {
-    return get('/sessions/$sessionId/ice-servers');
+    return get('/sessions/$sessionId/ice-servers').timeout(
+      const Duration(seconds: 5),
+      onTimeout: () => throw TimeoutException('ICE server request timed out'),
+    );
   }
 
   // ---------------------------------------------------------------------------

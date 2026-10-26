@@ -7,7 +7,7 @@
 | Local | Cloud |
 |---|---|
 | `DEFAULT_SERVER_URL=http://192.168.1.39:8000` | `https://api.yourdomain.com` |
-| `STUN=stun.l.google.com` + `TURN=turn:coturn:3478` (LAN) | `TURN=turn:coturn.yourdomain.com:3478` + `METERED` fallback |
+| `STUN=stun.l.google.com` + `TURN=turn:coturn:3478` (LAN) | Public TURN over UDP/TCP plus managed TURN/TLS fallback |
 | SQLite `assistme.db` | Managed Postgres + Redis |
 | `ALLOWED_ORIGINS=*` | `https://yourdomain.com` |
 | No TLS | `nginx` 443 with certs or Cloudflare Tunnel |
@@ -24,13 +24,21 @@ REDIS_URL=redis://:PASS@redis:6379/0
 ALLOWED_ORIGINS=https://yourdomain.com
 PUBLIC_API_BASE_URL=https://api.yourdomain.com
 PUBLIC_WS_BASE_URL=wss://api.yourdomain.com
-PUBLIC_TURN_URL=turn:coturn.yourdomain.com:3478
+PUBLIC_TURN_URL=turn:coturn.yourdomain.com:3478?transport=udp,turns:relay-provider.example:443?transport=tcp
 TURN_USERNAME=assistme_turn_user
 TURN_CREDENTIAL=<strong>
 EXTERNAL_IP=<your public IP or empty if behind NAT>
 METERED_API_KEY=<from metered.ca>  # fallback when users on different NATs
 METERED_DOMAIN=assistme.metered.live
 ```
+
+`PUBLIC_TURN_URL` accepts a comma-separated list. For restrictive campus and
+enterprise networks, provide a TURN/TLS endpoint on TCP 443 as one of the
+entries; opening only UDP/3478 is not sufficient when those networks block
+peer-to-peer UDP. The relay must be reachable from the public internet and its
+credentials must be valid. If Nginx already uses TCP 443 on the same public IP,
+use a managed TURN/TLS endpoint or a separate public IP for Coturn because both
+services cannot bind the same address and port.
 
 ## 3. Option A – VPS with Docker Compose ( simplest )
 

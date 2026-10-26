@@ -1,7 +1,6 @@
 """Tests for the Session Guide and Step-by-Step Visual Recall system."""
 
 import pytest
-import uuid
 from httpx import AsyncClient
 
 from tests.test_sessions import _register
@@ -23,13 +22,11 @@ async def test_create_and_list_guides(client: AsyncClient) -> None:
                 "step_number": 1,
                 "title": "Open Settings",
                 "instruction": "Tap on the Settings gear icon on your home screen.",
-                "image_url": "data:image/jpeg;base64,fakeimage1",
             },
             {
                 "step_number": 2,
                 "title": "Select Language",
                 "instruction": "Tap General Management, then tap Language.",
-                "image_url": "data:image/jpeg;base64,fakeimage2",
             },
         ],
     }
@@ -68,12 +65,32 @@ async def test_create_and_list_guides(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio(loop_scope="session")
-async def test_synthesize_guide_filtering(client: AsyncClient) -> None:
-    """Post-session guide synthesis filters duplicate screenshots and generates structured steps."""
+async def test_create_guide_rejects_uploaded_images(client: AsyncClient) -> None:
+    """Guide screenshots are private on-device data, not API payloads."""
+    user = await _register(client)
+    response = await client.post(
+        "/guides",
+        json={
+            "title": "Private guide",
+            "steps": [
+                {
+                    "step_number": 1,
+                    "instruction": "Tap Continue",
+                    "image_url": "data:image/jpeg;base64,private-screen-data",
+                }
+            ],
+        },
+        headers=user["headers"],
+    )
+    assert response.status_code == 422
+    assert "on-device" in response.json()["detail"]
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_legacy_cloud_guide_synthesis_is_disabled(client: AsyncClient) -> None:
+    """Legacy screenshot/transcript synthesis must never forward user data to a cloud model."""
     user = await _register(client)
     headers = user["headers"]
-    session_id = str(uuid.uuid4())
-
     # Create dummy session first
     sess_resp = await client.post("/sessions/", json={"title": "Test Session"}, headers=headers)
     assert sess_resp.status_code == 201
@@ -107,9 +124,5 @@ async def test_synthesize_guide_filtering(client: AsyncClient) -> None:
         json=synth_payload,
         headers=headers,
     )
-    assert resp.status_code == 201
-    guide = resp.json()
-    assert guide["title"] == "Wi-Fi Setup Guide"
-    # Duplicate frame was filtered out, leaving 2 distinct steps
-    assert guide["steps_count"] == 2
-    assert len(guide["steps"]) == 2
+    assert resp.status_code == 410
+    assert "on-device" in resp.json()["detail"]
