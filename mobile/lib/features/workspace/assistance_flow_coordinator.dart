@@ -112,6 +112,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   final List<Map<String, dynamic>> _pendingIceCandidates = [];
   bool _remoteDescriptionSet = false;
   bool _mediaRecovering = false;
+  bool _relayFallbackAttempted = false;
   DrawStroke? _draftStroke;
   Timer? _previewTimer;
   List<Offset>? _pendingPreviewPoints;
@@ -492,14 +493,17 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  Future<void> _recoverMedia({required bool sendOffer}) async {
+  Future<void> _recoverMedia({
+    required bool sendOffer,
+    bool forceRelayOnly = false,
+  }) async {
     if (!_mediaReady || _mediaRecovering) return;
     _mediaRecovering = true;
     _remoteDescriptionSet = false;
     _pendingIceCandidates.clear();
     remoteStreamNotifier.value = null;
     try {
-      await _engine.rebuildPeerConnection();
+      await _engine.rebuildPeerConnection(forceRelayOnly: forceRelayOnly);
       // Ensure mic is re-attached and respects previous mute state – VISION requires
       // reconnection restores full session (voice + video), not just video.
       if (!widget.isHelpee) {
@@ -513,7 +517,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           // Ensure mic track exists even after rebuild
           await _engine.startMicOnly();
         }
-        if (sendOffer && _screenShareStarted) {
+        if (sendOffer) {
           final offer = await _engine.createOffer();
           _realtime?.send({'type': 'signal_offer', 'sdp': offer});
         }
@@ -585,6 +589,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       };
       _engine.onIceStateChanged = (state) {
         if (kDebugMode) debugPrint('WebRTC ICE state: $state');
+        if (state.toLowerCase().contains('failed') &&
+            _engine.hasTurnServer &&
+            !_relayFallbackAttempted &&
+            mounted) {
+          _relayFallbackAttempted = true;
+          unawaited(_retryUsingRelay());
+        }
       };
       _engine.onDiagnosticsUpdated = (metrics) {
         if (kDebugMode) debugPrint('WebRTC transport metrics: $metrics');
@@ -647,6 +658,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _retryUsingRelay() async {
+    // A bounded fallback avoids repeatedly rebuilding a call when the TURN
+    // service itself is unavailable. The helpee remains the offerer.
+    await _recoverMedia(
+      sendOffer: widget.isHelpee,
+      forceRelayOnly: true,
+    );
+    if (!widget.isHelpee && mounted) {
+      _realtime?.send({'type': 'request_relay_offer'});
     }
   }
 
@@ -974,6 +997,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           } else if (_screenShareStarted && !_mediaRecovering) {
             _recoverMedia(sendOffer: true);
           }
+        }
+        break;
+
+      case 'request_relay_offer':
+        if (widget.isHelpee && !_relayFallbackAttempted) {
+          _relayFallbackAttempted = true;
+          await _recoverMedia(sendOffer: true, forceRelayOnly: true);
         }
         break;
 

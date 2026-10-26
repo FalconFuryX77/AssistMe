@@ -32,6 +32,7 @@ class WebRTCEngine {
   bool _isScreenSharing = false;
   bool _isAudioMuted = false;
   List<Map<String, dynamic>> _iceServers = const [];
+  bool _relayOnly = false;
 
   RTCPeerConnection? _pc;
   RTCDataChannel? _dataChannel;
@@ -63,6 +64,12 @@ class WebRTCEngine {
   WebRTCEngineState get state => _state;
   bool get isScreenSharing => _isScreenSharing;
   bool get isAudioMuted => _isAudioMuted;
+  bool get hasTurnServer => _iceServers.any((server) {
+    final urls = server['urls'];
+    bool isTurn(Object? url) =>
+        url is String && (url.startsWith('turn:') || url.startsWith('turns:'));
+    return urls is String ? isTurn(urls) : urls is List && urls.any(isTurn);
+  });
   bool get isDataChannelOpen =>
       _dataChannel != null &&
       _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
@@ -90,6 +97,7 @@ class WebRTCEngine {
     _pc = await createPeerConnection(
       {
         'iceServers': _iceServers,
+        'iceTransportPolicy': _relayOnly ? 'relay' : 'all',
         'sdpSemantics': 'unified-plan',
         'bundlePolicy': 'max-bundle',
         'rtcpMuxPolicy': 'require',
@@ -175,10 +183,11 @@ class WebRTCEngine {
   /// but a rejoined session often showed a blank viewport. Keep local tracks,
   /// replace only the peer connection, and let the coordinator negotiate a
   /// fresh offer/answer.
-  Future<void> rebuildPeerConnection() async {
+  Future<void> rebuildPeerConnection({bool forceRelayOnly = false}) async {
     if (_iceServers.isEmpty) {
       throw StateError('initialize() must be called before rebuilding');
     }
+    _relayOnly = forceRelayOnly || _relayOnly;
     _setState(WebRTCEngineState.initializing);
     final old = _pc;
     _pc = null;

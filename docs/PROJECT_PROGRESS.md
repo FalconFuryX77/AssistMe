@@ -71,6 +71,7 @@ analysis, and Flutter tests.
 - Current Flutter LiteRT-LM packages require Flutter 3.44/Dart 3.12 and Android API 30. The installed local SDK is older, so integrate Gemma only after the app/toolchain minimums and target-device support are decided and CI can build it.
 - Annotation previews now use a separate unordered, short-lived data channel; committed strokes and control messages remain reliable. WebRTC can balance resolution and frame rate under congestion, and debug builds log selected relay type, RTT, jitter, loss, and receive FPS without IP addresses.
 - Metered credential retrieval is asynchronous and bounded. Static `PUBLIC_TURN_URL` accepts a comma-separated list, including a TURN/TLS TCP 443 relay for restrictive networks. The public endpoint still needs to be configured and tested from the actual college Wi-Fi; code changes alone cannot make an unreachable relay pass the firewall.
+- If ICE negotiation fails while TURN is configured, the mobile clients now make one TURN-only retry and renegotiate; regular ICE remains the first choice for latency. This recovery still needs a two-device test on the actual campus network.
 
 ## Next validation step
 

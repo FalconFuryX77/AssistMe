@@ -40,6 +40,13 @@ credentials must be valid. If Nginx already uses TCP 443 on the same public IP,
 use a managed TURN/TLS endpoint or a separate public IP for Coturn because both
 services cannot bind the same address and port.
 
+The mobile client first tries normal ICE candidate selection to preserve the
+lowest-latency direct path. When ICE fails and TURN was included in the server
+configuration, both clients make one bounded retry that forces relay candidates
+and renegotiates. This does not make a missing, expired, or unreachable relay
+work: confirm the TURN/TLS 443 endpoint and credentials from the restricted
+network, then inspect the debug transport metrics for `localCandidateType: relay`.
+
 ## 3. Option A – VPS with Docker Compose ( simplest )
 
 1. Buy VPS (Hetzner DO Lightsail, 2 vCPU, 2GB), point `A api.yourdomain.com → VPS IP`, `turn.yourdomain.com → same IP`.

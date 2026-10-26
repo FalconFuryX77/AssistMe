@@ -244,7 +244,7 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
             # zeroization messages instead of forwarding them to a phone.
             allowed_types = {
                 "heartbeat", "leave", "signal_offer", "signal_answer",
-                "signal_ice_candidate", "request_offer", "screen_share_start", "screen_share_stop",
+                "signal_ice_candidate", "request_offer", "request_relay_offer", "screen_share_start", "screen_share_stop",
                 "screen_share_orientation", "screen_share_security_event",
                 "audio_call_start", "audio_call_stop", "audio_mute_toggle",
                 "audio_route_change", "audio_degradation_report",
@@ -318,6 +318,13 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
 
             elif msg_type == "request_offer":
                 await _broadcast(session_id, {"type": "request_offer", "sender_user_id": user.id}, exclude_user=user.id)
+
+            elif msg_type == "request_relay_offer":
+                await _broadcast(
+                    session_id,
+                    {"type": "request_relay_offer", "sender_user_id": user.id},
+                    exclude_user=user.id,
+                )
 
             elif msg_type in (
                 "screen_share_start",
