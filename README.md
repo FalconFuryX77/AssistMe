@@ -46,10 +46,13 @@ stable HTTPS URL. Flutter/Dart must be installed to run these checks.
 
 ## Security notes
 
-FCM credentials are runtime-only. Set `FIREBASE_SERVICE_ACCOUNT` to a mounted
-service-account JSON path when push notifications are enabled. A service key
-was present in the inherited repository history and must be revoked/rotated
-in Firebase; it is no longer tracked in the working tree.
+FCM credentials are runtime-only. For the Compose deployment, place a
+service-account JSON at the git-ignored `backend/firebase-service-account.json`
+path; Compose mounts it read-only at `/run/secrets/firebase-service-account.json`.
+Other deployments should mount the credential and set `FIREBASE_SERVICE_ACCOUNT`
+to that path. The Docker build excludes credential files. If the runtime file is
+absent, push notifications are skipped. Google disabled a service key after
+public exposure; rotate or delete it in Google Cloud.
 
 The current handoff and verification status is recorded in
 [`docs/PROJECT_PROGRESS.md`](docs/PROJECT_PROGRESS.md).

@@ -31,7 +31,7 @@ services:
       # Optional managed TURN provider for clients on unrelated networks.
       - METERED_API_KEY=${METERED_API_KEY:-}
       - METERED_DOMAIN=${METERED_DOMAIN:-assistme.metered.live}
-      - FIREBASE_SERVICE_ACCOUNT=${FIREBASE_SERVICE_ACCOUNT:-}
+      - FIREBASE_SERVICE_ACCOUNT=/run/secrets/firebase-service-account.json
       - ASSISTME_KEK_V1=${ASSISTME_KEK_V1:-}
       - ASSISTME_BIK_V1=${ASSISTME_BIK_V1:-}
     healthcheck:
@@ -42,7 +42,7 @@ services:
     # Keep the API private to the Compose network. Use docker-compose.local.yml
     # only for trusted-LAN manual testing; Nginx is the public ingress.
     volumes:
-      - ../backend/firebase-service-account.json:/app/firebase-service-account.json:ro
+      - ../backend/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro
     depends_on:
       db:
         condition: service_healthy

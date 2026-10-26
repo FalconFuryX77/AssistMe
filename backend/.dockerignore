@@ -1,0 +1,15 @@
+# Never copy credentials or environment files into an image layer.
+firebase-service-account*.json
+.env
+.env.*
+
+# Keep local repository metadata and runtime artifacts out of the build context.
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+*.db
+.pytest_cache
+.mypy_cache
+.ruff_cache

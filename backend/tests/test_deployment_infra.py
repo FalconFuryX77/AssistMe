@@ -25,6 +25,26 @@ def test_dockerfile_multi_stage_structure() -> None:
     assert "uvicorn" in content
 
 
+def test_runtime_service_account_is_excluded_from_image_build() -> None:
+    """Credential JSON must only enter the container through its runtime mount."""
+    dockerignore = (REPO_ROOT / "backend" / ".dockerignore").read_text(
+        encoding="utf-8"
+    )
+    compose = (REPO_ROOT / "deploy" / "docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+    notification_code = (
+        REPO_ROOT / "backend" / "api" / "routers" / "help_flow.py"
+    ).read_text(encoding="utf-8")
+
+    assert "firebase-service-account*.json" in dockerignore
+    assert "FIREBASE_SERVICE_ACCOUNT=/run/secrets/firebase-service-account.json" in compose
+    assert "../backend/firebase-service-account.json:/run/secrets/firebase-service-account.json:ro" in compose
+    assert 'os.getenv("FIREBASE_SERVICE_ACCOUNT")' in notification_code
+    assert 'os.path.isfile(creds_path)' in notification_code
+    assert '"backend/firebase-service-account.json"' not in notification_code
+
+
 def test_docker_compose_service_orchestration() -> None:
     """Verify docker-compose.yml defines backend, PostgreSQL, Coturn, and Nginx with healthchecks."""
     compose_path = REPO_ROOT / "deploy" / "docker-compose.yml"
