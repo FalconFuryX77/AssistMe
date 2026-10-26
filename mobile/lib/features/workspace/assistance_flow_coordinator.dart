@@ -477,15 +477,15 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final includedFrames = _keyframeManager.keyframes
           .where((frame) => input.includedFrameIds.contains(frame.id))
           .map((frame) {
-            final generatedInstruction =
-                input.generatedInstructions[frame.id]?.trim();
+            final generatedInstruction = input.generatedInstructions[frame.id]
+                ?.trim();
             return CapturedKeyframe(
               id: frame.id,
               timestamp: frame.timestamp,
-              imageBytes: frame.imageBytes,
+              imageBytes: input.redactedImages[frame.id] ?? frame.imageBytes,
               title: input.generatedTitles[frame.id] ?? frame.title,
-              instruction: generatedInstruction == null ||
-                      generatedInstruction.isEmpty
+              instruction:
+                  generatedInstruction == null || generatedInstruction.isEmpty
                   ? frame.instruction
                   : generatedInstruction,
               perceptualHash: frame.perceptualHash,
