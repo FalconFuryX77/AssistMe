@@ -103,13 +103,20 @@ promising automatic detection will catch every secret.
 
 ## Remaining implementation and acceptance work
 
-- Upgrade and pin Flutter to 3.44/Dart 3.12, set Android API 30/arm64 and iOS
-  15 minimums, then add the local Gemma model manager and explicit download flow.
-- Add on-device audio transcription and Gemma captions/instructions. The current
-  end-of-call field accepts only user-entered transcript/notes; it does not
-  capture or transcribe call audio.
-- Add local OCR redaction and per-step review/edit controls, then test it with synthetic
-  passwords, email addresses, phone numbers, and account IDs.
+- The model manager, explicit Gemma 4 E2B download, local screenshot step
+  generation, draft editing, and manual opaque redaction are implemented. Test
+  inference, memory, thermal load, battery, download resume/cancel, and output
+  quality on the actual capstone devices; model downloads are about 2.6 GB.
+- Automatic call-audio capture/transcription is not implemented. The current
+  end-of-call field accepts user-entered notes. Integrating STT is feasible with
+  a local LiteRT speech model, but reliable capture of both local and remote
+  WebRTC audio must be added for Android and iOS. Make recording opt-in with
+  clear consent, keep audio temporary/on-device, and run inference after the call
+  so it cannot add work to the live media path. Do not label typed notes as an
+  audio transcript.
+- Automatic OCR-based sensitive-data detection/redaction is not implemented;
+  redaction is manual. Test the review flow with synthetic passwords, email
+  addresses, phone numbers, and account IDs before relying on it for privacy.
 - Run a long call on the capstone device and measure memory, heat, battery,
   model latency, and output quality. The 2.6 GB bundle and memory use may make
   Gemma 4 E2B unsuitable on lower-memory phones.
@@ -117,14 +124,13 @@ promising automatic detection will catch every secret.
   code change alone cannot confirm that the relay endpoint is reachable.
 - Apply database migration `e5b7a2d91c40` in deployed environments to purge
   legacy guide image URLs from existing guide rows.
-- The repository scan found no remaining service-account JSON/private key in
-  current branch histories. The exposed Google key shown in the alert was a
-  service-account key in project `assistme-8332b`; Google said it was
-  restricting that credential. Verify in Cloud Console that it is disabled or
-  deleted.
-- GitHub still returns the old sensitive commit by its SHA. No current branch
-  contains it, but it is associated with closed PR 17. GitHub documents that
-  cached commit views and PR references require a Support purge after history
-  rewrite. Keep this repository private until that purge is confirmed. The
-  secret-scanning alerts endpoint is disabled for this repository, so it did
-  not provide an independent scan result.
+- The exposed service-account file is absent from the current `main` history.
+  Google reported that it would disable the key; verify in Cloud Console that
+  the key is disabled/deleted and the service account has no unnecessary IAM
+  roles.
+- GitHub still exposes the known old commit through closed PR refs #16, #17,
+  #18, and #19 and cached views. GitHub Support must purge those server-side
+  refs/views; keep the repository private until Support confirms. The private
+  personal repository cannot use GitHub's built-in secret-scanning alerts, so
+  CI now runs full-history Gitleaks (green on 2026-10-26). After a public
+  release, verify GitHub's public-repository secret scanning and push protection.
