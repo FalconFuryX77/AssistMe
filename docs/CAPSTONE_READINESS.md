@@ -95,9 +95,13 @@ promising automatic detection will catch every secret.
 - Apply database migration `e5b7a2d91c40` in deployed environments to purge
   legacy guide image URLs from existing guide rows.
 - The repository scan found no remaining service-account JSON/private key in
-  reachable Git history. The exposed Google key shown in the alert was a
+  current branch histories. The exposed Google key shown in the alert was a
   service-account key in project `assistme-8332b`; Google said it was
   restricting that credential. Verify in Cloud Console that it is disabled or
-  deleted before making the repository public. GitHub's secret-scanning alerts
-  endpoint was unavailable for this repository, so it did not provide a second
-  independent scan result.
+  deleted.
+- GitHub still returns the old sensitive commit by its SHA. No current branch
+  contains it, but it is associated with closed PR 17. GitHub documents that
+  cached commit views and PR references require a Support purge after history
+  rewrite. Keep this repository private until that purge is confirmed. The
+  secret-scanning alerts endpoint is disabled for this repository, so it did
+  not provide an independent scan result.
