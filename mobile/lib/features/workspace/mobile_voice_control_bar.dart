@@ -11,7 +11,8 @@ class MobileVoiceControlBar extends StatefulWidget {
   final Future<void> Function(bool muted)? onMuteChanged;
   final ValueListenable<GuideAudioCaptureStatus>? guideAudioStatus;
   final bool showGuideAudioControl;
-  final Future<void> Function(bool consented)? onGuideAudioConsentChanged;
+  final bool isGuideAudioHelper;
+  final Future<void> Function()? onGuideAudioControl;
 
   const MobileVoiceControlBar({
     super.key,
@@ -21,7 +22,8 @@ class MobileVoiceControlBar extends StatefulWidget {
     this.onMuteChanged,
     this.guideAudioStatus,
     this.showGuideAudioControl = false,
-    this.onGuideAudioConsentChanged,
+    this.isGuideAudioHelper = false,
+    this.onGuideAudioControl,
   });
 
   @override
@@ -83,31 +85,42 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
             ValueListenableBuilder<GuideAudioCaptureStatus>(
               valueListenable: widget.guideAudioStatus!,
               builder: (context, status, _) {
-                final isRecording = status == GuideAudioCaptureStatus.recording;
-                final isWaiting =
-                    status == GuideAudioCaptureStatus.waitingForPeer;
+                final recording = status == GuideAudioCaptureStatus.recording;
+                final awaiting = status == GuideAudioCaptureStatus.awaitingConsent;
+                final consented = status == GuideAudioCaptureStatus.consented;
+                final visible = widget.isGuideAudioHelper || consented || recording;
+                if (!visible) return const SizedBox.shrink();
+                final tooltip = widget.isGuideAudioHelper
+                    ? recording
+                        ? 'Stop guide audio on the other phone'
+                        : awaiting
+                        ? 'Waiting for permission on the other phone'
+                        : consented
+                        ? 'Start guide audio on the other phone'
+                        : 'Ask permission to record guide audio'
+                    : recording
+                    ? 'Revoke permission and stop guide audio'
+                    : 'Revoke guide-audio permission';
                 return IconButton(
                   icon: Icon(
-                    isRecording
+                    recording
                         ? Icons.fiber_manual_record
-                        : isWaiting
+                        : awaiting
                         ? Icons.hourglass_top
-                        : Icons.mic_none,
+                        : consented
+                        ? Icons.mic_none
+                        : Icons.mic_off,
                     size: 26,
                   ),
-                  color: isRecording
+                  color: recording
                       ? AppTheme.accentRose
-                      : isWaiting
+                      : awaiting
                       ? AppTheme.accentAmber
+                      : consented
+                      ? AppTheme.accentEmerald
                       : AppTheme.textSecondary,
-                  tooltip: isRecording
-                      ? 'Stop local guide audio capture'
-                      : isWaiting
-                      ? 'Cancel audio consent request'
-                      : 'Opt in to local guide audio capture',
-                  onPressed: () => widget.onGuideAudioConsentChanged?.call(
-                    status == GuideAudioCaptureStatus.off,
-                  ),
+                  tooltip: tooltip,
+                  onPressed: awaiting ? null : widget.onGuideAudioControl,
                 );
               },
             ),

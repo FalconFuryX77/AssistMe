@@ -178,7 +178,7 @@ class _ScreenshotRedactionEditorState
               'Drag over passwords, names, notifications, or other private details. Covered pixels are permanently removed from the copy used by the model and saved in your guide.',
               style: TextStyle(
                 color: AppTheme.textSecondary,
-                fontSize: 16,
+                fontSize: AppTypography.body,
                 height: 1.4,
               ),
               textAlign: TextAlign.center,

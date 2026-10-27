@@ -43,8 +43,8 @@ class IncomingHelpRequestPopup extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: AppTheme.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+                fontSize: AppTypography.bodyLarge,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 6),
@@ -52,7 +52,7 @@ class IncomingHelpRequestPopup extends StatelessWidget {
               'A trusted user needs your help. Accepting lets you draw on an '
               'overlay above their screen. More control requires their consent.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.caption),
             ),
             const SizedBox(height: 20),
             Row(

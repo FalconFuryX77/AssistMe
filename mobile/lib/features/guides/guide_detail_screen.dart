@@ -139,7 +139,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
           const SizedBox(height: 8),
           Text(
             message,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
           ),
         ],
       ),
@@ -177,7 +177,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
         elevation: 0,
         title: Text(
           widget.guide.title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          style: const TextStyle(fontSize: AppTypography.bodyLarge, fontWeight: FontWeight.w700),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -202,8 +202,8 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         'Step ${_currentStepIndex + 1} of $totalSteps',
                         style: const TextStyle(
                           color: AppTheme.accentEmerald,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
+                          fontSize: AppTypography.body,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       IconButton(
@@ -264,7 +264,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         _currentStep.instruction,
                         style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: 15,
+                          fontSize: AppTypography.bodySmall,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -285,8 +285,8 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         _currentStep.title,
                         style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
+                          fontSize: AppTypography.title,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -304,7 +304,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         _currentStep.instruction,
                         style: TextStyle(
                           color: AppTheme.textPrimary,
-                          fontSize: 17,
+                          fontSize: AppTypography.bodyLarge,
                           height: 1.45,
                           fontWeight: FontWeight.w600,
                         ),
@@ -328,7 +328,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                           'Session transcript',
                           style: TextStyle(
                             color: AppTheme.textPrimary,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                         children: [
@@ -371,7 +371,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         icon: const Icon(Icons.chevron_left),
                         label: const Text(
                           'Previous',
-                          style: TextStyle(fontSize: 16),
+                          style: TextStyle(fontSize: AppTypography.body),
                         ),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppTheme.textPrimary,
@@ -398,8 +398,8 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                             ? 'Finish Guide'
                             : 'Next Step',
                         style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
+                          fontSize: AppTypography.body,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       style: ElevatedButton.styleFrom(

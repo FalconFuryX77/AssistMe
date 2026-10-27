@@ -109,7 +109,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               Expanded(
                 child: Text(
                   'Your Recovery Code',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
+                  style: TextStyle(fontSize: AppTypography.title, fontWeight: FontWeight.w700),
                 ),
               ),
             ],
@@ -120,7 +120,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             children: [
               Text(
                 'Save this code in a safe place. If you get a new phone, this code restores your name and all your trusted helpers.',
-                style: TextStyle(color: ctx.textSecondary, fontSize: 15, height: 1.4),
+                style: TextStyle(color: ctx.textSecondary, fontSize: AppTypography.bodySmall, height: 1.4),
               ),
               const SizedBox(height: 20),
               Container(
@@ -134,9 +134,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   recoveryCode,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 28,
+                    fontSize: AppTypography.display,
                     letterSpacing: 4,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.accentEmerald,
                   ),
                 ),
@@ -153,7 +153,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   );
                 },
                 icon: const Icon(Icons.copy, size: 18),
-                label: const Text('Copy to clipboard', style: TextStyle(fontSize: 16)),
+                label: const Text('Copy to clipboard', style: TextStyle(fontSize: AppTypography.body)),
               ),
             ],
           ),
@@ -237,8 +237,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: context.textPrimary,
-                    fontSize: 30,
-                    fontWeight: FontWeight.w900,
+                    fontSize: AppTypography.display,
+                    fontWeight: FontWeight.w700,
                     letterSpacing: -0.5,
                   ),
                 ),
@@ -248,7 +248,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: context.textSecondary,
-                    fontSize: 17,
+                    fontSize: AppTypography.bodyLarge,
                     height: 1.4,
                   ),
                 ),
@@ -267,8 +267,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         'What should we call you?',
                         style: TextStyle(
                           color: context.textPrimary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
+                          fontSize: AppTypography.bodyLarge,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -278,8 +278,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         maxLength: 50,
                         style: TextStyle(
                           color: context.textPrimary,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
+                          fontSize: AppTypography.title,
+                          fontWeight: FontWeight.w700,
                         ),
                         decoration: const InputDecoration(
                           hintText: 'e.g. Grandma, Dad, Alex',
@@ -308,7 +308,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                   Expanded(
                                     child: Text(
                                       _error!,
-                                      style: const TextStyle(color: AppTheme.accentRose, fontSize: 14),
+                                      style: const TextStyle(color: AppTheme.accentRose, fontSize: AppTypography.bodySmall),
                                     ),
                                   ),
                                 ],
@@ -360,7 +360,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                               : const Icon(Icons.arrow_forward, size: 22),
                           label: Text(
                             _busy ? 'Setting up…' : 'Get Started',
-                            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+                            style: const TextStyle(fontSize: AppTypography.heading, fontWeight: FontWeight.w700),
                           ),
                         ),
                       ),
@@ -374,7 +374,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     icon: const Icon(Icons.restore, size: 18),
                     label: const Text(
                       'Reinstalling? Restore with recovery code',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: AppTypography.bodySmall, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
@@ -398,7 +398,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           children: [
             Icon(Icons.restore, color: AppTheme.accentSecondary, size: 26),
             SizedBox(width: 10),
-            Text('Enter Recovery Code', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            Text('Enter Recovery Code', style: TextStyle(fontSize: AppTypography.heading, fontWeight: FontWeight.w700)),
           ],
         ),
         content: Column(
@@ -407,7 +407,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           children: [
             Text(
               'Type the 12-character code you saved. This will restore your name and all your trusted contacts.',
-              style: TextStyle(color: ctx.textSecondary, fontSize: 15),
+              style: TextStyle(color: ctx.textSecondary, fontSize: AppTypography.bodySmall),
             ),
             const SizedBox(height: 18),
             TextField(
@@ -417,9 +417,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(
                 color: ctx.textPrimary,
-                fontSize: 22,
+                fontSize: AppTypography.title,
                 letterSpacing: 3,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w700,
               ),
               decoration: const InputDecoration(
                 hintText: 'ABCD-EFGH-1234',

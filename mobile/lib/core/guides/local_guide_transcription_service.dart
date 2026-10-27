@@ -45,10 +45,16 @@ class LocalGuideTranscriptionService {
         .install();
   }
 
-  /// Transcribes two temporary native recordings locally and deletes both
-  /// files whether decoding or inference succeeds or fails.
+  /// Keeps the one-recording API for callers that have a single segment.
   static Future<String> transcribeRecording(
     LocalGuideAudioRecording recording, {
+    required String language,
+  }) => transcribeRecordings([recording], language: language);
+
+  /// Transcribes helper-selected call segments locally, then deletes each
+  /// temporary pair of microphone/playback files on success or failure.
+  static Future<String> transcribeRecordings(
+    List<LocalGuideAudioRecording> recordings, {
     required String language,
   }) async {
     try {
@@ -60,20 +66,34 @@ class LocalGuideTranscriptionService {
         throw StateError('Install the on-device speech model first.');
       }
       final recognizer = await FlutterEdgeAi.getActiveStt(language: language);
-      final microphoneText = await _transcribeFile(
-        recording.microphonePath,
-        recognizer,
-      );
-      final remoteText = await _transcribeFile(
-        recording.remoteAudioPath,
-        recognizer,
-      );
-      return [
-        if (microphoneText.isNotEmpty) 'Microphone audio:\n$microphoneText',
-        if (remoteText.isNotEmpty) 'Call playback audio:\n$remoteText',
-      ].join('\n\n');
+      final sections = <String>[];
+      for (var index = 0; index < recordings.length; index++) {
+        final recording = recordings[index];
+        final microphoneText = await _transcribeFile(
+          recording.microphonePath,
+          recognizer,
+        );
+        final remoteText = await _transcribeFile(
+          recording.remoteAudioPath,
+          recognizer,
+        );
+        final heading = recordings.length > 1 ? 'Audio segment ${index + 1} · ' : '';
+        if (microphoneText.isNotEmpty) {
+          sections.add('${heading}Microphone audio:\n$microphoneText');
+        }
+        if (remoteText.isNotEmpty) {
+          sections.add('${heading}Call playback audio:\n$remoteText');
+        }
+      }
+      return sections.join('\n\n');
     } finally {
-      await recording.delete();
+      for (final recording in recordings) {
+        try {
+          await recording.delete();
+        } catch (_) {
+          // Best-effort cleanup is retried by stale-recording cleanup.
+        }
+      }
     }
   }
 

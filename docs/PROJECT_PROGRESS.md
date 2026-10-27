@@ -65,6 +65,13 @@ analysis, and Flutter tests.
 - The repository is currently private and GitHub Secret Scanning is disabled. The repository now runs a full-history Gitleaks scan on pushes and pull requests. That scan excludes only the Android `google-services.json` Firebase client configuration, which is public app configuration rather than a service-account credential; it cannot replace API-key restrictions, credential rotation, or the Support purge of historical pull-request refs. GitHub documents secret scanning as available automatically on public repos, so verify alerts and push protection after a public release.
 - Production deployment should use a strong `SECRET_KEY`, explicit allowed origins, HTTPS/WSS, Redis-backed rate-limit counters, and a mounted Firebase credential if FCM is enabled.
 
+## Current guide and notification handoff
+
+- The helper now captures the shared screen on their own view, redacts it before sending over the encrypted peer data channel, and names each selected step. The helpee's phone stores the received, reviewed frames and runs guide generation locally. A 32 MiB frame budget now refuses additional images instead of silently evicting earlier helper-selected steps.
+- Guide-audio capture is helper-started/stopped after explicit permission on the helpee's phone. The phone being helped records its microphone and call playback locally; the helpee can revoke at any time. Transcription remains on-device, and save/discard now fails closed if temporary-audio deletion cannot be confirmed.
+- Typography now uses a shared theme scale across the app, with a consistent semibold body/action style, bold title hierarchy, and more compact button padding while preserving minimum touch targets.
+- Firebase client wiring, Android package configuration, FCM token registration, backend send code, and the read-only Compose mount are present. The Android config matches `com.assistme`; the service-account path is ignored by Git. The Work `.env` references an Admin credential file that is absent, and the current backend credential path is an empty directory, so actual FCM delivery is not configured. Create a new least-privilege Firebase Admin credential directly in the ignored runtime location; do not reuse the publicly exposed key that Google disabled.
+
 ## Current guide and network follow-up
 
 - Guide screenshots are captured in memory and deduplicated. The call-end review can save screenshots and user-entered transcript notes into an AES-GCM-encrypted app-private library; screenshots require explicit review and manual opaque redaction before generation or saving. Transcript-only guides are supported. Android backups are disabled, and iOS guide storage is excluded from backup and file-protected.

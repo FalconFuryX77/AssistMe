@@ -75,6 +75,8 @@ class WebRTCEngine {
       _dataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
   bool get isPreviewDataChannelOpen => _previewDataChannel != null &&
       _previewDataChannel!.state == RTCDataChannelState.RTCDataChannelOpen;
+  int get dataChannelBufferedAmount =>
+      (_dataChannel?.bufferedAmount ?? 0).toInt();
   RTCPeerConnection? get peerConnection => _pc;
   MediaStream? get micStream => _micStream;
 

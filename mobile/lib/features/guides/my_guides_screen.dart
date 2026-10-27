@@ -140,7 +140,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
         backgroundColor: AppTheme.bgSecondary,
         title: const Text(
           'My Step Guides',
-          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+          style: TextStyle(fontSize: AppTypography.heading, fontWeight: FontWeight.w700),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
@@ -156,7 +156,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
               color: AppTheme.bgSecondary,
               child: TextField(
                 controller: _searchController,
-                style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTypography.body),
                 decoration: InputDecoration(
                   hintText: 'Search guides (e.g. language, wifi)...',
                   hintStyle: TextStyle(color: AppTheme.textMuted),
@@ -238,8 +238,8 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                         : 'No Matching Guides',
                                     style: TextStyle(
                                       color: AppTheme.textPrimary,
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w800,
+                                      fontSize: AppTypography.title,
+                                      fontWeight: FontWeight.w700,
                                     ),
                                   ),
                                   const SizedBox(height: 10),
@@ -250,7 +250,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                       color: AppTheme.textSecondary,
-                                      fontSize: 15,
+                                      fontSize: AppTypography.bodySmall,
                                       height: 1.4,
                                     ),
                                   ),
@@ -324,8 +324,8 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                           guide.title,
                                           style: TextStyle(
                                             color: AppTheme.textPrimary,
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.w800,
+                                            fontSize: AppTypography.bodyLarge,
+                                            fontWeight: FontWeight.w700,
                                           ),
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
@@ -336,7 +336,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                             guide.summary,
                                             style: TextStyle(
                                               color: AppTheme.textSecondary,
-                                              fontSize: 13,
+                                              fontSize: AppTypography.caption,
                                             ),
                                             maxLines: 2,
                                             overflow: TextOverflow.ellipsis,
@@ -360,8 +360,8 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                                 '${guide.stepsCount} steps',
                                                 style: const TextStyle(
                                                   color: AppTheme.accentEmerald,
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w700,
+                                                  fontSize: AppTypography.caption,
+                                                  fontWeight: FontWeight.w600,
                                                 ),
                                               ),
                                             ),
@@ -370,7 +370,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                               '${guide.createdAt.day}/${guide.createdAt.month}/${guide.createdAt.year}',
                                               style: TextStyle(
                                                 color: AppTheme.textMuted,
-                                                fontSize: 11,
+                                                fontSize: AppTypography.caption,
                                               ),
                                             ),
                                           ],

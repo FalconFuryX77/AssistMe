@@ -351,8 +351,8 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                               textAlign: TextAlign.center,
                               style: const TextStyle(
                                 color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
+                                fontSize: AppTypography.body,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                             const SizedBox(height: 8),
@@ -363,7 +363,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.white70,
-                                fontSize: 14,
+                                fontSize: AppTypography.bodySmall,
                                 height: 1.35,
                               ),
                             ),
@@ -377,7 +377,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                                 ),
                                 child: Text(
                                   'Session: ${widget.sessionId.substring(0, 6)}',
-                                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                  style: TextStyle(color: AppTheme.textMuted, fontSize: AppTypography.caption),
                                 ),
                               ),
                             ],
@@ -404,8 +404,8 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                             'Sensitive Content Protected',
                             style: TextStyle(
                               color: AppTheme.accentAmber,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              fontSize: AppTypography.body,
                             ),
                           ),
                           SizedBox(height: 6),
@@ -413,7 +413,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                             'The remote screen opened a FLAG_SECURE window',
                             style: TextStyle(
                               color: AppTheme.textSecondary,
-                              fontSize: 12,
+                              fontSize: AppTypography.caption,
                             ),
                           ),
                         ],

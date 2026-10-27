@@ -6,7 +6,7 @@ import 'dart:math';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
-enum KeyframeCaptureResult { saved, duplicate, unavailable }
+enum KeyframeCaptureResult { saved, duplicate, capacityReached, unavailable }
 
 class CapturedKeyframe {
   final String id;
@@ -16,6 +16,7 @@ class CapturedKeyframe {
   final String instruction;
   final int? perceptualHash;
   final int? colorSignature;
+  final bool privacyReviewed;
 
   CapturedKeyframe({
     required this.id,
@@ -25,6 +26,7 @@ class CapturedKeyframe {
     required this.instruction,
     required this.perceptualHash,
     required this.colorSignature,
+    this.privacyReviewed = false,
   });
 }
 
@@ -92,49 +94,66 @@ class SessionKeyframeManager {
       if (bytes == null || bytes.isEmpty) {
         return KeyframeCaptureResult.unavailable;
       }
+      return await _storeFrameBytes(
+        bytes,
+        title: title,
+        instruction: instruction,
+        privacyReviewed: false,
+      );
+    } catch (error) {
+      debugPrint('SessionKeyframeManager capture error: $error');
+      return KeyframeCaptureResult.unavailable;
+    }
+  }
 
-      final fingerprint = await _differenceHash(bytes);
-      if (fingerprint != null &&
-          _keyframes.any(
-            (frame) =>
-                frame.perceptualHash != null &&
-                frame.colorSignature != null &&
-                _hammingDistance(
-                      frame.perceptualHash!,
-                      fingerprint.difference,
-                    ) <=
-                    2 &&
-                _colorDistance(frame.colorSignature!, fingerprint.color) <= 12,
-          )) {
-        return KeyframeCaptureResult.duplicate;
-      }
-      if (bytes.length > _maxRetainedBytes) {
-        return KeyframeCaptureResult.unavailable;
-      }
+  Future<KeyframeCaptureResult> addPreReviewedFrame(
+    Uint8List bytes, {
+    required String title,
+  }) => _storeFrameBytes(
+    bytes,
+    title: title,
+    instruction: 'Selected and redacted by the helper.',
+    privacyReviewed: true,
+  );
 
-      while (_keyframes.isNotEmpty &&
-          _retainedBytes + bytes.length > _maxRetainedBytes) {
-        final removed = _keyframes.removeAt(0);
-        _retainedBytes -= removed.imageBytes.length;
-      }
-
-      final kf = CapturedKeyframe(
+  Future<KeyframeCaptureResult> _storeFrameBytes(
+    Uint8List bytes, {
+    required String title,
+    required String instruction,
+    required bool privacyReviewed,
+  }) async {
+    if (bytes.isEmpty || bytes.length > _maxRetainedBytes) {
+      return KeyframeCaptureResult.unavailable;
+    }
+    final fingerprint = await _differenceHash(bytes);
+    if (fingerprint != null &&
+        _keyframes.any(
+          (frame) =>
+              frame.perceptualHash != null &&
+              frame.colorSignature != null &&
+              _hammingDistance(frame.perceptualHash!, fingerprint.difference) <=
+                  2 &&
+              _colorDistance(frame.colorSignature!, fingerprint.color) <= 12,
+        )) {
+      return KeyframeCaptureResult.duplicate;
+    }
+    if (_retainedBytes + bytes.length > _maxRetainedBytes) {
+      return KeyframeCaptureResult.capacityReached;
+    }
+    _keyframes.add(
+      CapturedKeyframe(
         id: '${DateTime.now().microsecondsSinceEpoch}_${Random.secure().nextInt(1 << 32)}',
         timestamp: DateTime.now(),
-        imageBytes: bytes,
+        imageBytes: Uint8List.fromList(bytes),
         title: title,
         instruction: instruction,
         perceptualHash: fingerprint?.difference,
         colorSignature: fingerprint?.color,
-      );
-
-      _keyframes.add(kf);
-      _retainedBytes += bytes.length;
-      return KeyframeCaptureResult.saved;
-    } catch (e) {
-      debugPrint('SessionKeyframeManager capture error: $e');
-      return KeyframeCaptureResult.unavailable;
-    }
+        privacyReviewed: privacyReviewed,
+      ),
+    );
+    _retainedBytes += bytes.length;
+    return KeyframeCaptureResult.saved;
   }
 
   /// Computes a 64-bit difference hash from a 9x8 grayscale thumbnail. This

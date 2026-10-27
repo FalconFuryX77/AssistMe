@@ -11,7 +11,7 @@ import 'dart:io';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:path_provider/path_provider.dart';
 
-enum GuideAudioCaptureStatus { off, waitingForPeer, recording }
+enum GuideAudioCaptureStatus { off, awaitingConsent, consented, recording }
 
 class LocalGuideAudioRecording {
   final String microphonePath;

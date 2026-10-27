@@ -17,6 +17,7 @@ class PushNotificationService {
       FlutterLocalNotificationsPlugin();
 
   static final PushNotificationService instance = PushNotificationService._();
+  final Map<String, DateTime> _recentRingIds = {};
 
   PushNotificationService._();
 
@@ -38,6 +39,7 @@ class PushNotificationService {
       await showIncomingCall(
         title: notification?.title,
         body: notification?.body,
+        requestId: data['request_id'],
       );
     });
   }
@@ -45,7 +47,19 @@ class PushNotificationService {
   /// Show a heads-up notification for live device-channel rings too.  FCM is
   /// the closed-app path; the persistent WebSocket is the instant path while
   /// the app is open.  Both must produce the same user-visible notification.
-  Future<void> showIncomingCall({String? title, String? body}) async {
+  Future<void> showIncomingCall({
+    String? title,
+    String? body,
+    String? requestId,
+  }) async {
+    if (requestId != null && requestId.isNotEmpty) {
+      final now = DateTime.now();
+      _recentRingIds.removeWhere(
+        (_, seenAt) => now.difference(seenAt) > const Duration(minutes: 2),
+      );
+      if (_recentRingIds.containsKey(requestId)) return;
+      _recentRingIds[requestId] = now;
+    }
     await _local.show(
       DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
       title ?? 'AssistMe help request',

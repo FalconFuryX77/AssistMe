@@ -150,8 +150,8 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
             'Server Connection',
             style: TextStyle(
               color: AppTheme.textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
+              fontSize: AppTypography.heading,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ],
@@ -163,12 +163,12 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
           children: [
               Text(
               'Set the backend address used by this device.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _controller,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 15),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTypography.bodySmall),
               decoration: InputDecoration(
                 labelText: 'Server URL',
                 hintText: 'http://192.168.1.39:8000',
@@ -183,7 +183,7 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
             const SizedBox(height: 12),
               Text(
               'Quick Presets:',
-              style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(color: AppTheme.textMuted, fontSize: AppTypography.caption, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             Wrap(
@@ -191,7 +191,7 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
               runSpacing: 6,
               children: [
                 ActionChip(
-                  label: const Text('Wi-Fi (192.168.1.39)', style: TextStyle(fontSize: 12)),
+                  label: const Text('Wi-Fi (192.168.1.39)', style: TextStyle(fontSize: AppTypography.caption)),
                   onPressed: () {
                     setState(() {
                       _controller.text = 'http://192.168.1.39:8000';
@@ -200,7 +200,7 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
                   },
                 ),
                 ActionChip(
-                  label: const Text('USB (localhost)', style: TextStyle(fontSize: 12)),
+                  label: const Text('USB (localhost)', style: TextStyle(fontSize: AppTypography.caption)),
                   onPressed: () {
                     setState(() {
                       _controller.text = 'http://127.0.0.1:8000';
@@ -237,7 +237,7 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
                   _testResult!,
                   style: TextStyle(
                     color: _testSuccess ? AppTheme.accentEmerald : AppTheme.accentRose,
-                    fontSize: 13,
+                    fontSize: AppTypography.caption,
                     fontWeight: FontWeight.w600,
                   ),
                 ),

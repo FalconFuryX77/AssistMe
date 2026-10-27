@@ -110,7 +110,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (token == null || token.isEmpty) {
       final secret = await widget.secureStorage.getDeviceSecret();
       if (secret != null && secret.isNotEmpty) {
-        final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+        final fingerprint = await DeviceIdentity.getFingerprint(
+          widget.secureStorage,
+        );
         try {
           await widget.apiClient.deviceBootstrap(
             deviceFingerprint: fingerprint,
@@ -154,7 +156,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// A closed app must never lose a request: fetch pending rings on open.
   Future<void> _checkMissedCalls() async {
-    if (_incomingCall != null || _ringingRequestId != null || _incomingDialogOpen) return;
+    if (_incomingCall != null ||
+        _ringingRequestId != null ||
+        _incomingDialogOpen) {
+      return;
+    }
     try {
       final resp = await widget.apiClient.listPendingCalls();
       if (resp.statusCode != 200) return;
@@ -217,7 +223,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(_responseDetail(resp.body, fallback: 'Could not create setup code')),
+              content: Text(
+                _responseDetail(
+                  resp.body,
+                  fallback: 'Could not create setup code',
+                ),
+              ),
               backgroundColor: AppTheme.accentRose,
             ),
           );
@@ -226,7 +237,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection error: $e'), backgroundColor: AppTheme.accentRose),
+          SnackBar(
+            content: Text('Connection error: $e'),
+            backgroundColor: AppTheme.accentRose,
+          ),
         );
       }
     } finally {
@@ -243,12 +257,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (resp.statusCode != 200) return;
         final data = jsonDecode(resp.body);
         final pairings = List<Map<String, dynamic>>.from(data['pairings']);
-        final pairing = pairings.firstWhere((p) => p['pairing_id'] == _myPairingId, orElse: () => {});
+        final pairing = pairings.firstWhere(
+          (p) => p['pairing_id'] == _myPairingId,
+          orElse: () => {},
+        );
         if (pairing.isEmpty) return;
-        final friendlyName = pairing['friendly_name']?.toString() ?? 'This helper';
+        final friendlyName =
+            pairing['friendly_name']?.toString() ?? 'This helper';
         if (!mounted) return;
         _codePollTimer?.cancel();
-        
+
         final allow = await showDialog<bool>(
           context: context,
           barrierDismissible: false,
@@ -256,21 +274,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             backgroundColor: AppTheme.bgSecondary,
             title: Row(
               children: [
-                const Icon(Icons.shield, color: AppTheme.accentEmeraldAccessible, size: 28),
+                const Icon(
+                  Icons.shield,
+                  color: AppTheme.accentEmeraldAccessible,
+                  size: 28,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text('Allow $friendlyName?', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  child: Text(
+                    'Allow $friendlyName?',
+                    style: const TextStyle(
+                      fontSize: AppTypography.heading,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ],
             ),
             content: Text(
               '$friendlyName entered your code and wants to be added as your trusted helper.\n\nDo you allow this?',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 16, height: 1.4),
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTypography.body,
+                height: 1.4,
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('No, cancel', style: TextStyle(color: AppTheme.accentRose, fontSize: 16)),
+                child: const Text(
+                  'No, cancel',
+                  style: TextStyle(
+                    color: AppTheme.accentRose,
+                    fontSize: AppTypography.body,
+                  ),
+                ),
               ),
               ElevatedButton(
                 onPressed: () => Navigator.pop(ctx, true),
@@ -281,7 +319,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         );
 
         if (allow == true && mounted) {
-          final approveResp = await widget.apiClient.approvePairing(_myPairingId!);
+          final approveResp = await widget.apiClient.approvePairing(
+            _myPairingId!,
+          );
           if (approveResp.statusCode == 200) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -300,7 +340,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('Could not approve: ${_responseDetail(approveResp.body, fallback: 'Failed')}'),
+                  content: Text(
+                    'Could not approve: ${_responseDetail(approveResp.body, fallback: 'Failed')}',
+                  ),
                   backgroundColor: AppTheme.accentRose,
                 ),
               );
@@ -327,7 +369,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     setState(() => _submittingCode = true);
     try {
-      final fingerprint = await DeviceIdentity.getFingerprint(widget.secureStorage);
+      final fingerprint = await DeviceIdentity.getFingerprint(
+        widget.secureStorage,
+      );
       final deviceId = await DeviceIdentity.getDeviceId(widget.secureStorage);
       final resp = await widget.apiClient.claimSetupCode(
         setupCode: code,
@@ -344,14 +388,28 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             backgroundColor: AppTheme.bgSecondary,
             title: const Row(
               children: [
-                Icon(Icons.check_circle, color: AppTheme.accentEmeraldAccessible, size: 28),
+                Icon(
+                  Icons.check_circle,
+                  color: AppTheme.accentEmeraldAccessible,
+                  size: 28,
+                ),
                 SizedBox(width: 12),
-                Text('Request Sent!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                Text(
+                  'Request Sent!',
+                  style: TextStyle(
+                    fontSize: AppTypography.heading,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
               ],
             ),
             content: Text(
               'The person you want to help just needs to tap "Allow" on their phone screen. Once they tap Allow, they will appear in your list here.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 16, height: 1.4),
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTypography.body,
+                height: 1.4,
+              ),
             ),
             actions: [
               ElevatedButton(
@@ -366,7 +424,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Could not connect: ${_responseDetail(resp.body, fallback: 'Invalid code')}'),
+              content: Text(
+                'Could not connect: ${_responseDetail(resp.body, fallback: 'Invalid code')}',
+              ),
               backgroundColor: AppTheme.accentRose,
             ),
           );
@@ -375,7 +435,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection error: $e'), backgroundColor: AppTheme.accentRose),
+          SnackBar(
+            content: Text('Connection error: $e'),
+            backgroundColor: AppTheme.accentRose,
+          ),
         );
       }
     } finally {
@@ -384,7 +447,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _removeHelper(Map<String, dynamic> device) async {
-    final name = (device['helper_display_name'] as String?) ??
+    final name =
+        (device['helper_display_name'] as String?) ??
         (device['friendly_name'] as String?) ??
         'this helper';
     final confirmed = await showDialog<bool>(
@@ -394,12 +458,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: const Text('Remove Helper?'),
         content: Text(
           'Remove $name from your trusted helpers? They will no longer receive help calls from you.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTypography.body,
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRose),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accentRose,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Remove'),
           ),
@@ -425,12 +497,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: const Text('Remove from List?'),
         content: Text(
           'Remove $name from the list of people you help?',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTypography.body,
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accentRose),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accentRose,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Remove'),
           ),
@@ -474,6 +554,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           await PushNotificationService.instance.showIncomingCall(
             title: '${event.data['from_name'] ?? 'Someone'} needs your help',
             body: (event.data['message'] as String?) ?? 'Tap to respond',
+            requestId: event.data['request_id'] as String?,
           );
         } catch (_) {}
         if (!mounted) return;
@@ -554,7 +635,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_activeSession != null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You are already in a session. Please leave or reconnect.')),
+          const SnackBar(
+            content: Text(
+              'You are already in a session. Please leave or reconnect.',
+            ),
+          ),
         );
       }
       return;
@@ -572,7 +657,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     });
 
     try {
-      final targetId = (device['device_fingerprint'] as String?) ??
+      final targetId =
+          (device['device_fingerprint'] as String?) ??
           (device['helper_user_id'] as String?) ??
           (device['owner_user_id'] as String?) ??
           (device['device_id'] as String?);
@@ -592,9 +678,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } else {
         _clearOutgoing();
         if (mounted) {
-          final detail = _responseDetail(resp.body, fallback: 'Call could not be placed');
+          final detail = _responseDetail(
+            resp.body,
+            fallback: 'Call could not be placed',
+          );
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(detail), backgroundColor: AppTheme.accentRose),
+            SnackBar(
+              content: Text(detail),
+              backgroundColor: AppTheme.accentRose,
+            ),
           );
         }
       }
@@ -602,7 +694,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _clearOutgoing();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection error: $e'), backgroundColor: AppTheme.accentRose),
+          SnackBar(
+            content: Text('Connection error: $e'),
+            backgroundColor: AppTheme.accentRose,
+          ),
         );
       }
     }
@@ -656,7 +751,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _clearOutgoing();
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('$name can\'t help right now'), backgroundColor: AppTheme.accentAmber),
+              SnackBar(
+                content: Text('$name can\'t help right now'),
+                backgroundColor: AppTheme.accentAmber,
+              ),
             );
           }
         }
@@ -716,10 +814,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         backgroundColor: AppTheme.bgSecondary,
         title: Row(
           children: [
-            const Icon(Icons.phone_in_talk, color: AppTheme.accentEmeraldAccessible, size: 28),
+            const Icon(
+              Icons.phone_in_talk,
+              color: AppTheme.accentEmeraldAccessible,
+              size: 28,
+            ),
             const SizedBox(width: 12),
             Expanded(
-              child: Text('Call $name?', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              child: Text(
+                'Call $name?',
+                style: const TextStyle(
+                  fontSize: AppTypography.title,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
           ],
         ),
@@ -727,9 +835,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-              Text(
+            Text(
               'What do you need help with? (Optional)',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: AppTypography.bodySmall,
+              ),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -737,7 +848,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               maxLines: 2,
               maxLength: 200,
               autofocus: true,
-              style: TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: AppTypography.bodyLarge,
+              ),
               decoration: const InputDecoration(
                 hintText: 'e.g. My screen is stuck',
               ),
@@ -747,11 +861,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(fontSize: 16)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(fontSize: AppTypography.body),
+            ),
           ),
           ElevatedButton.icon(
             icon: const Icon(Icons.call, size: 20),
-            label: const Text('Call Now', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            label: const Text(
+              'Call Now',
+              style: TextStyle(
+                fontSize: AppTypography.bodyLarge,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
           ),
         ],
@@ -803,9 +926,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Connection error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Connection error: $e')));
       }
     }
     await _checkMissedCalls();
@@ -846,9 +969,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       title: const Center(
         child: Column(
           children: [
-            Icon(Icons.ring_volume, color: AppTheme.accentEmeraldAccessible, size: 48),
+            Icon(
+              Icons.ring_volume,
+              color: AppTheme.accentEmeraldAccessible,
+              size: 48,
+            ),
             SizedBox(height: 12),
-            Text('Incoming Help Request', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
+            Text(
+              'Incoming Help Request',
+              style: TextStyle(
+                fontSize: AppTypography.title,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ],
         ),
       ),
@@ -861,22 +994,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               color: AppTheme.bgPrimary,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.accentEmeraldAccessible.withValues(alpha: 0.4)),
+              border: Border.all(
+                color: AppTheme.accentEmeraldAccessible.withValues(alpha: 0.4),
+              ),
             ),
             child: Column(
               children: [
                 Text(
                   fromName,
                   style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
+                    fontSize: AppTypography.sectionTitle,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.accentEmeraldAccessible,
                   ),
                 ),
                 const SizedBox(height: 6),
-                  Text(
+                Text(
                   'needs your help on their phone',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTypography.bodySmall,
+                  ),
                 ),
                 if (message != null && message.isNotEmpty) ...[
                   const SizedBox(height: 12),
@@ -891,7 +1029,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: AppTheme.textPrimary,
-                        fontSize: 16,
+                        fontSize: AppTypography.body,
                         fontStyle: FontStyle.italic,
                       ),
                     ),
@@ -937,13 +1075,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
+    Theme.of(
+      context,
+    ); // Rebuild legacy color-token widgets when the app theme changes.
     return Scaffold(
       backgroundColor: context.bgPrimary,
       appBar: AppBar(
         title: Text(
           _myName.isEmpty ? 'AssistMe' : 'Hi, $_myName',
-          style: TextStyle(color: context.textPrimary, fontSize: 22, fontWeight: FontWeight.w800),
+          style: TextStyle(
+            color: context.textPrimary,
+            fontSize: AppTypography.title,
+            fontWeight: FontWeight.w700,
+          ),
         ),
         backgroundColor: context.bgPrimary,
         iconTheme: IconThemeData(color: context.textPrimary),
@@ -967,7 +1111,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           IconButton(
             tooltip: 'My Step Guides',
-            icon: const Icon(Icons.menu_book, color: AppTheme.accentEmeraldAccessible),
+            icon: const Icon(
+              Icons.menu_book,
+              color: AppTheme.accentEmeraldAccessible,
+            ),
             onPressed: () {
               Navigator.push(
                 context,
@@ -1043,7 +1190,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         decoration: BoxDecoration(
           color: selected ? activeColor.withValues(alpha: 0.18) : null,
           borderRadius: BorderRadius.circular(18),
-          border: selected ? Border.all(color: activeColor.withValues(alpha: 0.6), width: 1.5) : null,
+          border: selected
+              ? Border.all(
+                  color: activeColor.withValues(alpha: 0.6),
+                  width: 1.5,
+                )
+              : null,
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1057,8 +1209,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             Text(
               label,
               style: TextStyle(
-                fontSize: 18,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                fontSize: AppTypography.bodyLarge,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                 color: selected ? activeColor : AppTheme.textSecondary,
               ),
             ),
@@ -1088,13 +1240,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.person_add, color: AppTheme.accentEmeraldAccessible, size: 24),
+                      Icon(
+                        Icons.person_add,
+                        color: AppTheme.accentEmeraldAccessible,
+                        size: 24,
+                      ),
                       SizedBox(width: 10),
                       Text(
                         'Add a new helper',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                          fontSize: AppTypography.bodyLarge,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -1102,7 +1258,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 8),
                   Text(
                     'Want someone new to help you? Show them your 6-digit code.',
-                    style: TextStyle(color: context.textSecondary, fontSize: 14),
+                    style: TextStyle(
+                      color: context.textSecondary,
+                      fontSize: AppTypography.bodySmall,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   if (_myCode != null) ...[
@@ -1111,15 +1270,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       decoration: BoxDecoration(
                         color: context.bgPrimary,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.accentEmeraldAccessible, width: 2),
+                        border: Border.all(
+                          color: AppTheme.accentEmeraldAccessible,
+                          width: 2,
+                        ),
                       ),
                       child: Text(
                         _myCode!,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          fontSize: 40,
+                          fontSize: AppTypography.hero,
                           letterSpacing: 10,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w700,
                           color: AppTheme.accentEmeraldAccessible,
                         ),
                       ),
@@ -1128,7 +1290,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     const Text(
                       'Read this code to your helper. Waiting for them to enter it...',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppTheme.accentAmber, fontSize: 14, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        color: AppTheme.accentAmber,
+                        fontSize: AppTypography.bodySmall,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton(
@@ -1147,9 +1313,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: ElevatedButton.icon(
                         onPressed: _generatingCode ? null : _generateMyCode,
                         icon: _generatingCode
-                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
                             : const Icon(Icons.qr_code, size: 20),
-                        label: Text(_generatingCode ? 'Creating code...' : 'Show My 6-Digit Code'),
+                        label: Text(
+                          _generatingCode
+                              ? 'Creating code...'
+                              : 'Show My 6-Digit Code',
+                        ),
                       ),
                     ),
                   ],
@@ -1161,19 +1338,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'Your Trusted Helpers',
               style: TextStyle(
                 color: context.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+                fontSize: AppTypography.bodyLarge,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 12),
             if (_myHelpers.isEmpty)
               _emptyState(
                 icon: Icons.people_outline,
-                text: 'No helpers added yet. Tap "Show My 6-Digit Code" above and have your helper enter it on their phone.',
+                text:
+                    'No helpers added yet. Tap "Show My 6-Digit Code" above and have your helper enter it on their phone.',
               )
             else ...[
               ..._myHelpers.map((d) {
-                final name = (d['helper_display_name'] as String?) ??
+                final name =
+                    (d['helper_display_name'] as String?) ??
                     (d['friendly_name'] as String?) ??
                     'Helper';
                 final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
@@ -1194,8 +1373,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           child: Text(
                             initial,
                             style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.w900,
+                              fontSize: AppTypography.sectionTitle,
+                              fontWeight: FontWeight.w700,
                               color: Colors.white,
                             ),
                           ),
@@ -1208,15 +1387,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               Text(
                                 name,
                                 style: TextStyle(
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
+                                  fontSize: AppTypography.heading,
+                                  fontWeight: FontWeight.w700,
                                   color: context.textPrimary,
                                 ),
                               ),
                               const SizedBox(height: 4),
                               Text(
                                 'Tap Call to ask for help',
-                                style: TextStyle(fontSize: 14, color: context.textSecondary),
+                                style: TextStyle(
+                                  fontSize: AppTypography.bodySmall,
+                                  color: context.textSecondary,
+                                ),
                               ),
                             ],
                           ),
@@ -1226,14 +1408,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           label: const Text('Call'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.accentEmeraldAccessible,
-                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 12,
+                            ),
                             minimumSize: const Size(80, 48),
                           ),
                           onPressed: _isBusy ? null : () => _ringHelper(d),
                         ),
                         const SizedBox(width: 4),
                         IconButton(
-                          icon: Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 22),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: AppTheme.textMuted,
+                            size: 22,
+                          ),
                           tooltip: 'Remove helper',
                           onPressed: () => _removeHelper(d),
                         ),
@@ -1268,13 +1457,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.add_link, color: AppTheme.accentPrimary, size: 24),
+                      Icon(
+                        Icons.add_link,
+                        color: AppTheme.accentPrimary,
+                        size: 24,
+                      ),
                       SizedBox(width: 10),
                       Text(
                         'Connect to someone you help',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                          fontSize: AppTypography.bodyLarge,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ],
@@ -1282,7 +1475,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(height: 8),
                   Text(
                     'Ask them for their 6-digit code shown on their "I need help" screen.',
-                    style: TextStyle(color: context.textSecondary, fontSize: 14),
+                    style: TextStyle(
+                      color: context.textSecondary,
+                      fontSize: AppTypography.bodySmall,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -1294,8 +1490,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             letterSpacing: 6,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800,
+                            fontSize: AppTypography.title,
+                            fontWeight: FontWeight.w700,
                             color: context.textPrimary,
                           ),
                           decoration: const InputDecoration(
@@ -1314,7 +1510,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           ),
                           onPressed: _submittingCode ? null : _submitCode,
                           child: _submittingCode
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: Colors.white,
+                                  ),
+                                )
                               : const Text('Connect'),
                         ),
                       ),
@@ -1328,23 +1531,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               'People You Help',
               style: TextStyle(
                 color: context.textPrimary,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
+                fontSize: AppTypography.bodyLarge,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 12),
             if (_iHelp.isEmpty)
               _emptyState(
                 icon: Icons.volunteer_activism,
-                text: 'No one added yet. Enter their 6-digit code above to connect and start helping them.',
+                text:
+                    'No one added yet. Enter their 6-digit code above to connect and start helping them.',
               )
             else ...[
               ..._iHelp.map((e) {
-                final contactId = e['owner_device_fingerprint'] ?? e['owner_user_id'] ?? e['id'];
+                final contactId =
+                    e['owner_device_fingerprint'] ??
+                    e['owner_user_id'] ??
+                    e['id'];
                 final name = (e['owner_display_name'] as String?) ?? 'Someone';
                 final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
-                final isActiveForThisPerson = _activeSession != null &&
-                    ((_activeSession!['peer_id'] != null && _activeSession!['peer_id'] == contactId) ||
+                final isActiveForThisPerson =
+                    _activeSession != null &&
+                    ((_activeSession!['peer_id'] != null &&
+                            _activeSession!['peer_id'] == contactId) ||
                         _activeSession!['peer_name'] == name);
 
                 return Container(
@@ -1353,25 +1562,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     color: context.bgSecondary,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isActiveForThisPerson ? AppTheme.accentRose : context.borderGlass,
+                      color: isActiveForThisPerson
+                          ? AppTheme.accentRose
+                          : context.borderGlass,
                       width: isActiveForThisPerson ? 1.5 : 1,
                     ),
                   ),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(20),
-                    onTap: isActiveForThisPerson ? _reconnectActiveSession : null,
+                    onTap: isActiveForThisPerson
+                        ? _reconnectActiveSession
+                        : null,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
                           CircleAvatar(
                             radius: 26,
-                            backgroundColor: isActiveForThisPerson ? AppTheme.accentRose : AppTheme.accentPrimary,
+                            backgroundColor: isActiveForThisPerson
+                                ? AppTheme.accentRose
+                                : AppTheme.accentPrimary,
                             child: Text(
                               initial,
                               style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
+                                fontSize: AppTypography.title,
+                                fontWeight: FontWeight.w700,
                                 color: Colors.white,
                               ),
                             ),
@@ -1387,8 +1602,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       child: Text(
                                         name,
                                         style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w800,
+                                          fontSize: AppTypography.bodyLarge,
+                                          fontWeight: FontWeight.w700,
                                           color: context.textPrimary,
                                         ),
                                         overflow: TextOverflow.ellipsis,
@@ -1397,23 +1612,37 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     if (isActiveForThisPerson) ...[
                                       const SizedBox(width: 8),
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 3,
+                                        ),
                                         decoration: BoxDecoration(
-                                          color: AppTheme.accentRose.withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: AppTheme.accentRose.withValues(alpha: 0.6)),
+                                          color: AppTheme.accentRose.withValues(
+                                            alpha: 0.15,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            8,
+                                          ),
+                                          border: Border.all(
+                                            color: AppTheme.accentRose
+                                                .withValues(alpha: 0.6),
+                                          ),
                                         ),
                                         child: const Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(Icons.fiber_manual_record, color: AppTheme.accentRose, size: 10),
+                                            Icon(
+                                              Icons.fiber_manual_record,
+                                              color: AppTheme.accentRose,
+                                              size: 10,
+                                            ),
                                             SizedBox(width: 4),
                                             Text(
                                               'In Session',
                                               style: TextStyle(
                                                 color: AppTheme.accentRose,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w700,
+                                                fontSize: AppTypography.caption,
+                                                fontWeight: FontWeight.w600,
                                               ),
                                             ),
                                           ],
@@ -1428,9 +1657,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       ? 'Awaiting your assistance. Tap Join to reconnect.'
                                       : 'They can ring your phone for help anytime',
                                   style: TextStyle(
-                                    fontSize: 13,
-                                    color: isActiveForThisPerson ? AppTheme.accentEmeraldAccessible : context.textSecondary,
-                                    fontWeight: isActiveForThisPerson ? FontWeight.w600 : FontWeight.normal,
+                                    fontSize: AppTypography.caption,
+                                    color: isActiveForThisPerson
+                                        ? AppTheme.accentEmeraldAccessible
+                                        : context.textSecondary,
+                                    fontWeight: isActiveForThisPerson
+                                        ? FontWeight.w600
+                                        : FontWeight.normal,
                                   ),
                                 ),
                               ],
@@ -1443,21 +1676,35 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   ? const SizedBox(
                                       width: 16,
                                       height: 16,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
                                     )
                                   : const Icon(Icons.phone_in_talk, size: 18),
                               label: const Text('Join'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.accentEmeraldAccessible,
+                                backgroundColor:
+                                    AppTheme.accentEmeraldAccessible,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 10,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
                               ),
-                              onPressed: (_isReconnecting || _isOpeningSession) ? null : _reconnectActiveSession,
+                              onPressed: (_isReconnecting || _isOpeningSession)
+                                  ? null
+                                  : _reconnectActiveSession,
                             ),
                           ] else
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: AppTheme.accentRose),
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: AppTheme.accentRose,
+                              ),
                               tooltip: 'Remove',
                               onPressed: () => _removeHelping(e),
                             ),
@@ -1482,14 +1729,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 64, color: AppTheme.textMuted.withValues(alpha: 0.6)),
+              Icon(
+                icon,
+                size: 64,
+                color: AppTheme.textMuted.withValues(alpha: 0.6),
+              ),
               const SizedBox(height: 18),
               Text(
                 text,
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: context.textSecondary,
-                  fontSize: 16,
+                  fontSize: AppTypography.body,
                   height: 1.5,
                 ),
               ),
@@ -1505,7 +1756,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     try {
       final parts = token.split('.');
       if (parts.length < 2) return null;
-      final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+      final payload = utf8.decode(
+        base64Url.decode(base64Url.normalize(parts[1])),
+      );
       final data = jsonDecode(payload);
       return data['sub']?.toString();
     } catch (_) {
@@ -1545,16 +1798,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               }
               if (isHelpee) {
                 for (final h in _myHelpers) {
-                  final hid = h['helper_user_id'] ?? h['helper_device_fingerprint'] ?? h['id'];
+                  final hid =
+                      h['helper_user_id'] ??
+                      h['helper_device_fingerprint'] ??
+                      h['id'];
                   if (hid == peerId) {
-                    peerName = (h['helper_display_name'] as String?) ?? (h['friendly_name'] as String?);
+                    peerName =
+                        (h['helper_display_name'] as String?) ??
+                        (h['friendly_name'] as String?);
                     break;
                   }
                 }
                 peerName ??= 'Helper';
               } else {
                 for (final h in _iHelp) {
-                  final hid = h['owner_device_fingerprint'] ?? h['owner_user_id'] ?? h['id'];
+                  final hid =
+                      h['owner_device_fingerprint'] ??
+                      h['owner_user_id'] ??
+                      h['id'];
                   if (hid == peerId) {
                     peerName = h['owner_display_name'] as String?;
                     break;
@@ -1687,7 +1948,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   width: 90,
                   height: 90,
                   decoration: BoxDecoration(
-                    color: AppTheme.accentEmeraldAccessible.withValues(alpha: 0.15),
+                    color: AppTheme.accentEmeraldAccessible.withValues(
+                      alpha: 0.15,
+                    ),
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
@@ -1707,15 +1970,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w900,
+                    fontSize: AppTypography.display,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 12),
-                  Text(
+                Text(
                   'Their phone is ringing. Please wait for them to answer.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: AppTypography.body,
+                  ),
                 ),
                 const SizedBox(height: 48),
                 SizedBox(
@@ -1725,9 +1991,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     onPressed: _cancelRing,
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppTheme.accentRose,
-                      side: const BorderSide(color: AppTheme.accentRose, width: 2),
+                      side: const BorderSide(
+                        color: AppTheme.accentRose,
+                        width: 2,
+                      ),
                     ),
-                    child: const Text('Cancel Call', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                    child: const Text(
+                      'Cancel Call',
+                      style: TextStyle(
+                        fontSize: AppTypography.bodyLarge,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -1754,7 +2029,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               color: AppTheme.bgSecondary,
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: AppTheme.accentEmeraldAccessible, width: 2),
+              border: Border.all(
+                color: AppTheme.accentEmeraldAccessible,
+                width: 2,
+              ),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1771,8 +2049,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
+                    fontSize: AppTypography.sectionTitle,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 if (message != null && message.isNotEmpty) ...[
@@ -1782,7 +2060,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppTheme.textSecondary,
-                      fontSize: 16,
+                      fontSize: AppTypography.body,
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -1793,7 +2071,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   child: ElevatedButton.icon(
                     onPressed: () => _respondIncoming(accept: true),
                     icon: const Icon(Icons.call, size: 24),
-                    label: const Text('Accept & Start Helping', style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
+                    label: const Text(
+                      'Accept & Start Helping',
+                      style: TextStyle(
+                        fontSize: AppTypography.heading,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -1807,7 +2091,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     child: const Text(
                       "Can't right now",
-                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                        fontSize: AppTypography.bodyLarge,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),

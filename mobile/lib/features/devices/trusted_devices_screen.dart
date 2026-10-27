@@ -157,7 +157,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
               'The person you want to help has been notified. They just need to '
               'tap "Allow" on their phone — no passwords, nothing else for you '
               'to do. Once approved, this device can help them.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
             ),
             actions: [
               ElevatedButton(
@@ -195,7 +195,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
               'Ask the person you are helping to open this app and press '
               '"Show my code". They will read you a 6-digit code over the call. '
               'Type it here.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.caption),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -205,7 +205,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
               style: TextStyle(
                 color: AppTheme.textPrimary,
                 letterSpacing: 6,
-                fontSize: 22,
+                fontSize: AppTypography.title,
                 fontWeight: FontWeight.w700,
               ),
               decoration: const InputDecoration(labelText: 'Setup code'),
@@ -237,7 +237,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
         content: Text(
           '"${device['friendly_name'] ?? 'Device'}" will no longer be able to '
           'help you.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
         ),
         actions: [
           TextButton(
@@ -326,7 +326,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
                     _error!,
                     style: const TextStyle(
                       color: AppTheme.accentRose,
-                      fontSize: 13,
+                      fontSize: AppTypography.caption,
                     ),
                   ),
                 ),
@@ -334,7 +334,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
                 'People who can help you',
                 style: TextStyle(
                   color: AppTheme.textSecondary,
-                  fontSize: 13,
+                  fontSize: AppTypography.caption,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -383,7 +383,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
           '${device['device_platform'] ?? 'unknown'}'
           '${device['device_tag'] == null ? '' : ' • #${device['device_tag']}'}'
           ' • ${device['status']}',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.caption),
         ),
         trailing: IconButton(
           icon: const Icon(Icons.delete_outline, color: AppTheme.accentRose),
@@ -438,8 +438,8 @@ class _FlowCard extends StatelessWidget {
                   title,
                   style: TextStyle(
                     color: AppTheme.textPrimary,
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
+                    fontSize: AppTypography.bodyLarge,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -448,7 +448,7 @@ class _FlowCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             subtitle,
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.caption),
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
@@ -526,7 +526,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
           content: Text(
             '$friendlyName wants to be able to help you when you ask. '
             'Do you allow this?',
-            style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
           ),
           actions: [
             TextButton(
@@ -616,7 +616,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
                 'Read this code to the person who will help you. '
                 'They enter it on their phone.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
               ),
               const SizedBox(height: 24),
               Container(
@@ -630,9 +630,9 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
                   widget.setupCode,
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 48,
+                    fontSize: AppTypography.heroLarge,
                     letterSpacing: 12,
-                    fontWeight: FontWeight.w800,
+                    fontWeight: FontWeight.w700,
                     color: AppTheme.accentPrimary,
                   ),
                 ),
@@ -642,7 +642,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
                 'Waiting for them to enter the code…\n'
                 'A button will appear here when they do.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.bodySmall),
               ),
               const SizedBox(height: 24),
               if (_approving)

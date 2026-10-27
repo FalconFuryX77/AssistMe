@@ -85,12 +85,18 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
         title: const Text('Leave Help Session?'),
         content: Text(
           'Ending this call will end the assistance session for both of you.',
-          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+          style: TextStyle(
+            color: AppTheme.textSecondary,
+            fontSize: AppTypography.body,
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Stay in call', style: TextStyle(fontSize: 16)),
+            child: const Text(
+              'Stay in call',
+              style: TextStyle(fontSize: AppTypography.body),
+            ),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -133,7 +139,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
 
   @override
   Widget build(BuildContext context) {
-    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
+    Theme.of(
+      context,
+    ); // Rebuild legacy color-token widgets when the app theme changes.
     return PopScope(
       canPop: _allowPop,
       onPopInvokedWithResult: (didPop, _) {
@@ -146,13 +154,27 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
             widget.isHelpee
                 ? 'Help from ${widget.peerName}'
                 : 'Helping ${widget.peerName}',
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+            style: const TextStyle(
+              fontSize: AppTypography.heading,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           backgroundColor: AppTheme.bgSecondary,
         ),
         body: SafeArea(
           child: Column(
             children: [
+              // Keep sharing status outside the remote viewport so it never
+              // covers the controls or the disconnect/reconnect banner.
+              if (widget.isHelpee)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                  child: ValueListenableBuilder<bool>(
+                    valueListenable: _screenShareNotifier,
+                    builder: (context, sharing, _) =>
+                        _helpeeStatusBanner(sharing),
+                  ),
+                ),
               // Bounded remote viewport (VISION §12.6)
               Expanded(
                 child: Padding(
@@ -222,19 +244,6 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                               guideAudioStatusSink: _guideAudioStatusNotifier,
                             ),
                           ),
-
-                          // Status banner for helpee
-                          if (widget.isHelpee)
-                            Positioned(
-                              top: 14,
-                              left: 14,
-                              right: 14,
-                              child: ValueListenableBuilder<bool>(
-                                valueListenable: _screenShareNotifier,
-                                builder: (context, sharing, _) =>
-                                    _helpeeStatusBanner(sharing),
-                              ),
-                            ),
                         ],
                       ),
                     ),
@@ -243,7 +252,21 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
               ),
 
               // Helper annotation toolbar BELOW viewport
-              if (!widget.isHelpee) _helperAnnotationRow(),
+              if (!widget.isHelpee) ...[
+                _helperAnnotationRow(),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed:
+                          _flowCoordinatorKey.currentState?.captureGuideStep,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                      label: const Text('Add redacted step to guide'),
+                    ),
+                  ),
+                ),
+              ],
 
               // Voice controls
               Padding(
@@ -268,9 +291,10 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                         },
                         guideAudioStatus: _guideAudioStatusNotifier,
                         showGuideAudioControl: Platform.isAndroid,
-                        onGuideAudioConsentChanged: (consented) async {
+                        isGuideAudioHelper: !widget.isHelpee,
+                        onGuideAudioControl: () async {
                           await _flowCoordinatorKey.currentState
-                              ?.setGuideAudioConsent(consented);
+                              ?.toggleGuideAudioControl();
                         },
                       ),
                     ),
@@ -309,8 +333,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                   : 'Tap Start Sharing below to begin',
               style: TextStyle(
                 color: sharing ? Colors.white : const Color(0xFF422006),
-                fontSize: 14,
-                fontWeight: FontWeight.w800,
+                fontSize: AppTypography.bodySmall,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
@@ -320,76 +344,109 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
   }
 
   Widget _helpeeSharingPlaceholder(bool sharing) {
-    return Padding(
-      padding: const EdgeInsets.all(28),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: (sharing ? AppTheme.accentEmerald : AppTheme.accentAmber)
-                  .withValues(alpha: 0.15),
-              shape: BoxShape.circle,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 400;
+        final iconSize = compact ? 38.0 : 56.0;
+        final gap = compact ? 8.0 : 18.0;
+        final titleSize = compact
+            ? AppTypography.bodyLarge
+            : AppTypography.title;
+        final bodySize = compact
+            ? AppTypography.caption
+            : AppTypography.bodySmall;
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(compact ? 8 : 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight - (compact ? 16 : 48),
             ),
-            child: Icon(
-              sharing ? Icons.check_circle : Icons.screen_share,
-              size: 56,
-              color: sharing ? AppTheme.accentEmerald : AppTheme.accentAmber,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: EdgeInsets.all(compact ? 10 : 16),
+                  decoration: BoxDecoration(
+                    color:
+                        (sharing
+                                ? AppTheme.accentEmerald
+                                : AppTheme.accentAmber)
+                            .withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    sharing ? Icons.check_circle : Icons.screen_share,
+                    size: iconSize,
+                    color: sharing
+                        ? AppTheme.accentEmerald
+                        : AppTheme.accentAmber,
+                  ),
+                ),
+                SizedBox(height: gap),
+                Text(
+                  sharing ? 'Screen Sharing Active' : 'Ready to Share',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: titleSize,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: compact ? 6 : 10),
+                Text(
+                  sharing
+                      ? 'Your helper can see your screen. You can use your phone normally.\nTap Stop Sharing below to end sharing.'
+                      : 'Tap Start Sharing below so your helper can view and guide your screen.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: bodySize,
+                    height: 1.3,
+                  ),
+                ),
+                SizedBox(height: compact ? 10 : 20),
+                ElevatedButton.icon(
+                  icon: Icon(
+                    sharing ? Icons.stop_screen_share : Icons.screen_share,
+                    size: compact ? 18 : 22,
+                  ),
+                  label: Text(
+                    sharing ? 'Stop Sharing' : 'Start Sharing',
+                    style: TextStyle(
+                      fontSize: compact
+                          ? AppTypography.bodySmall
+                          : AppTypography.body,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: sharing
+                        ? AppTheme.accentRose
+                        : AppTheme.accentEmeraldAccessible,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compact ? 18 : 28,
+                      vertical: compact ? 10 : 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 4,
+                  ),
+                  onPressed: () {
+                    if (sharing) {
+                      _flowCoordinatorKey.currentState?.stopScreenShare();
+                    } else {
+                      _flowCoordinatorKey.currentState?.startScreenShare();
+                    }
+                  },
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 20),
-          Text(
-            sharing ? 'Screen Sharing Active' : 'Ready to Share',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            sharing
-                ? 'Your helper can see your screen. You can use your phone normally.\nTap Stop Sharing below to end sharing.'
-                : 'Tap Start Sharing below so your helper can view and guide your screen.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 15,
-              height: 1.4,
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            icon: Icon(
-              sharing ? Icons.stop_screen_share : Icons.screen_share,
-              size: 22,
-            ),
-            label: Text(
-              sharing ? 'Stop Sharing' : 'Start Sharing',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: sharing
-                  ? AppTheme.accentRose
-                  : AppTheme.accentEmeraldAccessible,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              elevation: 4,
-            ),
-            onPressed: () {
-              if (sharing) {
-                _flowCoordinatorKey.currentState?.stopScreenShare();
-              } else {
-                _flowCoordinatorKey.currentState?.startScreenShare();
-              }
-            },
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -415,13 +472,13 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                   color: AppTheme.accentEmerald,
                 ),
                 const SizedBox(width: 8),
-                  Expanded(
+                Expanded(
                   child: Text(
                     'Viewing Screen',
                     style: TextStyle(
                       color: AppTheme.textPrimary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      fontSize: AppTypography.bodySmall,
+                      fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -431,7 +488,10 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                   icon: const Icon(Icons.touch_app, size: 16),
                   label: const Text(
                     'Request Control',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      fontSize: AppTypography.caption,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.accentPrimary,
@@ -482,7 +542,10 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
       icon: Icon(icon, size: 16),
       label: Text(
         label,
-        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        style: const TextStyle(
+          fontSize: AppTypography.caption,
+          fontWeight: FontWeight.w600,
+        ),
         overflow: TextOverflow.ellipsis,
       ),
       style: ElevatedButton.styleFrom(

@@ -11,6 +11,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -32,6 +33,23 @@ import 'drawing_overlay.dart';
 import 'incoming_help_request_popup.dart';
 import 'risk_disclaimer_modal.dart';
 import 'local_guide_save_dialog.dart';
+import 'screenshot_redaction_editor.dart';
+
+class _IncomingGuideFrameTransfer {
+  final String id;
+  final String title;
+  final int expectedBytes;
+  final int expectedChunks;
+  final List<Uint8List> chunks = <Uint8List>[];
+  int receivedBytes = 0;
+
+  _IncomingGuideFrameTransfer({
+    required this.id,
+    required this.title,
+    required this.expectedBytes,
+    required this.expectedChunks,
+  });
+}
 
 class AssistanceFlowCoordinator extends StatefulWidget {
   final String sessionId;
@@ -140,11 +158,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   int _totalAloneSeconds = 0;
   bool _sessionTerminationHandled = false;
   bool _guideReviewShown = false;
+  static const int _maxGuideFrameBytes = 2 * 1024 * 1024;
+  static const int _guideFrameChunkBytes = 12 * 1024;
+  _IncomingGuideFrameTransfer? _incomingGuideFrameTransfer;
+  final Map<String, Completer<KeyframeCaptureResult>> _pendingGuideFrameAcks =
+      {};
+  int _guideFrameOrdinal = 0;
+  bool _guideFrameTransferInProgress = false;
   final LocalGuideAudioCapture _guideAudioCapture = LocalGuideAudioCapture();
   bool _localGuideAudioConsent = false;
   bool _peerGuideAudioConsent = false;
-  LocalGuideAudioRecording? _pendingGuideAudioRecording;
+  final List<LocalGuideAudioRecording> _pendingGuideAudioRecordings = [];
   Timer? _guideAudioLimitTimer;
+  DateTime? _guideAudioStartedAt;
+  Duration _guideAudioRecordedDuration = Duration.zero;
   static const Duration _maxGuideAudioDuration = Duration(minutes: 20);
   static const int _maxAloneSeconds = 300; // 5 minutes max alone time
 
@@ -271,7 +298,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       'width': width,
     });
     _pushOverlay();
-    _keyframeManager.onStrokeCompleted(points);
   }
 
   void _eraseAt(Offset point) {
@@ -394,16 +420,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     // Local overlay already shows the stroke via native canvas; _pushOverlay
     // keeps it in sync for any future helper replay but does not duplicate.
     _pushOverlay();
-    _keyframeManager.onStrokeCompleted(points);
   }
 
   Future<void> toggleAudioMute(bool mute) async {
     if (mute &&
-        (_localGuideAudioConsent ||
-            _peerGuideAudioConsent ||
-            _guideAudioCapture.isRecording)) {
+        widget.isHelpee &&
+        (_localGuideAudioConsent || _guideAudioCapture.isRecording)) {
       _localGuideAudioConsent = false;
-      _peerGuideAudioConsent = false;
       _sendGuideAudioConsent(false);
       await _stopGuideAudioCapture(discard: true);
       _setGuideAudioStatus(GuideAudioCaptureStatus.off);
@@ -412,91 +435,50 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _sendRealtimeOrP2P({'type': 'audio_mute_toggle', 'is_muted': mute});
   }
 
-  /// Captures call audio only after both people opt in on their own device.
-  /// Recording is local, temporary, Android-only, and never enters signaling.
-  Future<void> setGuideAudioConsent(bool consented) async {
-    if (!Platform.isAndroid) return;
-    if (!_mediaReady) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Wait for the call audio connection before opting in.',
-            ),
-          ),
-        );
-      }
+  /// Helper requests permission, then controls start/stop. The helpee's phone
+  /// alone records and stores temporary audio; the helpee can revoke anytime.
+  Future<void> toggleGuideAudioControl() async {
+    if (!Platform.isAndroid || !_mediaReady || !_engine.isDataChannelOpen) {
+      _showGuideMessage('Guide audio needs a ready Android call connection.');
       return;
     }
-    if (consented && _engine.isAudioMuted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unmute your microphone before opting in to guide audio capture.'),
-        ),
-      );
-      return;
-    }
-    if (!_engine.isDataChannelOpen) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Secure peer connection is not ready; no audio will be recorded.',
-            ),
-          ),
-        );
-      }
-      return;
-    }
-    if (!consented) {
+    if (widget.isHelpee) {
+      if (!_localGuideAudioConsent) return;
       _localGuideAudioConsent = false;
       _sendGuideAudioConsent(false);
       await _stopGuideAudioCapture(discard: true);
       _setGuideAudioStatus(GuideAudioCaptureStatus.off);
       return;
     }
-
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppTheme.bgSecondary,
-        title: const Text('Include audio in a private guide?'),
-        content: Text(
-          'AssistMe will temporarily record this call’s microphone and playback audio in this Android device’s private cache. Both people must opt in before capture starts. The recording is not sent to AssistMe servers or an AI service; live WebRTC audio still travels to the other participant and may pass through the configured TURN relay. The temporary recording is deleted after local transcription or when discarded. Capture stops after 20 minutes, and you can stop it sooner.',
-          style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Not now'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('I agree for this device'),
-          ),
-        ],
-      ),
-    );
-    if (accepted != true || !mounted) return;
-
-    _localGuideAudioConsent = true;
-    if (!_sendGuideAudioConsent(true)) {
-      _localGuideAudioConsent = false;
-      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+    final status =
+        widget.guideAudioStatusSink?.value ?? GuideAudioCaptureStatus.off;
+    if (!_peerGuideAudioConsent) {
+      if (!_engine.sendData({'type': 'guide_audio_consent_request'})) {
+        _showGuideMessage('Could not ask for guide-audio permission.');
+        return;
+      }
+      _setGuideAudioStatus(GuideAudioCaptureStatus.awaitingConsent);
       return;
     }
-    if (_peerGuideAudioConsent) {
-      await _startGuideAudioCaptureIfConsented();
-    } else {
-      _setGuideAudioStatus(GuideAudioCaptureStatus.waitingForPeer);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Waiting for the other person to opt in. No audio is being recorded yet.',
-          ),
-        ),
-      );
+    if (status == GuideAudioCaptureStatus.awaitingConsent) return;
+    final action = status == GuideAudioCaptureStatus.recording
+        ? 'stop'
+        : 'start';
+    if (!_engine.sendData({
+      'type': 'guide_audio_capture_control',
+      'action': action,
+    })) {
+      _showGuideMessage('Could not send the audio control.');
     }
+  }
+
+  /// Kept as a small UI compatibility wrapper: only the helpee may revoke.
+  Future<void> setGuideAudioConsent(bool consented) async {
+    if (!widget.isHelpee || consented || !_localGuideAudioConsent) return;
+    _localGuideAudioConsent = false;
+    _sendGuideAudioConsent(false);
+    await _stopGuideAudioCapture(discard: true);
+    _setGuideAudioStatus(GuideAudioCaptureStatus.off);
   }
 
   void _setGuideAudioStatus(GuideAudioCaptureStatus status) {
@@ -506,74 +488,146 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   bool _sendGuideAudioConsent(bool consented) =>
       _engine.sendData({'type': 'guide_audio_consent', 'consented': consented});
 
-  Future<void> _startGuideAudioCaptureIfConsented() async {
-    if (!_localGuideAudioConsent ||
-        !_peerGuideAudioConsent ||
-        _guideAudioCapture.isRecording ||
-        !mounted) {
+  Future<void> _requestHelpeeGuideAudioConsent() async {
+    if (!widget.isHelpee || !Platform.isAndroid || !mounted) return;
+    if (_localGuideAudioConsent) {
+      _sendGuideAudioConsent(true);
+      _setGuideAudioStatus(GuideAudioCaptureStatus.consented);
+      return;
+    }
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Allow guide audio capture?'),
+        content: Text(
+          'Your helper is asking to record selected parts of this call. Audio is captured on this phone, kept temporarily in its private storage, and transcribed on this phone. It is not uploaded to AssistMe or an AI service. You will see when recording starts and can revoke permission at any time.',
+          style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Decline'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Allow for this call'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    _localGuideAudioConsent = accepted == true;
+    _setGuideAudioStatus(
+      _localGuideAudioConsent
+          ? GuideAudioCaptureStatus.consented
+          : GuideAudioCaptureStatus.off,
+    );
+    if (!_sendGuideAudioConsent(_localGuideAudioConsent)) {
+      _localGuideAudioConsent = false;
+      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+    }
+  }
+
+  Future<void> _handleGuideAudioCaptureCommand(String action) async {
+    if (!widget.isHelpee) return;
+    if (action == 'stop') {
+      await _stopGuideAudioCapture(discard: false);
+      _setGuideAudioStatus(
+        _localGuideAudioConsent
+            ? GuideAudioCaptureStatus.consented
+            : GuideAudioCaptureStatus.off,
+      );
+      _engine.sendData({
+        'type': 'guide_audio_capture_status',
+        'state': _localGuideAudioConsent ? 'consented' : 'off',
+      });
+      return;
+    }
+    if (action != 'start' || !_localGuideAudioConsent) {
+      _engine.sendData({
+        'type': 'guide_audio_capture_status',
+        'state': 'off',
+        'error': 'permission',
+      });
+      return;
+    }
+    if (_guideAudioCapture.isRecording) return;
+    final remaining = _maxGuideAudioDuration - _guideAudioRecordedDuration;
+    if (remaining <= Duration.zero) {
+      _localGuideAudioConsent = false;
+      _sendGuideAudioConsent(false);
+      _engine.sendData({
+        'type': 'guide_audio_capture_status',
+        'state': 'off',
+        'error': 'limit',
+      });
+      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
       return;
     }
     try {
       await _guideAudioCapture.start();
+      _guideAudioStartedAt = DateTime.now();
+      _setGuideAudioStatus(GuideAudioCaptureStatus.recording);
+      _engine.sendData({
+        'type': 'guide_audio_capture_status',
+        'state': 'recording',
+      });
       _guideAudioLimitTimer?.cancel();
-      _guideAudioLimitTimer = Timer(_maxGuideAudioDuration, () async {
+      _guideAudioLimitTimer = Timer(remaining, () async {
         _localGuideAudioConsent = false;
         _sendGuideAudioConsent(false);
-        await _stopGuideAudioCapture(discard: true);
+        await _stopGuideAudioCapture(discard: false);
         _setGuideAudioStatus(GuideAudioCaptureStatus.off);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Audio capture stopped at the 20 minute limit.'),
-            ),
-          );
-        }
+        _engine.sendData({
+          'type': 'guide_audio_capture_status',
+          'state': 'off',
+          'error': 'limit',
+        });
       });
-      _setGuideAudioStatus(GuideAudioCaptureStatus.recording);
     } catch (_) {
-      _localGuideAudioConsent = false;
-      _sendGuideAudioConsent(false);
-      await _stopGuideAudioCapture(discard: true);
-      _setGuideAudioStatus(GuideAudioCaptureStatus.off);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Could not start private audio capture. The call continues without recording.',
-            ),
-          ),
-        );
-      }
+      _engine.sendData({
+        'type': 'guide_audio_capture_status',
+        'state': 'consented',
+        'error': 'capture',
+      });
+      _setGuideAudioStatus(GuideAudioCaptureStatus.consented);
     }
   }
 
   Future<void> _stopGuideAudioCapture({required bool discard}) async {
     _guideAudioLimitTimer?.cancel();
     _guideAudioLimitTimer = null;
+    final startedAt = _guideAudioStartedAt;
+    _guideAudioStartedAt = null;
+    if (startedAt != null) {
+      _guideAudioRecordedDuration += DateTime.now().difference(startedAt);
+    }
     try {
       final recording = await _guideAudioCapture.stop();
-      if (recording == null) return;
-      if (discard) {
-        _pendingGuideAudioRecording = recording;
-        await recording.delete();
-        _pendingGuideAudioRecording = null;
-      } else {
-        final previous = _pendingGuideAudioRecording;
-        if (previous != null) {
-          await previous.delete();
-          _pendingGuideAudioRecording = null;
+      if (recording != null) {
+        if (discard) {
+          await recording.delete();
+        } else {
+          _pendingGuideAudioRecordings.add(recording);
         }
-        _pendingGuideAudioRecording = recording;
+      }
+      if (discard) {
+        for (final pending in _pendingGuideAudioRecordings) {
+          await pending.delete();
+        }
+        _pendingGuideAudioRecordings.clear();
+        _guideAudioRecordedDuration = Duration.zero;
       }
     } catch (_) {
-      final pending = _pendingGuideAudioRecording;
-      if (pending != null) {
-        try {
-          await pending.delete();
-          _pendingGuideAudioRecording = null;
-        } catch (_) {
-          // Keep the file handle so teardown or app-start cleanup can retry.
+      if (discard) {
+        for (final pending in _pendingGuideAudioRecordings) {
+          try {
+            await pending.delete();
+          } catch (_) {}
         }
+        _pendingGuideAudioRecordings.clear();
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -707,12 +761,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     if (!mounted) return;
     _setGuideAudioStatus(GuideAudioCaptureStatus.off);
     final now = DateTime.now();
+    if (!widget.isHelpee) return;
     final input = await showDialog<LocalGuideSaveInput>(
       context: context,
       barrierDismissible: false,
       builder: (_) => LocalGuideSaveDialog(
         frames: _keyframeManager.keyframes,
-        audioRecording: _pendingGuideAudioRecording,
+        audioRecordings: List.unmodifiable(_pendingGuideAudioRecordings),
+        helperCuratedFrames: true,
         suggestedTitle:
             'Help guide ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
       ),
@@ -729,7 +785,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               id: frame.id,
               timestamp: frame.timestamp,
               imageBytes: input.redactedImages[frame.id] ?? frame.imageBytes,
-              title: input.generatedTitles[frame.id] ?? frame.title,
+              title: frame.privacyReviewed
+                  ? frame.title
+                  : (input.generatedTitles[frame.id] ?? frame.title),
               instruction:
                   generatedInstruction == null || generatedInstruction.isEmpty
                   ? frame.instruction
@@ -963,20 +1021,23 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       };
       _engine.onDataChannelMessage = (data) {
         final type = data['type'] as String?;
-        if (type != null) {
+        if (type == null) return;
+        if (type.startsWith('guide_frame_')) {
+          unawaited(_onGuideFrameMessage(data));
+        } else {
           _onEvent(RealtimeEvent(type, data));
         }
       };
       _engine.onDataChannelState = (isOpen) {
         if (!isOpen &&
-            (_localGuideAudioConsent ||
-                _peerGuideAudioConsent ||
-                _guideAudioCapture.isRecording)) {
-          // Consent travels only over this encrypted P2P channel. If it closes,
-          // stop recording because the other participant can no longer revoke.
+            widget.isHelpee &&
+            (_localGuideAudioConsent || _guideAudioCapture.isRecording)) {
           _localGuideAudioConsent = false;
-          _peerGuideAudioConsent = false;
+          _sendGuideAudioConsent(false);
           unawaited(_stopGuideAudioCapture(discard: true));
+          _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+        } else if (!isOpen && !widget.isHelpee) {
+          _peerGuideAudioConsent = false;
           _setGuideAudioStatus(GuideAudioCaptureStatus.off);
         }
       };
@@ -1198,8 +1259,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               strokeId != null &&
               _remoteDraftStrokeId != null &&
               _remoteDraftStrokeId! > strokeId;
-          if (strokeId != null &&
-              strokeId > _lastRemoteCommittedStrokeId) {
+          if (strokeId != null && strokeId > _lastRemoteCommittedStrokeId) {
             _lastRemoteCommittedStrokeId = strokeId;
           }
           if (strokeId != null && _remoteDraftStrokeId == strokeId) {
@@ -1223,7 +1283,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             );
           });
           _pushOverlay();
-          _keyframeManager.onStrokeCompleted(points);
         }
         break;
 
@@ -1435,17 +1494,48 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // another offer here can collide with the first negotiation.
         break;
 
+      case 'guide_audio_consent_request':
+        await _requestHelpeeGuideAudioConsent();
+        break;
+
       case 'guide_audio_consent':
-        final consented = event.data['consented'] == true;
-        _peerGuideAudioConsent = consented;
-        if (!consented) {
-          // A participant withdrawing consent stops and deletes both local
-          // channels immediately. Fresh consent is required to resume.
-          _localGuideAudioConsent = false;
-          await _stopGuideAudioCapture(discard: true);
-          _setGuideAudioStatus(GuideAudioCaptureStatus.off);
-        } else if (_localGuideAudioConsent) {
-          await _startGuideAudioCaptureIfConsented();
+        if (!widget.isHelpee) {
+          _peerGuideAudioConsent = event.data['consented'] == true;
+          _setGuideAudioStatus(
+            _peerGuideAudioConsent
+                ? GuideAudioCaptureStatus.consented
+                : GuideAudioCaptureStatus.off,
+          );
+          if (!_peerGuideAudioConsent) {
+            _showGuideMessage(
+              'Guide-audio permission was declined or revoked.',
+            );
+          }
+        }
+        break;
+
+      case 'guide_audio_capture_control':
+        await _handleGuideAudioCaptureCommand(
+          event.data['action'] as String? ?? '',
+        );
+        break;
+
+      case 'guide_audio_capture_status':
+        if (!widget.isHelpee) {
+          final state = event.data['state'] as String?;
+          _setGuideAudioStatus(switch (state) {
+            'recording' => GuideAudioCaptureStatus.recording,
+            'consented' => GuideAudioCaptureStatus.consented,
+            _ => GuideAudioCaptureStatus.off,
+          });
+          final error = event.data['error'] as String?;
+          if (error == 'limit') {
+            _showGuideMessage('The 20 minute guide-audio limit was reached.');
+          } else if (error == 'capture') {
+            _showGuideMessage(
+              'Audio capture could not start on the other phone.',
+            );
+          }
         }
         break;
 
@@ -1628,10 +1718,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-                Text(
+              Text(
                 'This phone is the HELPEE (person being helped). Pick the '
                 'helper and their trusted device.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTypography.caption,
+                ),
               ),
               const SizedBox(height: 12),
               if (trusted.isEmpty)
@@ -1645,7 +1738,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                   child: const Text(
                     'No trusted devices yet. Go to Trusted Devices and pair '
                     'the helper\'s device first (paste their Device ID).',
-                    style: TextStyle(color: AppTheme.accentRose, fontSize: 12),
+                    style: TextStyle(
+                      color: AppTheme.accentRose,
+                      fontSize: AppTypography.caption,
+                    ),
                   ),
                 )
               else
@@ -1653,7 +1749,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                   'Trusted helper devices: ${trusted.map((d) => (d['friendly_name'] ?? 'device')).join(', ')}',
                   style: TextStyle(
                     color: AppTheme.textSecondary,
-                    fontSize: 12,
+                    fontSize: AppTypography.caption,
                   ),
                 ),
               const SizedBox(height: 12),
@@ -1675,10 +1771,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                 ),
               ),
               const SizedBox(height: 8),
-                Text(
+              Text(
                 'The Device ID must match one you already paired in Trusted '
                 'Devices, or the request will be rejected.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                style: TextStyle(
+                  color: AppTheme.textSecondary,
+                  fontSize: AppTypography.caption,
+                ),
               ),
             ],
           ),
@@ -1874,7 +1973,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-                Text(
+              Text(
                 'Phase 2 is annotation only. This single request asks for '
                 'Phase 3 full touch control: tap, swipe, and scroll. The '
                 'helpee must approve the risk screen first.',
@@ -1901,7 +2000,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   @override
   Widget build(BuildContext context) {
-    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
+    Theme.of(
+      context,
+    ); // Rebuild legacy color-token widgets when the app theme changes.
     return Stack(
       children: [
         // Drawing overlay – for helper, only show the in-progress draft for low-latency
@@ -1978,7 +2079,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // Disconnect countdown banner with immediate Leave Now action
         if (_disconnectCountdownSeconds != null)
           Positioned(
-            top: 16,
+            top: widget.isHelpee ? 16 : 76,
             left: 16,
             right: 16,
             child: Material(
@@ -2021,8 +2122,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                             '${widget.peerName} disconnected',
                             style: TextStyle(
                               color: AppTheme.textPrimary,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
+                              fontSize: AppTypography.bodySmall,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -2030,7 +2131,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                             'Auto-leaving in ${_disconnectCountdownSeconds}s…',
                             style: const TextStyle(
                               color: AppTheme.accentAmber,
-                              fontSize: 13,
+                              fontSize: AppTypography.caption,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -2078,8 +2179,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                         child: const Text(
                           'Wait (+30s)',
                           style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            fontSize: AppTypography.caption,
                           ),
                         ),
                       ),
@@ -2109,8 +2210,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                       child: const Text(
                         'Leave Now',
                         style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          fontSize: AppTypography.caption,
                         ),
                       ),
                     ),
@@ -2224,39 +2325,287 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                 icon: const Icon(Icons.delete_sweep),
                 onPressed: _strokes.isEmpty ? null : _clearDrawings,
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.all(6),
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                iconSize: 20,
-                tooltip: 'Bookmark step for guide',
-                icon: const Icon(Icons.bookmark_add_outlined),
-                color: AppTheme.accentAmber,
-                onPressed: () async {
-                  final result = await _keyframeManager.manualBookmark();
-                  if (mounted) {
-                    final message = switch (result) {
-                      KeyframeCaptureResult.saved =>
-                        'Step saved on this device.',
-                      KeyframeCaptureResult.duplicate =>
-                        'This screen already appears in the guide.',
-                      KeyframeCaptureResult.unavailable =>
-                        'Could not capture this screen.',
-                    };
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(message),
-                        duration: const Duration(seconds: 2),
-                      ),
-                    );
-                  }
-                },
-              ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> captureGuideStep() async {
+    if (widget.isHelpee || _guideFrameTransferInProgress) return;
+    final stream = remoteStreamNotifier.value;
+    if (stream is! MediaStream || stream.getVideoTracks().isEmpty) {
+      _showGuideMessage(
+        'Wait until the shared screen is visible, then add a step.',
+      );
+      return;
+    }
+    setState(() => _guideFrameTransferInProgress = true);
+    String? pendingTransferId;
+    try {
+      final captured = await _engine.captureScreenFrame(remoteStream: stream);
+      if (captured == null || captured.isEmpty) {
+        _showGuideMessage('Could not capture the shared screen.');
+        return;
+      }
+      if (!mounted) return;
+      final redacted = await editScreenshotRedactions(context, captured);
+      if (!mounted || redacted == null) return;
+      if (redacted.length > _maxGuideFrameBytes) {
+        _showGuideMessage('This screenshot is too large to send. Try again.');
+        return;
+      }
+      final transferId =
+          '${DateTime.now().microsecondsSinceEpoch}_${_guideFrameOrdinal + 1}';
+      pendingTransferId = transferId;
+      final title = await _requestGuideStepTitle(_guideFrameOrdinal + 1);
+      if (title == null || !mounted) return;
+      final chunkCount =
+          (redacted.length + _guideFrameChunkBytes - 1) ~/
+          _guideFrameChunkBytes;
+      final ack = Completer<KeyframeCaptureResult>();
+      _pendingGuideFrameAcks[transferId] = ack;
+      if (!_engine.sendData({
+        'type': 'guide_frame_start',
+        'transfer_id': transferId,
+        'title': title,
+        'byte_count': redacted.length,
+        'chunk_count': chunkCount,
+      })) {
+        _showGuideMessage('The secure call channel is not ready.');
+        return;
+      }
+      for (var index = 0; index < chunkCount; index++) {
+        final deadline = DateTime.now().add(const Duration(seconds: 8));
+        while (_engine.dataChannelBufferedAmount > 96 * 1024 &&
+            DateTime.now().isBefore(deadline)) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        if (_engine.dataChannelBufferedAmount > 96 * 1024) {
+          _engine.sendData({
+            'type': 'guide_frame_abort',
+            'transfer_id': transferId,
+          });
+          _showGuideMessage('Network is busy. Try adding this step again.');
+          return;
+        }
+        final start = index * _guideFrameChunkBytes;
+        final end = (start + _guideFrameChunkBytes).clamp(0, redacted.length);
+        final chunk = Uint8List.sublistView(redacted, start, end);
+        if (!_engine.sendData({
+          'type': 'guide_frame_chunk',
+          'transfer_id': transferId,
+          'index': index,
+          'data': base64Encode(chunk),
+        })) {
+          _engine.sendData({
+            'type': 'guide_frame_abort',
+            'transfer_id': transferId,
+          });
+          _showGuideMessage('The screenshot transfer stopped. Try again.');
+          return;
+        }
+      }
+      if (!_engine.sendData({
+        'type': 'guide_frame_finish',
+        'transfer_id': transferId,
+      })) {
+        _showGuideMessage('The screenshot transfer stopped. Try again.');
+        return;
+      }
+      final result = await ack.future.timeout(
+        const Duration(seconds: 20),
+        onTimeout: () => KeyframeCaptureResult.unavailable,
+      );
+      if (!mounted) return;
+      switch (result) {
+        case KeyframeCaptureResult.saved:
+          _guideFrameOrdinal++;
+          _showGuideMessage(
+            'Redacted step added to the private guide on ${widget.peerName}’s phone.',
+          );
+        case KeyframeCaptureResult.duplicate:
+          _showGuideMessage('That screen is already in the guide.');
+        case KeyframeCaptureResult.capacityReached:
+          _showGuideMessage(
+            'The private guide reached its on-device image limit. Save the current guide before adding more steps.',
+          );
+        case KeyframeCaptureResult.unavailable:
+          _showGuideMessage(
+            'The screenshot did not reach the other phone. Try again.',
+          );
+      }
+    } finally {
+      if (pendingTransferId != null) {
+        _pendingGuideFrameAcks.remove(pendingTransferId);
+      }
+      if (mounted) setState(() => _guideFrameTransferInProgress = false);
+    }
+  }
+
+  Future<String?> _requestGuideStepTitle(int stepNumber) async {
+    final controller = TextEditingController(text: 'Step $stepNumber');
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Name this guide step'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 100,
+            textCapitalization: TextCapitalization.sentences,
+            decoration: const InputDecoration(
+              labelText: 'Step name',
+              hintText: 'For example, Open account settings',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Add step'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  void _showGuideMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _onGuideFrameMessage(Map<String, dynamic> data) async {
+    final type = data['type'] as String?;
+    final transferId = data['transfer_id'] as String?;
+    if (type == null || transferId == null) return;
+    if (type == 'guide_frame_ack') {
+      if (widget.isHelpee) return;
+      final completer = _pendingGuideFrameAcks[transferId];
+      if (completer == null || completer.isCompleted) return;
+      final resultName = data['result'] as String?;
+      final result = KeyframeCaptureResult.values.firstWhere(
+        (value) => value.name == resultName,
+        orElse: () => KeyframeCaptureResult.unavailable,
+      );
+      completer.complete(result);
+      return;
+    }
+    if (type == 'guide_frame_abort') {
+      if (_incomingGuideFrameTransfer?.id == transferId) {
+        _incomingGuideFrameTransfer = null;
+      }
+      return;
+    }
+    if (!widget.isHelpee) return;
+    if (type == 'guide_frame_start') {
+      final byteCount = data['byte_count'];
+      final chunkCount = data['chunk_count'];
+      final title = (data['title'] as String? ?? '').trim();
+      if (_incomingGuideFrameTransfer != null ||
+          byteCount is! int ||
+          byteCount < 1 ||
+          byteCount > _maxGuideFrameBytes ||
+          chunkCount is! int ||
+          chunkCount < 1 ||
+          chunkCount >
+              (_maxGuideFrameBytes + _guideFrameChunkBytes - 1) ~/
+                  _guideFrameChunkBytes ||
+          title.isEmpty ||
+          title.length > 100) {
+        _engine.sendData({
+          'type': 'guide_frame_ack',
+          'transfer_id': transferId,
+          'result': 'unavailable',
+        });
+        return;
+      }
+      _incomingGuideFrameTransfer = _IncomingGuideFrameTransfer(
+        id: transferId,
+        title: title,
+        expectedBytes: byteCount,
+        expectedChunks: chunkCount,
+      );
+      return;
+    }
+    if (type == 'guide_frame_chunk') {
+      final transfer = _incomingGuideFrameTransfer;
+      final index = data['index'];
+      final payload = data['data'];
+      if (transfer == null ||
+          transfer.id != transferId ||
+          index is! int ||
+          index != transfer.chunks.length ||
+          payload is! String) {
+        _incomingGuideFrameTransfer = null;
+        _engine.sendData({
+          'type': 'guide_frame_ack',
+          'transfer_id': transferId,
+          'result': 'unavailable',
+        });
+        return;
+      }
+      try {
+        final chunk = base64Decode(payload);
+        if (chunk.isEmpty ||
+            chunk.length > _guideFrameChunkBytes ||
+            transfer.receivedBytes + chunk.length > transfer.expectedBytes) {
+          throw const FormatException('Invalid guide frame chunk size.');
+        }
+        transfer.chunks.add(Uint8List.fromList(chunk));
+        transfer.receivedBytes += chunk.length;
+      } catch (_) {
+        _incomingGuideFrameTransfer = null;
+        _engine.sendData({
+          'type': 'guide_frame_ack',
+          'transfer_id': transferId,
+          'result': 'unavailable',
+        });
+      }
+      return;
+    }
+    if (type == 'guide_frame_finish') {
+      final transfer = _incomingGuideFrameTransfer;
+      _incomingGuideFrameTransfer = null;
+      if (transfer == null ||
+          transfer.id != transferId ||
+          transfer.chunks.length != transfer.expectedChunks ||
+          transfer.receivedBytes != transfer.expectedBytes) {
+        _engine.sendData({
+          'type': 'guide_frame_ack',
+          'transfer_id': transferId,
+          'result': 'unavailable',
+        });
+        return;
+      }
+      final builder = BytesBuilder(copy: false);
+      for (final chunk in transfer.chunks) {
+        builder.add(chunk);
+      }
+      final result = await _keyframeManager.addPreReviewedFrame(
+        builder.takeBytes(),
+        title: transfer.title,
+      );
+      _engine.sendData({
+        'type': 'guide_frame_ack',
+        'transfer_id': transferId,
+        'result': result.name,
+      });
+      if (mounted && result == KeyframeCaptureResult.saved) setState(() {});
+    }
   }
 
   Future<void> _showAnnotationOptions() async {
@@ -2280,7 +2629,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             children: [
               const Text(
                 'Annotation style',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                style: TextStyle(
+                  fontSize: AppTypography.bodyLarge,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
               const SizedBox(height: 14),
               const Text('Colour'),
@@ -2334,7 +2686,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _overlayTimer?.cancel();
     _guideAudioLimitTimer?.cancel();
     unawaited(_guideAudioCapture.dispose());
-    unawaited(_pendingGuideAudioRecording?.delete());
+    for (final recording in _pendingGuideAudioRecordings) {
+      unawaited(recording.delete());
+    }
     _realtime?.disconnect();
     _engine.dispose();
     _keyframeManager.dispose();

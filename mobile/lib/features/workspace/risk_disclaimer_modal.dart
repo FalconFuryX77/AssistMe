@@ -42,8 +42,8 @@ class RiskDisclaimerModal extends StatelessWidget {
                     'Control Requested',
                     style: TextStyle(
                       color: AppTheme.accentRose,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+                      fontSize: AppTypography.bodyLarge,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
@@ -52,7 +52,7 @@ class RiskDisclaimerModal extends StatelessWidget {
             const SizedBox(height: 6),
               Text(
               'The helper wants more than just drawing. Read the risks carefully.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: AppTypography.caption),
             ),
             const SizedBox(height: 16),
             Container(
@@ -66,7 +66,7 @@ class RiskDisclaimerModal extends StatelessWidget {
                 disclaimerText,
                 style: TextStyle(
                   color: AppTheme.textPrimary,
-                  fontSize: 13,
+                  fontSize: AppTypography.caption,
                   height: 1.4,
                 ),
               ),

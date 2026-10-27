@@ -165,8 +165,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text(
           'Settings',
           style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
+            fontSize: AppTypography.heading,
+            fontWeight: FontWeight.w700,
             color: context.textPrimary,
           ),
         ),
@@ -186,11 +186,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   secondary: const Icon(Icons.dark_mode_outlined, color: AppTheme.accentPrimary),
                   title: Text(
                     'Dark Theme',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: context.textPrimary),
+                    style: TextStyle(fontWeight: FontWeight.w600, color: context.textPrimary),
                   ),
                   subtitle: Text(
                     'Optimized for OLED displays & high contrast',
-                    style: TextStyle(color: context.textSecondary, fontSize: 13),
+                    style: TextStyle(color: context.textSecondary, fontSize: AppTypography.caption),
                   ),
                   value: _darkMode,
                   activeTrackColor: AppTheme.accentPrimary.withValues(alpha: 0.5),
@@ -216,11 +216,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   secondary: const Icon(Icons.ring_volume_outlined, color: AppTheme.accentEmerald),
                   title: Text(
                     'Assistance Requests',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: context.textPrimary),
+                    style: TextStyle(fontWeight: FontWeight.w600, color: context.textPrimary),
                   ),
                   subtitle: Text(
                     'Alert when contacts request help or call',
-                    style: TextStyle(color: context.textSecondary, fontSize: 13),
+                    style: TextStyle(color: context.textSecondary, fontSize: AppTypography.caption),
                   ),
                   value: _notificationsEnabled,
                   activeTrackColor: AppTheme.accentEmerald.withValues(alpha: 0.5),
@@ -234,11 +234,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   secondary: const Icon(Icons.vibration_outlined, color: AppTheme.accentAmber),
                   title: Text(
                     'Sound & Vibration',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: context.textPrimary),
+                    style: TextStyle(fontWeight: FontWeight.w600, color: context.textPrimary),
                   ),
                   subtitle: Text(
                     'Play chime and vibrate for incoming calls',
-                    style: TextStyle(color: context.textSecondary, fontSize: 13),
+                    style: TextStyle(color: context.textSecondary, fontSize: AppTypography.caption),
                   ),
                   value: _soundVibrationEnabled,
                   activeTrackColor: AppTheme.accentAmber.withValues(alpha: 0.5),
@@ -261,11 +261,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 leading: const Icon(Icons.help_outline, color: AppTheme.accentPrimary),
                 title: Text(
                   'First-Time Setup & Help Guide',
-                  style: TextStyle(fontWeight: FontWeight.w700, color: context.textPrimary),
+                  style: TextStyle(fontWeight: FontWeight.w600, color: context.textPrimary),
                 ),
                 subtitle: Text(
                   'How to pair devices and use AssistMe',
-                  style: TextStyle(color: context.textSecondary, fontSize: 13),
+                  style: TextStyle(color: context.textSecondary, fontSize: AppTypography.caption),
                 ),
                 children: [
                   Padding(
@@ -335,15 +335,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Text(
                               'AssistMe',
                               style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                                fontSize: AppTypography.bodyLarge,
+                                fontWeight: FontWeight.w700,
                                 color: context.textPrimary,
                               ),
                             ),
                             Text(
                               'Version 1.1.0 (Build 2026.09)',
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: AppTypography.caption,
                                 color: context.textSecondary,
                               ),
                             ),
@@ -355,7 +355,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   const SizedBox(height: 12),
                   Text(
                     'One-tap remote help for family and trusted companions. Built with privacy-first WebRTC streaming and zero-lag interactive annotations.',
-                    style: TextStyle(color: context.textSecondary, fontSize: 13, height: 1.4),
+                    style: TextStyle(color: context.textSecondary, fontSize: AppTypography.caption, height: 1.4),
                   ),
                   const SizedBox(height: 12),
                   Container(
@@ -381,7 +381,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             'Server: ${AppConfig.baseUrl}',
                             style: const TextStyle(
                               color: AppTheme.accentEmerald,
-                              fontSize: 12,
+                              fontSize: AppTypography.caption,
                               fontWeight: FontWeight.w600,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -409,8 +409,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: const Text(
                       'P',
                       style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
+                        fontSize: AppTypography.bodyLarge,
+                        fontWeight: FontWeight.w700,
                         color: AppTheme.accentPrimary,
                       ),
                     ),
@@ -423,8 +423,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text(
                           'Praneel (Falcon)',
                           style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                            fontSize: AppTypography.body,
+                            fontWeight: FontWeight.w600,
                             color: context.textPrimary,
                           ),
                         ),
@@ -432,7 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Text(
                           'Creator & Lead Architect',
                           style: TextStyle(
-                            fontSize: 13,
+                            fontSize: AppTypography.caption,
                             color: context.textSecondary,
                           ),
                         ),
@@ -440,7 +440,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           Text(
                           'AssistMe Open-Source Project',
                           style: TextStyle(
-                            fontSize: 12,
+                            fontSize: AppTypography.caption,
                             color: AppTheme.textMuted,
                           ),
                         ),
@@ -476,15 +476,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             Text(
                               'Custom Backend Server',
                               style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
+                                fontSize: AppTypography.bodySmall,
+                                fontWeight: FontWeight.w600,
                                 color: AppTheme.textPrimary,
                               ),
                             ),
                             Text(
                               'For developers & self-hosted instances',
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: AppTypography.caption,
                                 color: AppTheme.textSecondary,
                               ),
                             ),
@@ -527,7 +527,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               'Caution: Modifying these settings connects AssistMe to a custom server. Incorrect settings will cause connection errors. Fresh installs always point to the default server.',
                               style: TextStyle(
                                 color: AppTheme.accentAmber,
-                                fontSize: 12,
+                                fontSize: AppTypography.caption,
                                 fontWeight: FontWeight.w500,
                                 height: 1.3,
                               ),
@@ -539,7 +539,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 16),
                     TextField(
                       controller: _serverUrlController,
-                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTypography.bodySmall),
                       decoration: InputDecoration(
                         labelText: 'Server Base URL',
                         hintText: 'http://192.168.1.39:8000',
@@ -560,7 +560,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 10),
                       Text(
                       'Quick Presets:',
-                      style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: AppTheme.textMuted, fontSize: AppTypography.caption, fontWeight: FontWeight.w600),
                     ),
                     const SizedBox(height: 6),
                     Wrap(
@@ -568,7 +568,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       runSpacing: 6,
                       children: [
                         ActionChip(
-                          label: const Text('Wi-Fi example', style: TextStyle(fontSize: 12)),
+                          label: const Text('Wi-Fi example', style: TextStyle(fontSize: AppTypography.caption)),
                           onPressed: () {
                             setState(() {
                               _serverUrlController.text = 'http://192.168.1.100:8000';
@@ -577,7 +577,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           },
                         ),
                         ActionChip(
-                          label: const Text('USB (localhost)', style: TextStyle(fontSize: 12)),
+                          label: const Text('USB (localhost)', style: TextStyle(fontSize: AppTypography.caption)),
                           onPressed: () {
                             setState(() {
                               _serverUrlController.text = 'http://127.0.0.1:8000';
@@ -614,7 +614,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _testResult!,
                           style: TextStyle(
                             color: _testSuccess ? AppTheme.accentEmerald : AppTheme.accentRose,
-                            fontSize: 13,
+                            fontSize: AppTypography.caption,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -668,8 +668,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text(
               title,
               style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
+                fontSize: AppTypography.bodySmall,
+                fontWeight: FontWeight.w600,
                 color: context.textSecondary,
                 letterSpacing: 0.4,
               ),
@@ -711,8 +711,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Text(
               step,
               style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+                fontSize: AppTypography.caption,
+                fontWeight: FontWeight.w700,
                 color: AppTheme.accentPrimary,
               ),
             ),
@@ -725,8 +725,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text(
                   title,
                   style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
+                    fontSize: AppTypography.bodySmall,
+                    fontWeight: FontWeight.w600,
                     color: context.textPrimary,
                   ),
                 ),
@@ -734,7 +734,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text(
                   description,
                   style: TextStyle(
-                    fontSize: 12,
+                    fontSize: AppTypography.caption,
                     color: context.textSecondary,
                     height: 1.3,
                   ),

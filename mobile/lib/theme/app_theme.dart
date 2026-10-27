@@ -1,6 +1,70 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+/// Shared typography scale used across every AssistMe screen.
+class AppTypography {
+  static const double caption = 13;
+  static const double bodySmall = 14;
+  static const double body = 16;
+  static const double bodyLarge = 18;
+  static const double heading = 20;
+  static const double title = 22;
+  static const double sectionTitle = 24;
+  static const double display = 32;
+  static const double hero = 40;
+  static const double heroLarge = 48;
+
+  static TextTheme theme({
+    required Color primary,
+    required Color secondary,
+    required Color muted,
+  }) => TextTheme(
+    displayLarge: TextStyle(
+      fontSize: heroLarge,
+      fontWeight: FontWeight.w700,
+      color: primary,
+    ),
+    displayMedium: TextStyle(
+      fontSize: hero,
+      fontWeight: FontWeight.w700,
+      color: primary,
+    ),
+    displaySmall: TextStyle(
+      fontSize: display,
+      fontWeight: FontWeight.w700,
+      color: primary,
+    ),
+    headlineSmall: TextStyle(
+      fontSize: sectionTitle,
+      fontWeight: FontWeight.w700,
+      color: primary,
+    ),
+    titleLarge: TextStyle(
+      fontSize: title,
+      fontWeight: FontWeight.w700,
+      color: primary,
+    ),
+    titleMedium: TextStyle(
+      fontSize: heading,
+      fontWeight: FontWeight.w600,
+      color: primary,
+    ),
+    bodyLarge: TextStyle(fontSize: body, height: 1.35, color: primary),
+    bodyMedium: TextStyle(fontSize: bodySmall, height: 1.35, color: secondary),
+    bodySmall: TextStyle(fontSize: caption, height: 1.3, color: muted),
+    labelLarge: TextStyle(
+      fontSize: body,
+      fontWeight: FontWeight.w600,
+      color: primary,
+    ),
+    labelMedium: TextStyle(
+      fontSize: bodySmall,
+      fontWeight: FontWeight.w500,
+      color: secondary,
+    ),
+  );
+}
+
 /// AssistMe Design System & Theme Tokens.
 /// Specially optimized for high contrast, elderly accessibility, and premium native feel.
 class AppTheme {
@@ -18,26 +82,38 @@ class AppTheme {
   static const Color _lightBgSecondary = Color(0xFFFFFFFF);
   static const Color _lightBgCard = Color(0xFFF8FAFC);
   static Color get bgPrimary => _darkMode ? _darkBgPrimary : _lightBgPrimary;
-  static Color get bgSecondary => _darkMode ? _darkBgSecondary : _lightBgSecondary;
+  static Color get bgSecondary =>
+      _darkMode ? _darkBgSecondary : _lightBgSecondary;
   static Color get bgCard => _darkMode ? _darkBgCard : _lightBgCard;
-  static Color get bgCardElevated => _darkMode ? _darkBgCardElevated : _lightBgSecondary;
-  
+  static Color get bgCardElevated =>
+      _darkMode ? _darkBgCardElevated : _lightBgSecondary;
+
   // Glassmorphic border tokens
   static const Color _darkBorderGlass = Color(0x24FFFFFF);
   static const Color _darkBorderGlassStrong = Color(0x40FFFFFF);
   static const Color _lightBorderGlass = Color(0x1E000000);
-  static Color get borderGlass => _darkMode ? _darkBorderGlass : _lightBorderGlass;
-  static Color get borderGlassStrong => _darkMode ? _darkBorderGlassStrong : const Color(0x33000000);
+  static Color get borderGlass =>
+      _darkMode ? _darkBorderGlass : _lightBorderGlass;
+  static Color get borderGlassStrong =>
+      _darkMode ? _darkBorderGlassStrong : const Color(0x33000000);
   static const Color borderGlow = Color(0x3310B981);
 
   // Vibrant, high-contrast semantic accents
-  static const Color accentPrimary = Color(0xFF6366F1); // Indigo (Helper primary)
+  static const Color accentPrimary = Color(
+    0xFF6366F1,
+  ); // Indigo (Helper primary)
   static const Color accentSecondary = Color(0xFF06B6D4); // Cyan (Highlights)
-  static const Color accentEmerald = Color(0xFF10B981); // Emerald (Helpee action & call)
+  static const Color accentEmerald = Color(
+    0xFF10B981,
+  ); // Emerald (Helpee action & call)
   static const Color accentEmeraldGlow = Color(0xFF059669);
   static const Color accentEmeraldAccessible = Color(0xFF047857);
-  static const Color accentRose = Color(0xFFEF4444); // Rose/Red (Panic stop, decline, error)
-  static const Color accentAmber = Color(0xFFF59E0B); // Amber (Pending status, warnings)
+  static const Color accentRose = Color(
+    0xFFEF4444,
+  ); // Rose/Red (Panic stop, decline, error)
+  static const Color accentAmber = Color(
+    0xFFF59E0B,
+  ); // Amber (Pending status, warnings)
 
   // Typography contrast tokens (WCAG AAA compliant on dark)
   static const Color _darkTextPrimary = Color(0xFFF9FAFB);
@@ -46,14 +122,21 @@ class AppTheme {
   static const Color _lightTextPrimary = Color(0xFF0F172A);
   static const Color _lightTextSecondary = Color(0xFF334155);
   static const Color _lightTextMuted = Color(0xFF475569);
-  static Color get textPrimary => _darkMode ? _darkTextPrimary : _lightTextPrimary;
-  static Color get textSecondary => _darkMode ? _darkTextSecondary : _lightTextSecondary;
+  static Color get textPrimary =>
+      _darkMode ? _darkTextPrimary : _lightTextPrimary;
+  static Color get textSecondary =>
+      _darkMode ? _darkTextSecondary : _lightTextSecondary;
   static Color get textMuted => _darkMode ? _darkTextMuted : _lightTextMuted;
 
   static ThemeData get darkTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
+      textTheme: AppTypography.theme(
+        primary: _darkTextPrimary,
+        secondary: _darkTextSecondary,
+        muted: _darkTextMuted,
+      ),
       scaffoldBackgroundColor: _darkBgPrimary,
       primaryColor: accentEmerald,
       colorScheme: const ColorScheme.dark(
@@ -75,8 +158,8 @@ class AppTheme {
         centerTitle: true,
         titleTextStyle: TextStyle(
           color: _darkTextPrimary,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+          fontSize: AppTypography.title,
+          fontWeight: FontWeight.w700,
           letterSpacing: -0.5,
         ),
         iconTheme: IconThemeData(color: _darkTextPrimary, size: 24),
@@ -94,29 +177,32 @@ class AppTheme {
           backgroundColor: accentEmeraldAccessible,
           foregroundColor: Colors.white,
           elevation: 2,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          minimumSize: const Size(88, 56), // Minimum 56dp touch target for accessibility
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          minimumSize: const Size(
+            80,
+            52,
+          ), // Accessible touch target with less visual bulk
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
           textStyle: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
+            fontSize: AppTypography.body,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.1,
           ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: _darkTextPrimary,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-          minimumSize: const Size(88, 54),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
+          minimumSize: const Size(80, 50),
           side: const BorderSide(color: _darkBorderGlassStrong, width: 1.5),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
           textStyle: const TextStyle(
-            fontSize: 16,
+            fontSize: AppTypography.body,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -126,7 +212,7 @@ class AppTheme {
           foregroundColor: accentSecondary,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           textStyle: const TextStyle(
-            fontSize: 15,
+            fontSize: AppTypography.bodySmall,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -134,9 +220,19 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: _darkBgCard,
-        hintStyle: const TextStyle(color: _darkTextMuted, fontSize: 16),
-        labelStyle: const TextStyle(color: _darkTextSecondary, fontSize: 16, fontWeight: FontWeight.w500),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        hintStyle: const TextStyle(
+          color: _darkTextMuted,
+          fontSize: AppTypography.body,
+        ),
+        labelStyle: const TextStyle(
+          color: _darkTextSecondary,
+          fontSize: AppTypography.body,
+          fontWeight: FontWeight.w500,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 18,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: _darkBorderGlass),
@@ -163,12 +259,12 @@ class AppTheme {
         ),
         titleTextStyle: const TextStyle(
           color: _darkTextPrimary,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+          fontSize: AppTypography.title,
+          fontWeight: FontWeight.w700,
         ),
         contentTextStyle: const TextStyle(
           color: _darkTextSecondary,
-          fontSize: 16,
+          fontSize: AppTypography.body,
           height: 1.4,
         ),
       ),
@@ -185,6 +281,11 @@ class AppTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
+      textTheme: AppTypography.theme(
+        primary: textMain,
+        secondary: textSub,
+        muted: textSub,
+      ),
       scaffoldBackgroundColor: bgLight,
       primaryColor: accentEmerald,
       colorScheme: const ColorScheme.light(
@@ -206,8 +307,8 @@ class AppTheme {
         centerTitle: true,
         titleTextStyle: TextStyle(
           color: textMain,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+          fontSize: AppTypography.title,
+          fontWeight: FontWeight.w700,
           letterSpacing: -0.5,
         ),
         iconTheme: IconThemeData(color: textMain, size: 24),
@@ -231,18 +332,28 @@ class AppTheme {
             borderRadius: BorderRadius.circular(16),
           ),
           textStyle: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.2,
+            fontSize: AppTypography.body,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.1,
           ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: cardLight,
-        hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 16),
-        labelStyle: const TextStyle(color: textSub, fontSize: 16, fontWeight: FontWeight.w500),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        hintStyle: const TextStyle(
+          color: Color(0xFF94A3B8),
+          fontSize: AppTypography.body,
+        ),
+        labelStyle: const TextStyle(
+          color: textSub,
+          fontSize: AppTypography.body,
+          fontWeight: FontWeight.w500,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 20,
+          vertical: 18,
+        ),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: borderSubtle),
@@ -265,12 +376,12 @@ class AppTheme {
         ),
         titleTextStyle: const TextStyle(
           color: textMain,
-          fontSize: 22,
-          fontWeight: FontWeight.w800,
+          fontSize: AppTypography.title,
+          fontWeight: FontWeight.w700,
         ),
         contentTextStyle: const TextStyle(
           color: textSub,
-          fontSize: 16,
+          fontSize: AppTypography.body,
           height: 1.4,
         ),
       ),
@@ -280,11 +391,17 @@ class AppTheme {
 
 extension ThemeContext on BuildContext {
   bool get isDark => Theme.of(this).brightness == Brightness.dark;
-  Color get bgPrimary => isDark ? AppTheme._darkBgPrimary : AppTheme._lightBgPrimary;
-  Color get bgSecondary => isDark ? AppTheme._darkBgSecondary : AppTheme._lightBgSecondary;
+  Color get bgPrimary =>
+      isDark ? AppTheme._darkBgPrimary : AppTheme._lightBgPrimary;
+  Color get bgSecondary =>
+      isDark ? AppTheme._darkBgSecondary : AppTheme._lightBgSecondary;
   Color get bgCard => isDark ? AppTheme._darkBgCard : AppTheme._lightBgCard;
-  Color get textPrimary => isDark ? AppTheme._darkTextPrimary : AppTheme._lightTextPrimary;
-  Color get textSecondary => isDark ? AppTheme._darkTextSecondary : AppTheme._lightTextSecondary;
-  Color get textMuted => isDark ? AppTheme._darkTextMuted : AppTheme._lightTextMuted;
-  Color get borderGlass => isDark ? AppTheme._darkBorderGlass : AppTheme._lightBorderGlass;
+  Color get textPrimary =>
+      isDark ? AppTheme._darkTextPrimary : AppTheme._lightTextPrimary;
+  Color get textSecondary =>
+      isDark ? AppTheme._darkTextSecondary : AppTheme._lightTextSecondary;
+  Color get textMuted =>
+      isDark ? AppTheme._darkTextMuted : AppTheme._lightTextMuted;
+  Color get borderGlass =>
+      isDark ? AppTheme._darkBorderGlass : AppTheme._lightBorderGlass;
 }
