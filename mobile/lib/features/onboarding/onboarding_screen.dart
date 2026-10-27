@@ -330,7 +330,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                                         apiClient: widget.apiClient,
                                         secureStorage: widget.secureStorage,
                                         onServerUrlChanged: () {
-                                          if (mounted) setState(() => _error = null);
+                                          if (mounted) {
+                                            setState(() => _error = null);
+                                          }
                                         },
                                       ),
                                     ),
