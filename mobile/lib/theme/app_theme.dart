@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// AssistMe Design System & Theme Tokens.
 /// Specially optimized for high contrast, elderly accessibility, and premium native feel.
@@ -43,6 +44,10 @@ class AppTheme {
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: bgPrimary,
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarIconBrightness: Brightness.light,
+          statusBarBrightness: Brightness.dark,
+        ),
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
@@ -170,6 +175,10 @@ class AppTheme {
       ),
       appBarTheme: const AppBarTheme(
         backgroundColor: bgLight,
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarIconBrightness: Brightness.dark,
+          statusBarBrightness: Brightness.light,
+        ),
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: true,
