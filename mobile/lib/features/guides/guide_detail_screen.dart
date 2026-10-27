@@ -115,7 +115,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
           : Image.network(
               imageUrl,
               fit: BoxFit.contain,
-              errorBuilder: (context, error, stackTrace) => const Icon(
+              errorBuilder: (context, error, stackTrace) =>  Icon(
                 Icons.broken_image,
                 size: 48,
                 color: AppTheme.textMuted,
@@ -129,7 +129,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
     decoration: BoxDecoration(
       color: AppTheme.bgSecondary,
       borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.white12),
+      border: Border.all(color: AppTheme.borderGlass),
     ),
     child: Center(
       child: Column(
@@ -139,7 +139,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
           const SizedBox(height: 8),
           Text(
             message,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
           ),
         ],
       ),
@@ -164,6 +164,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     final totalSteps = _steps.length;
     final progress = totalSteps > 0
         ? (_currentStepIndex + 1) / totalSteps
@@ -227,7 +228,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     borderRadius: BorderRadius.circular(6),
                     child: LinearProgressIndicator(
                       value: progress,
-                      backgroundColor: Colors.white12,
+                      backgroundColor: AppTheme.borderGlass,
                       valueColor: const AlwaysStoppedAnimation<Color>(
                         AppTheme.accentEmerald,
                       ),
@@ -261,8 +262,8 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     Expanded(
                       child: Text(
                         _currentStep.instruction,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
                         ),
@@ -282,8 +283,8 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     if (_currentStep.title.isNotEmpty) ...[
                       Text(
                         _currentStep.title,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
                         ),
@@ -297,12 +298,12 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                       decoration: BoxDecoration(
                         color: AppTheme.bgSecondary,
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white10),
+                        border: Border.all(color: AppTheme.borderGlass),
                       ),
                       child: Text(
                         _currentStep.instruction,
-                        style: const TextStyle(
-                          color: Colors.white,
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
                           fontSize: 17,
                           height: 1.45,
                           fontWeight: FontWeight.w600,
@@ -323,10 +324,10 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         tilePadding: EdgeInsets.zero,
                         collapsedIconColor: AppTheme.accentEmerald,
                         iconColor: AppTheme.accentEmerald,
-                        title: const Text(
+                        title: Text(
                           'Session transcript',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: AppTheme.textPrimary,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -335,7 +336,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                             alignment: Alignment.centerLeft,
                             child: SelectableText(
                               widget.guide.transcript,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: AppTheme.textSecondary,
                                 height: 1.45,
                               ),
@@ -352,7 +353,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
             // Bottom Navigation Footer
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 color: AppTheme.bgSecondary,
                 boxShadow: [
                   BoxShadow(
@@ -373,8 +374,8 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                           style: TextStyle(fontSize: 16),
                         ),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          side: const BorderSide(color: Colors.white24),
+                          foregroundColor: AppTheme.textPrimary,
+                          side: BorderSide(color: AppTheme.borderGlassStrong),
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
@@ -402,7 +403,7 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.accentEmerald,
+                        backgroundColor: AppTheme.accentEmeraldAccessible,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(

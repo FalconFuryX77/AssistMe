@@ -191,6 +191,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
@@ -355,7 +356,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                               ),
                             ),
                             const SizedBox(height: 8),
-                            const Text(
+                              Text(
                               'Make sure the helpee tapped Start Sharing\nand granted screen permission',
                               textAlign: TextAlign.center,
                               style: TextStyle(
@@ -373,7 +374,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                                 ),
                                 child: Text(
                                   'Session: ${widget.sessionId.substring(0, 6)}',
-                                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11),
                                 ),
                               ),
                             ],
@@ -389,7 +390,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
-                        children: const [
+                        children: [
                           Icon(
                             Icons.lock,
                             color: AppTheme.accentAmber,

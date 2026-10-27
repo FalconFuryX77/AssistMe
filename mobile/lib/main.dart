@@ -24,6 +24,7 @@ void main() async {
   if (isDark != null) {
     appThemeModeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
   }
+  AppTheme.setDarkMode(appThemeModeNotifier.value == ThemeMode.dark);
 
   // Restore the saved server address (Settings) if present.
   final savedUrl = await secureStorage.getServerUrl();

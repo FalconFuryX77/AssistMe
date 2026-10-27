@@ -23,6 +23,7 @@ class RiskDisclaimerModal extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Dialog(
       backgroundColor: AppTheme.bgSecondary,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -49,7 +50,7 @@ class RiskDisclaimerModal extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
-            const Text(
+              Text(
               'The helper wants more than just drawing. Read the risks carefully.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             ),
@@ -63,7 +64,7 @@ class RiskDisclaimerModal extends StatelessWidget {
               ),
               child: Text(
                 disclaimerText,
-                style: const TextStyle(
+                style: TextStyle(
                   color: AppTheme.textPrimary,
                   fontSize: 13,
                   height: 1.4,

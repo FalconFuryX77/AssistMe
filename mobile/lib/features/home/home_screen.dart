@@ -256,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             backgroundColor: AppTheme.bgSecondary,
             title: Row(
               children: [
-                const Icon(Icons.shield, color: AppTheme.accentEmerald, size: 28),
+                const Icon(Icons.shield, color: AppTheme.accentEmeraldAccessible, size: 28),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text('Allow $friendlyName?', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
@@ -265,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             content: Text(
               '$friendlyName entered your code and wants to be added as your trusted helper.\n\nDo you allow this?',
-              style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16, height: 1.4),
+              style: TextStyle(color: AppTheme.textSecondary, fontSize: 16, height: 1.4),
             ),
             actions: [
               TextButton(
@@ -287,7 +287,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Success! $friendlyName can now help you.'),
-                  backgroundColor: AppTheme.accentEmerald,
+                  backgroundColor: AppTheme.accentEmeraldAccessible,
                 ),
               );
               setState(() {
@@ -344,12 +344,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             backgroundColor: AppTheme.bgSecondary,
             title: const Row(
               children: [
-                Icon(Icons.check_circle, color: AppTheme.accentEmerald, size: 28),
+                Icon(Icons.check_circle, color: AppTheme.accentEmeraldAccessible, size: 28),
                 SizedBox(width: 12),
                 Text('Request Sent!', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
               ],
             ),
-            content: const Text(
+            content: Text(
               'The person you want to help just needs to tap "Allow" on their phone screen. Once they tap Allow, they will appear in your list here.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 16, height: 1.4),
             ),
@@ -394,7 +394,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: const Text('Remove Helper?'),
         content: Text(
           'Remove $name from your trusted helpers? They will no longer receive help calls from you.',
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
@@ -425,7 +425,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         title: const Text('Remove from List?'),
         content: Text(
           'Remove $name from the list of people you help?',
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 16),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Keep')),
@@ -716,7 +716,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         backgroundColor: AppTheme.bgSecondary,
         title: Row(
           children: [
-            const Icon(Icons.phone_in_talk, color: AppTheme.accentEmerald, size: 28),
+            const Icon(Icons.phone_in_talk, color: AppTheme.accentEmeraldAccessible, size: 28),
             const SizedBox(width: 12),
             Expanded(
               child: Text('Call $name?', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
@@ -727,7 +727,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+              Text(
               'What do you need help with? (Optional)',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
             ),
@@ -737,7 +737,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               maxLines: 2,
               maxLength: 200,
               autofocus: true,
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 18),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 18),
               decoration: const InputDecoration(
                 hintText: 'e.g. My screen is stuck',
               ),
@@ -846,7 +846,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       title: const Center(
         child: Column(
           children: [
-            Icon(Icons.ring_volume, color: AppTheme.accentEmerald, size: 48),
+            Icon(Icons.ring_volume, color: AppTheme.accentEmeraldAccessible, size: 48),
             SizedBox(height: 12),
             Text('Incoming Help Request', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
           ],
@@ -861,7 +861,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               color: AppTheme.bgPrimary,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: AppTheme.accentEmerald.withValues(alpha: 0.4)),
+              border: Border.all(color: AppTheme.accentEmeraldAccessible.withValues(alpha: 0.4)),
             ),
             child: Column(
               children: [
@@ -870,11 +870,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   style: const TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
-                    color: AppTheme.accentEmerald,
+                    color: AppTheme.accentEmeraldAccessible,
                   ),
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                  Text(
                   'needs your help on their phone',
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
                 ),
@@ -889,7 +889,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     child: Text(
                       '"$message"',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: AppTheme.textPrimary,
                         fontSize: 16,
                         fontStyle: FontStyle.italic,
@@ -937,6 +937,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Scaffold(
       backgroundColor: context.bgPrimary,
       appBar: AppBar(
@@ -966,7 +967,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
           IconButton(
             tooltip: 'My Step Guides',
-            icon: const Icon(Icons.menu_book, color: AppTheme.accentEmerald),
+            icon: const Icon(Icons.menu_book, color: AppTheme.accentEmeraldAccessible),
             onPressed: () {
               Navigator.push(
                 context,
@@ -1014,7 +1015,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _tabNeedHelp,
                   'I need help',
                   Icons.help_outline,
-                  AppTheme.accentEmerald,
+                  AppTheme.accentEmeraldAccessible,
                 ),
               ),
               Expanded(
@@ -1087,7 +1088,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   const Row(
                     children: [
-                      Icon(Icons.person_add, color: AppTheme.accentEmerald, size: 24),
+                      Icon(Icons.person_add, color: AppTheme.accentEmeraldAccessible, size: 24),
                       SizedBox(width: 10),
                       Text(
                         'Add a new helper',
@@ -1110,7 +1111,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       decoration: BoxDecoration(
                         color: context.bgPrimary,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: AppTheme.accentEmerald, width: 2),
+                        border: Border.all(color: AppTheme.accentEmeraldAccessible, width: 2),
                       ),
                       child: Text(
                         _myCode!,
@@ -1119,7 +1120,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           fontSize: 40,
                           letterSpacing: 10,
                           fontWeight: FontWeight.w900,
-                          color: AppTheme.accentEmerald,
+                          color: AppTheme.accentEmeraldAccessible,
                         ),
                       ),
                     ),
@@ -1189,7 +1190,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       children: [
                         CircleAvatar(
                           radius: 28,
-                          backgroundColor: AppTheme.accentEmerald,
+                          backgroundColor: AppTheme.accentEmeraldAccessible,
                           child: Text(
                             initial,
                             style: const TextStyle(
@@ -1224,7 +1225,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           icon: const Icon(Icons.call, size: 20),
                           label: const Text('Call'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.accentEmerald,
+                            backgroundColor: AppTheme.accentEmeraldAccessible,
                             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                             minimumSize: const Size(80, 48),
                           ),
@@ -1232,7 +1233,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         ),
                         const SizedBox(width: 4),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 22),
+                          icon: Icon(Icons.delete_outline, color: AppTheme.textMuted, size: 22),
                           tooltip: 'Remove helper',
                           onPressed: () => _removeHelper(d),
                         ),
@@ -1428,7 +1429,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       : 'They can ring your phone for help anytime',
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: isActiveForThisPerson ? AppTheme.accentEmerald : context.textSecondary,
+                                    color: isActiveForThisPerson ? AppTheme.accentEmeraldAccessible : context.textSecondary,
                                     fontWeight: isActiveForThisPerson ? FontWeight.w600 : FontWeight.normal,
                                   ),
                                 ),
@@ -1447,7 +1448,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                   : const Icon(Icons.phone_in_talk, size: 18),
                               label: const Text('Join'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: AppTheme.accentEmerald,
+                                backgroundColor: AppTheme.accentEmeraldAccessible,
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1686,7 +1687,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   width: 90,
                   height: 90,
                   decoration: BoxDecoration(
-                    color: AppTheme.accentEmerald.withValues(alpha: 0.15),
+                    color: AppTheme.accentEmeraldAccessible.withValues(alpha: 0.15),
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
@@ -1694,7 +1695,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       width: 48,
                       height: 48,
                       child: CircularProgressIndicator(
-                        color: AppTheme.accentEmerald,
+                        color: AppTheme.accentEmeraldAccessible,
                         strokeWidth: 4,
                       ),
                     ),
@@ -1704,14 +1705,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 Text(
                   'Calling ${_ringingName ?? 'your helper'}…',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 26,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                  Text(
                   'Their phone is ringing. Please wait for them to answer.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
@@ -1753,7 +1754,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             decoration: BoxDecoration(
               color: AppTheme.bgSecondary,
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: AppTheme.accentEmerald, width: 2),
+              border: Border.all(color: AppTheme.accentEmeraldAccessible, width: 2),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1762,13 +1763,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const Icon(
                   Icons.ring_volume,
                   size: 60,
-                  color: AppTheme.accentEmerald,
+                  color: AppTheme.accentEmeraldAccessible,
                 ),
                 const SizedBox(height: 20),
                 Text(
                   '$fromName needs your help',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 24,
                     fontWeight: FontWeight.w900,
@@ -1779,7 +1780,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   Text(
                     '"$message"',
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: AppTheme.textSecondary,
                       fontSize: 16,
                       fontStyle: FontStyle.italic,

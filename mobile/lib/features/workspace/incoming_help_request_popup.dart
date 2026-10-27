@@ -22,6 +22,7 @@ class IncomingHelpRequestPopup extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Dialog(
       backgroundColor: AppTheme.bgSecondary,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -37,7 +38,7 @@ class IncomingHelpRequestPopup extends StatelessWidget {
               size: 40,
             ),
             const SizedBox(height: 10),
-            const Text(
+              Text(
               'Assistance Request',
               textAlign: TextAlign.center,
               style: TextStyle(
@@ -47,7 +48,7 @@ class IncomingHelpRequestPopup extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
+              Text(
               'A trusted user needs your help. Accepting lets you draw on an '
               'overlay above their screen. More control requires their consent.',
               textAlign: TextAlign.center,

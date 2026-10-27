@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../../core/guides/screenshot_redaction.dart';
+import '../../theme/app_theme.dart';
 
 /// Opens an explicit review step and returns a PNG with redactions burned in.
 /// A null result means the user cancelled review.
@@ -143,12 +144,14 @@ class _ScreenshotRedactionEditorState
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: Colors.black,
+  Widget build(BuildContext context) {
+    Theme.of(context);
+    return Scaffold(
+    backgroundColor: AppTheme.bgPrimary,
     appBar: AppBar(
       title: const Text('Review screenshot'),
-      backgroundColor: Colors.black,
-      foregroundColor: Colors.white,
+      backgroundColor: AppTheme.bgSecondary,
+      foregroundColor: AppTheme.textPrimary,
       actions: [
         IconButton(
           tooltip: 'Undo last redaction',
@@ -169,11 +172,15 @@ class _ScreenshotRedactionEditorState
     body: SafeArea(
       child: Column(
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Text(
               'Drag over passwords, names, notifications, or other private details. Covered pixels are permanently removed from the copy used by the model and saved in your guide.',
-              style: TextStyle(color: Colors.white70),
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: 16,
+                height: 1.4,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -185,7 +192,7 @@ class _ScreenshotRedactionEditorState
                   return Center(
                     child: Text(
                       _error!,
-                      style: const TextStyle(color: Colors.white),
+                      style: TextStyle(color: AppTheme.textPrimary),
                     ),
                   );
                 }
@@ -257,7 +264,8 @@ class _ScreenshotRedactionEditorState
         ],
       ),
     ),
-  );
+    );
+  }
 }
 
 class _ScreenshotRedactionPainter extends CustomPainter {

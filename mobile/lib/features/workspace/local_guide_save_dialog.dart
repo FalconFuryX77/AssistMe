@@ -68,6 +68,17 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   bool get _selectedFramesReviewed =>
       _includedFrameIds.every(_reviewedFrameIds.contains);
 
+  String? get _saveValidationMessage {
+    if (_title.text.trim().isEmpty) return 'Enter a title for this guide.';
+    if (!_selectedFramesReviewed) {
+      return 'Open and review every selected screenshot before saving.';
+    }
+    if (_includedFrameIds.isEmpty && _transcript.text.trim().isEmpty) {
+      return 'Add notes or select a screenshot before saving.';
+    }
+    return null;
+  }
+
   Uint8List _imageFor(CapturedKeyframe frame) =>
       _reviewedImages[frame.id] ?? frame.imageBytes;
 
@@ -240,9 +251,15 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   }
 
   Future<void> _saveGuide() async {
-    if (_generating || _transcribing || !await _deleteTemporaryAudio() || !mounted) {
+    if (_generating || _transcribing) return;
+    final validationMessage = _saveValidationMessage;
+    if (validationMessage != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(validationMessage)),
+      );
       return;
     }
+    if (!await _deleteTemporaryAudio() || !mounted) return;
     Navigator.pop(
       context,
       LocalGuideSaveInput(
@@ -263,7 +280,9 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
+  Widget build(BuildContext context) {
+    Theme.of(context);
+    return PopScope(
     // Keep the temporary recording alive until native decode and on-device
     // inference finish; the explicit dialog action is disabled during inference.
     canPop: !_speechInferenceStarted,
@@ -277,9 +296,9 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'The guide and notes are encrypted and saved on this device. Nothing is uploaded. The model runs on this device. Review every selected screenshot; drag over sensitive details to permanently black them out before generation or saving.',
-              style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
+            Text(
+              'Your guide stays encrypted on this phone. To include a screenshot, select it and open it to cover private details. You can then generate and edit numbered steps on this phone.',
+              style: TextStyle(fontSize: 16, height: 1.4),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -314,11 +333,11 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
+                    Text(
                       'Call audio is temporary and stays on this device. Downloading Whisper sends only model requests; audio is deleted after transcription or when this guide is discarded.',
                       style: TextStyle(
                         color: AppTheme.textSecondary,
-                        fontSize: 12,
+                        fontSize: 14,
                         height: 1.35,
                       ),
                     ),
@@ -363,9 +382,13 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
             ],
             if (widget.frames.isNotEmpty) ...[
               const SizedBox(height: 12),
+              const Text(
+                'Choose screenshots',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+              ),
               Text(
-                'Review screenshots · ${_reviewedFrameIds.length} reviewed · ${_includedFrameIds.length} selected',
-                style: const TextStyle(fontWeight: FontWeight.w700),
+                'Select a screenshot, then open it to cover private details.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
               ),
               const SizedBox(height: 6),
               SizedBox(
@@ -393,8 +416,8 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                       ),
                       subtitle: Text(
                         _reviewedFrameIds.contains(frame.id)
-                            ? 'Reviewed · ${frame.instruction}'
-                            : 'Tap the image to review and redact before use.',
+                            ? 'Reviewed. Tap the image to change redactions.'
+                            : 'Select, then tap the image to hide private details.',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -461,9 +484,9 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
               if (_downloadProgress != null) ...[
                 const SizedBox(height: 6),
                 LinearProgressIndicator(value: _downloadProgress),
-                const Text(
+                Text(
                   'First setup downloads about 2.6 GB of model files. This download contains no session data.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
                 ),
               ],
               if (_generationError != null) ...[
@@ -483,11 +506,22 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                     maxLines: 4,
                     maxLength: 1000,
                     decoration: InputDecoration(
-                      labelText: _stepTitles[frame.id] ?? frame.title,
-                      helperText: 'Review and edit this generated draft.',
+                      labelText:
+                          'Step ${widget.frames.indexOf(frame) + 1}: ${_stepTitles[frame.id] ?? frame.title}',
+                      helperText: 'Review and edit these instructions.',
                     ),
                   ),
                 ],
+              if (_includedFrameIds.any((id) => !_reviewedFrameIds.contains(id)))
+                Text(
+                  'Review every selected screenshot before saving.',
+                  style: TextStyle(color: AppTheme.accentRose, fontSize: 15),
+                )
+              else if (_includedFrameIds.isEmpty && _transcript.text.trim().isEmpty)
+                Text(
+                  'Add notes or select a screenshot to enable saving.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+                ),
             ],
           ],
         ),
@@ -507,17 +541,11 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
         ),
       ),
       ElevatedButton(
-        onPressed:
-            _generating ||
-                _transcribing ||
-                !_selectedFramesReviewed ||
-                _title.text.trim().isEmpty ||
-                (_includedFrameIds.isEmpty && _transcript.text.trim().isEmpty)
-            ? null
-            : _saveGuide,
-        child: const Text('Save on this device'),
+        onPressed: _generating || _transcribing ? null : _saveGuide,
+        child: const Text('Save private guide'),
       ),
     ],
     ),
-  );
+    );
+  }
 }

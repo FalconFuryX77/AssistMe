@@ -83,7 +83,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.bgSecondary,
         title: const Text('Leave Help Session?'),
-        content: const Text(
+        content: Text(
           'Ending this call will end the assistance session for both of you.',
           style: TextStyle(color: AppTheme.textSecondary, fontSize: 16),
         ),
@@ -133,6 +133,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return PopScope(
       canPop: _allowPop,
       onPopInvokedWithResult: (didPop, _) {
@@ -287,9 +288,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: sharing
-            ? AppTheme.accentEmerald.withValues(alpha: 0.95)
-            : AppTheme.accentAmber.withValues(alpha: 0.95),
+        color: sharing ? const Color(0xFF047857) : const Color(0xFFFFF3C4),
         borderRadius: BorderRadius.circular(16),
         boxShadow: const [
           BoxShadow(color: Colors.black38, blurRadius: 8, offset: Offset(0, 2)),
@@ -300,7 +299,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
           Icon(
             sharing ? Icons.videocam : Icons.videocam_off,
             size: 20,
-            color: Colors.white,
+            color: sharing ? Colors.white : const Color(0xFF422006),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -308,8 +307,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
               sharing
                   ? 'Your screen is live — helper can see and guide you'
                   : 'Tap Start Sharing below to begin',
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: sharing ? Colors.white : const Color(0xFF422006),
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
               ),
@@ -342,8 +341,8 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
           const SizedBox(height: 20),
           Text(
             sharing ? 'Screen Sharing Active' : 'Ready to Share',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: AppTheme.textPrimary,
               fontSize: 22,
               fontWeight: FontWeight.w900,
             ),
@@ -354,7 +353,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                 ? 'Your helper can see your screen. You can use your phone normally.\nTap Stop Sharing below to end sharing.'
                 : 'Tap Start Sharing below so your helper can view and guide your screen.',
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               color: AppTheme.textSecondary,
               fontSize: 15,
               height: 1.4,
@@ -373,7 +372,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
             style: ElevatedButton.styleFrom(
               backgroundColor: sharing
                   ? AppTheme.accentRose
-                  : AppTheme.accentEmerald,
+                  : AppTheme.accentEmeraldAccessible,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
               shape: RoundedRectangleBorder(
@@ -416,7 +415,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                   color: AppTheme.accentEmerald,
                 ),
                 const SizedBox(width: 8),
-                const Expanded(
+                  Expanded(
                   child: Text(
                     'Viewing Screen',
                     style: TextStyle(
@@ -488,7 +487,9 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
       ),
       style: ElevatedButton.styleFrom(
         foregroundColor: selected ? Colors.white : AppTheme.textSecondary,
-        backgroundColor: selected ? AppTheme.accentEmerald : AppTheme.bgCard,
+        backgroundColor: selected
+            ? AppTheme.accentEmeraldAccessible
+            : AppTheme.bgCard,
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
         minimumSize: Size.zero,
         elevation: selected ? 2 : 0,

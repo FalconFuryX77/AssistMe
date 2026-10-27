@@ -153,7 +153,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
           builder: (ctx) => AlertDialog(
             backgroundColor: AppTheme.bgSecondary,
             title: const Text('Request sent'),
-            content: const Text(
+            content: Text(
               'The person you want to help has been notified. They just need to '
               'tap "Allow" on their phone — no passwords, nothing else for you '
               'to do. Once approved, this device can help them.',
@@ -191,7 +191,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+              Text(
               'Ask the person you are helping to open this app and press '
               '"Show my code". They will read you a 6-digit code over the call. '
               'Type it here.',
@@ -202,7 +202,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
               controller: controller,
               keyboardType: TextInputType.number,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.textPrimary,
                 letterSpacing: 6,
                 fontSize: 22,
@@ -237,7 +237,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
         content: Text(
           '"${device['friendly_name'] ?? 'Device'}" will no longer be able to '
           'help you.',
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
         ),
         actions: [
           TextButton(
@@ -276,6 +276,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Scaffold(
       appBar: AppBar(
         title: const Text('Help & Trusted People'),
@@ -329,7 +330,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
                     ),
                   ),
                 ),
-              const Text(
+                Text(
                 'People who can help you',
                 style: TextStyle(
                   color: AppTheme.textSecondary,
@@ -344,7 +345,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
                   child: Center(child: CircularProgressIndicator()),
                 )
               else if (_devices.isEmpty)
-                const Padding(
+                  Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: Text(
                     'No helpers yet. Use one of the buttons above.',
@@ -367,7 +368,7 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
       margin: const EdgeInsets.only(bottom: 10),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: AppTheme.borderGlass),
+        side: BorderSide(color: AppTheme.borderGlass),
       ),
       child: ListTile(
         leading: const CircleAvatar(
@@ -376,13 +377,13 @@ class _TrustedDevicesScreenState extends State<TrustedDevicesScreen> {
         ),
         title: Text(
           device['helper_display_name'] ?? device['friendly_name'] ?? 'Device',
-          style: const TextStyle(color: AppTheme.textPrimary),
+          style: TextStyle(color: AppTheme.textPrimary),
         ),
         subtitle: Text(
           '${device['device_platform'] ?? 'unknown'}'
           '${device['device_tag'] == null ? '' : ' • #${device['device_tag']}'}'
           ' • ${device['status']}',
-          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
         ),
         trailing: IconButton(
           icon: const Icon(Icons.delete_outline, color: AppTheme.accentRose),
@@ -413,6 +414,7 @@ class _FlowCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -434,7 +436,7 @@ class _FlowCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textPrimary,
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
@@ -446,7 +448,7 @@ class _FlowCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             subtitle,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 12),
           ElevatedButton.icon(
@@ -524,7 +526,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
           content: Text(
             '$friendlyName wants to be able to help you when you ask. '
             'Do you allow this?',
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
           ),
           actions: [
             TextButton(
@@ -599,6 +601,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Scaffold(
       backgroundColor: AppTheme.bgPrimary,
       appBar: AppBar(title: const Text('Your setup code')),
@@ -609,7 +612,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+                Text(
                 'Read this code to the person who will help you. '
                 'They enter it on their phone.',
                 textAlign: TextAlign.center,
@@ -635,7 +638,7 @@ class _MyCodeScreenState extends State<_MyCodeScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              const Text(
+                Text(
                 'Waiting for them to enter the code…\n'
                 'A button will appear here when they do.',
                 textAlign: TextAlign.center,

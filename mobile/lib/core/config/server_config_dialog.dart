@@ -138,10 +138,11 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return AlertDialog(
       backgroundColor: AppTheme.bgSecondary,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      title: const Row(
+      title: Row(
         children: [
           Icon(Icons.dns_outlined, color: AppTheme.accentPrimary, size: 26),
           SizedBox(width: 10),
@@ -160,18 +161,18 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+              Text(
               'Set the backend address used by this device.',
               style: TextStyle(color: AppTheme.textSecondary, fontSize: 14),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: _controller,
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
+              style: TextStyle(color: AppTheme.textPrimary, fontSize: 15),
               decoration: InputDecoration(
                 labelText: 'Server URL',
                 hintText: 'http://192.168.1.39:8000',
-                prefixIcon: const Icon(Icons.link, color: AppTheme.textMuted),
+                prefixIcon: Icon(Icons.link, color: AppTheme.textMuted),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.clear, size: 18),
                   onPressed: () => _controller.clear(),
@@ -180,7 +181,7 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
               keyboardType: TextInputType.url,
             ),
             const SizedBox(height: 12),
-            const Text(
+              Text(
               'Quick Presets:',
               style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
             ),

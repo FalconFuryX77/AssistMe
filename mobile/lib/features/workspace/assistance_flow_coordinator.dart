@@ -111,6 +111,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     },
   );
   bool _mediaReady = false;
+  bool _bootstrapping = false;
   bool _screenShareStarted = false;
   bool _remoteControlGranted = false;
   bool _helpeeOverlayRunning = false;
@@ -420,7 +421,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: AppTheme.bgSecondary,
         title: const Text('Include audio in a private guide?'),
-        content: const Text(
+        content: Text(
           'AssistMe will temporarily record this call’s microphone and playback audio in this Android device’s private cache. Both people must opt in before capture starts. The recording is not sent to AssistMe servers or an AI service; live WebRTC audio still travels to the other participant and may pass through the configured TURN relay. The temporary recording is deleted after local transcription or when discarded. Capture stops after 20 minutes, and you can stop it sooner.',
           style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
         ),
@@ -737,7 +738,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     final token = await widget.secureStorage.getAccessToken();
     setState(() => _helperDeviceFingerprint = fingerprint);
 
-    if (token != null) {
+    _bootstrapping = true;
+    Future<void> connectRealtime() async {
+      if (token == null) return;
       try {
         _realtime = RealtimeService(
           sessionId: widget.sessionId,
@@ -752,7 +755,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       }
     }
 
-    await _initMediaEngine();
+    // Signaling, ICE credentials, and local media setup do not depend on one
+    // another. Run them together so session startup takes roughly the slower
+    // of the two paths instead of adding their network and permission delays.
+    try {
+      await Future.wait<void>([connectRealtime(), _initMediaEngine()]);
+    } finally {
+      _bootstrapping = false;
+    }
 
     // Screen share is started by an explicit tap on "Start Sharing"
     // (no auto-start) so the mic + MediaProjection consent dialogs appear
@@ -764,6 +774,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   /// replaced. This avoids a second Android capture consent flow and restores
   /// the remote video after either phone briefly drops off the network.
   Future<void> _handleRealtimeConnected() async {
+    // The first connection is part of bootstrap. Media setup sends the initial
+    // offer once it is ready, so recovery here would rebuild an empty peer.
+    if (_bootstrapping) return;
     await Future<void>.delayed(const Duration(milliseconds: 400));
     if (!mounted || _mediaRecovering) return;
     if (widget.isHelpee && _screenShareStarted) {
@@ -1031,11 +1044,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       return;
     }
     try {
+      // Match the offer's transceiver order before adding the helper mic.
+      // The caller adds screen video first and audio second; creating an audio
+      // transceiver here first can make the answer's SDP m-lines disagree.
+      await _engine.setRemoteDescription(sdp);
+      _remoteDescriptionSet = true;
       if (!widget.isHelpee) {
         await _engine.startMicOnly();
       }
-      await _engine.setRemoteDescription(sdp);
-      _remoteDescriptionSet = true;
       for (final candidate in _pendingIceCandidates) {
         await _engine.addIceCandidate(candidate);
       }
@@ -1507,7 +1523,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+                Text(
                 'This phone is the HELPEE (person being helped). Pick the '
                 'helper and their trusted device.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
@@ -1530,7 +1546,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               else
                 Text(
                   'Trusted helper devices: ${trusted.map((d) => (d['friendly_name'] ?? 'device')).join(', ')}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: AppTheme.textSecondary,
                     fontSize: 12,
                   ),
@@ -1538,7 +1554,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               const SizedBox(height: 12),
               TextField(
                 controller: userIdController,
-                style: const TextStyle(color: AppTheme.textPrimary),
+                style: TextStyle(color: AppTheme.textPrimary),
                 decoration: const InputDecoration(
                   labelText: "Helper's user ID",
                   hintText: 'Paste the helper user id',
@@ -1547,14 +1563,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               const SizedBox(height: 12),
               TextField(
                 controller: fingerprintController,
-                style: const TextStyle(color: AppTheme.textPrimary),
+                style: TextStyle(color: AppTheme.textPrimary),
                 decoration: const InputDecoration(
                   labelText: "Helper's Device ID",
                   hintText: 'assistme-... or browser-...',
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
+                Text(
                 'The Device ID must match one you already paired in Trusted '
                 'Devices, or the request will be rejected.',
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
@@ -1753,7 +1769,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
+                Text(
                 'Phase 2 is annotation only. This single request asks for '
                 'Phase 3 full touch control: tap, swipe, and scroll. The '
                 'helpee must approve the risk screen first.',
@@ -1780,6 +1796,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Stack(
       children: [
         // Drawing overlay – for helper, only show the in-progress draft for low-latency
@@ -1838,7 +1855,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                   GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onPanUpdate: (details) => _moveHelperDock(details.delta),
-                    child: const Padding(
+                    child: Padding(
                       padding: EdgeInsets.all(8),
                       child: Icon(
                         Icons.drag_indicator,
@@ -1897,7 +1914,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                         children: [
                           Text(
                             '${widget.peerName} disconnected',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: AppTheme.textPrimary,
                               fontSize: 14,
                               fontWeight: FontWeight.w700,

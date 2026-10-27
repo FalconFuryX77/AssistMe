@@ -131,6 +131,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     final filtered = _filteredGuides;
 
     return Scaffold(
@@ -155,17 +156,17 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
               color: AppTheme.bgSecondary,
               child: TextField(
                 controller: _searchController,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
+                style: TextStyle(color: AppTheme.textPrimary, fontSize: 16),
                 decoration: InputDecoration(
                   hintText: 'Search guides (e.g. language, wifi)...',
-                  hintStyle: const TextStyle(color: AppTheme.textMuted),
+                  hintStyle: TextStyle(color: AppTheme.textMuted),
                   prefixIcon: const Icon(
                     Icons.search,
                     color: AppTheme.accentEmerald,
                   ),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
-                          icon: const Icon(
+                          icon: Icon(
                             Icons.clear,
                             color: AppTheme.textMuted,
                           ),
@@ -235,9 +236,9 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                     _searchQuery.isEmpty
                                         ? 'No Guides Saved Yet'
                                         : 'No Matching Guides',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 20,
+                                    style: TextStyle(
+                                      color: AppTheme.textPrimary,
+                                      fontSize: 22,
                                       fontWeight: FontWeight.w800,
                                     ),
                                   ),
@@ -247,7 +248,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                         ? 'After a help call, review and save selected screenshots with your own notes. Your saved guides stay encrypted on this device.'
                                         : 'Try searching with a different keyword.',
                                     textAlign: TextAlign.center,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: AppTheme.textSecondary,
                                       fontSize: 15,
                                       height: 1.4,
@@ -288,7 +289,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                               decoration: BoxDecoration(
                                 color: AppTheme.bgSecondary,
                                 borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: Colors.white10),
+                                border: Border.all(color: AppTheme.borderGlass),
                                 boxShadow: const [
                                   BoxShadow(
                                     color: Colors.black26,
@@ -321,8 +322,8 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                       children: [
                                         Text(
                                           guide.title,
-                                          style: const TextStyle(
-                                            color: Colors.white,
+                                          style: TextStyle(
+                                            color: AppTheme.textPrimary,
                                             fontSize: 17,
                                             fontWeight: FontWeight.w800,
                                           ),
@@ -333,7 +334,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                         if (guide.summary.isNotEmpty)
                                           Text(
                                             guide.summary,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               color: AppTheme.textSecondary,
                                               fontSize: 13,
                                             ),
@@ -367,7 +368,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                             const SizedBox(width: 8),
                                             Text(
                                               '${guide.createdAt.day}/${guide.createdAt.month}/${guide.createdAt.year}',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 color: AppTheme.textMuted,
                                                 fontSize: 11,
                                               ),
@@ -378,7 +379,7 @@ class _MyGuidesScreenState extends State<MyGuidesScreen> {
                                     ),
                                   ),
                                   IconButton(
-                                    icon: const Icon(
+                                    icon: Icon(
                                       Icons.delete_outline,
                                       color: AppTheme.textMuted,
                                       size: 20,

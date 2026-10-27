@@ -158,6 +158,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
     return Scaffold(
       backgroundColor: context.bgPrimary,
       appBar: AppBar(
@@ -196,6 +197,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   activeThumbColor: AppTheme.accentPrimary,
                   onChanged: (val) {
                     setState(() => _darkMode = val);
+                    AppTheme.setDarkMode(val);
                     appThemeModeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
                     widget.secureStorage.saveDarkMode(val);
                   },
@@ -435,7 +437,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        const Text(
+                          Text(
                           'AssistMe Open-Source Project',
                           style: TextStyle(
                             fontSize: 12,
@@ -467,7 +469,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         size: 22,
                       ),
                       const SizedBox(width: 10),
-                      const Expanded(
+                        Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -537,11 +539,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const SizedBox(height: 16),
                     TextField(
                       controller: _serverUrlController,
-                      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
+                      style: TextStyle(color: AppTheme.textPrimary, fontSize: 14),
                       decoration: InputDecoration(
                         labelText: 'Server Base URL',
                         hintText: 'http://192.168.1.39:8000',
-                        prefixIcon: const Icon(Icons.link, color: AppTheme.textMuted, size: 20),
+                        prefixIcon: Icon(Icons.link, color: AppTheme.textMuted, size: 20),
                         suffixIcon: IconButton(
                           icon: const Icon(Icons.clear, size: 18),
                           onPressed: () => _serverUrlController.clear(),
@@ -550,13 +552,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         fillColor: AppTheme.bgPrimary,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: AppTheme.borderGlass),
+                          borderSide: BorderSide(color: AppTheme.borderGlass),
                         ),
                       ),
                       keyboardType: TextInputType.url,
                     ),
                     const SizedBox(height: 10),
-                    const Text(
+                      Text(
                       'Quick Presets:',
                       style: TextStyle(color: AppTheme.textMuted, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
@@ -625,7 +627,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: OutlinedButton(
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppTheme.textSecondary,
-                              side: const BorderSide(color: AppTheme.borderGlass),
+                              side: BorderSide(color: AppTheme.borderGlass),
                             ),
                             onPressed: _resetServerUrlToDefault,
                             child: const Text('Reset Default'),
