@@ -319,16 +319,20 @@ class TestDockerComposeConfig:
 
 
 # ---------------------------------------------------------------------------
-# 7. Self-Signed Dev Certificate Exists
+# 7. TLS Certificates Stay Runtime-Only
 # ---------------------------------------------------------------------------
 
 class TestDevCertificatePresent:
-    """Verify that development TLS certificates are generated."""
+    """Ensure TLS material is configured but never required in source control."""
 
-    def test_fullchain_exists(self):
-        cert_path = DEPLOY_DIR / "nginx" / "certs" / "fullchain.pem"
-        assert cert_path.exists(), f"Dev certificate not found at {cert_path}"
+    def test_fullchain_is_runtime_only(self):
+        nginx_config = DEPLOY_DIR / "nginx" / "conf.d" / "assistme.conf"
+        gitignore = DEPLOY_DIR.parent / ".gitignore"
+        assert "fullchain.pem" in nginx_config.read_text(encoding="utf-8")
+        assert "deploy/nginx/certs/*.pem" in gitignore.read_text(encoding="utf-8")
 
-    def test_privkey_exists(self):
-        key_path = DEPLOY_DIR / "nginx" / "certs" / "privkey.pem"
-        assert key_path.exists(), f"Dev private key not found at {key_path}"
+    def test_privkey_is_runtime_only(self):
+        nginx_config = DEPLOY_DIR / "nginx" / "conf.d" / "assistme.conf"
+        gitignore = DEPLOY_DIR.parent / ".gitignore"
+        assert "privkey.pem" in nginx_config.read_text(encoding="utf-8")
+        assert "deploy/nginx/certs/*.pem" in gitignore.read_text(encoding="utf-8")

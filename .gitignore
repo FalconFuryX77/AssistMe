@@ -30,3 +30,6 @@ Thumbs.db
 
 # Release binaries
 releases/*.apk
+
+# Local TLS certificates and private keys (runtime only)
+deploy/nginx/certs/*.pem
