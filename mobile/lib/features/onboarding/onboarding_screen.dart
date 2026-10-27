@@ -101,7 +101,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
-          backgroundColor: AppTheme.bgSecondary,
+          backgroundColor: ctx.bgSecondary,
           title: const Row(
             children: [
               Icon(Icons.key, color: AppTheme.accentAmber, size: 28),
@@ -118,15 +118,15 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Text(
+              Text(
                 'Save this code in a safe place. If you get a new phone, this code restores your name and all your trusted helpers.',
-                style: TextStyle(color: AppTheme.textSecondary, fontSize: 15, height: 1.4),
+                style: TextStyle(color: ctx.textSecondary, fontSize: 15, height: 1.4),
               ),
               const SizedBox(height: 20),
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
                 decoration: BoxDecoration(
-                  color: AppTheme.bgPrimary,
+                  color: ctx.bgPrimary,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: AppTheme.accentEmerald, width: 2),
                 ),
@@ -183,14 +183,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.bgPrimary,
+      backgroundColor: context.bgPrimary,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
           IconButton(
             tooltip: 'Settings',
-            icon: const Icon(Icons.settings_outlined, color: AppTheme.textPrimary),
+            icon: Icon(Icons.settings_outlined, color: context.textPrimary),
             onPressed: () {
               Navigator.push(
                 context,
@@ -232,22 +232,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   ),
                 ),
                 const SizedBox(height: 28),
-                const Text(
+                Text(
                   'Welcome to AssistMe',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: AppTheme.textPrimary,
+                    color: context.textPrimary,
                     fontSize: 30,
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.5,
                   ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   'One-tap remote help from family and trusted people. No passwords to remember.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: AppTheme.textSecondary,
+                    color: context.textSecondary,
                     fontSize: 17,
                     height: 1.4,
                   ),
@@ -256,17 +256,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: AppTheme.bgSecondary,
+                    color: context.bgSecondary,
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppTheme.borderGlass),
+                    border: Border.all(color: context.borderGlass),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
+                      Text(
                         'What should we call you?',
                         style: TextStyle(
-                          color: AppTheme.textPrimary,
+                          color: context.textPrimary,
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
@@ -276,8 +276,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         controller: _nameController,
                         textCapitalization: TextCapitalization.words,
                         maxLength: 50,
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
+                        style: TextStyle(
+                          color: context.textPrimary,
                           fontSize: 22,
                           fontWeight: FontWeight.w600,
                         ),
@@ -391,7 +391,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     final code = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.bgSecondary,
+        backgroundColor: ctx.bgSecondary,
         title: const Row(
           children: [
             Icon(Icons.restore, color: AppTheme.accentSecondary, size: 26),
@@ -403,9 +403,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Type the 12-character code you saved. This will restore your name and all your trusted contacts.',
-              style: TextStyle(color: AppTheme.textSecondary, fontSize: 15),
+              style: TextStyle(color: ctx.textSecondary, fontSize: 15),
             ),
             const SizedBox(height: 18),
             TextField(
@@ -413,8 +413,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               autofocus: true,
               textCapitalization: TextCapitalization.characters,
               textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
+              style: TextStyle(
+                color: ctx.textPrimary,
                 fontSize: 22,
                 letterSpacing: 3,
                 fontWeight: FontWeight.w800,
