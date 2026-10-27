@@ -120,8 +120,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   bool _remoteDescriptionSet = false;
   bool _mediaRecovering = false;
   bool _relayFallbackAttempted = false;
+  bool _directIceRecoveryAttempted = false;
   DrawStroke? _draftStroke;
+  int _nextLocalDrawStrokeId = 0;
+  int? _activeLocalDrawStrokeId;
+  int _localDrawPreviewSequence = 0;
+  int _lastRemotePreviewStrokeId = -1;
+  int _lastRemotePreviewSequence = -1;
+  int _lastRemoteCommittedStrokeId = -1;
+  int? _remoteDraftStrokeId;
   Timer? _previewTimer;
+  Timer? _realtimePreviewTimer;
+  Map<String, dynamic>? _pendingRealtimePreview;
   List<Offset>? _pendingPreviewPoints;
   Timer? _overlayTimer;
   Offset _helperDockOffset = const Offset(16, 16);
@@ -180,7 +190,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     // If the unreliable channel is open but congested, drop this transient
     // preview instead of queuing stale points behind the current pen position.
     if (_engine.isPreviewDataChannelOpen) return;
-    _realtime?.send(payload);
+    // A WebSocket/TCP fallback can queue behind a slow network. Keep only the
+    // newest full-stroke snapshot and cap fallback previews at 10 per second.
+    _pendingRealtimePreview = payload;
+    if (_realtimePreviewTimer?.isActive == true) return;
+    _realtimePreviewTimer = Timer(const Duration(milliseconds: 100), () {
+      _realtimePreviewTimer = null;
+      final latest = _pendingRealtimePreview;
+      _pendingRealtimePreview = null;
+      if (latest != null) _realtime?.send(latest);
+    });
   }
 
   void _sendDrawPreview(List<Offset> points) {
@@ -190,6 +209,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       color: _annotationColor,
       width: _annotationWidth,
     );
+    final strokeId = _activeLocalDrawStrokeId ??= ++_nextLocalDrawStrokeId;
+    final previewSequence = ++_localDrawPreviewSequence;
     setState(() => _draftStroke = draft);
     _pendingPreviewPoints = points;
     if (_previewTimer?.isActive == true) return;
@@ -200,6 +221,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       if (latest == null || latest.isEmpty) return;
       _sendPreviewRealtimeOrP2P({
         'type': 'draw_preview',
+        'stroke_id': strokeId,
+        'preview_sequence': previewSequence,
         'points': latest
             .map(
               (p) => {
@@ -219,8 +242,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     // the single source of truth; there is no separate thin/thick mode.
     final color = _annotationColor;
     final width = _annotationWidth;
+    final strokeId = _activeLocalDrawStrokeId ?? ++_nextLocalDrawStrokeId;
+    _activeLocalDrawStrokeId = null;
+    _localDrawPreviewSequence = 0;
     _previewTimer?.cancel();
     _previewTimer = null;
+    _realtimePreviewTimer?.cancel();
+    _realtimePreviewTimer = null;
+    _pendingRealtimePreview = null;
     _pendingPreviewPoints = null;
     setState(() {
       _draftStroke = null;
@@ -229,6 +258,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     });
     _sendRealtimeOrP2P({
       'type': 'draw_stroke',
+      'stroke_id': strokeId,
       'points': points
           .map(
             (p) => {
@@ -281,6 +311,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _previewTimer?.cancel();
     _previewTimer = null;
     _pendingPreviewPoints = null;
+    _realtimePreviewTimer?.cancel();
+    _realtimePreviewTimer = null;
+    _pendingRealtimePreview = null;
+    _activeLocalDrawStrokeId = null;
+    _localDrawPreviewSequence = 0;
     _overlayTimer?.cancel();
     _overlayTimer = null;
     _draftStroke = null;
@@ -288,7 +323,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _strokes.clear();
       _redoStrokes.clear();
     });
-    _sendRealtimeOrP2P({'type': 'draw_clear'});
+    _sendRealtimeOrP2P({
+      'type': 'draw_clear',
+      'stroke_id': ++_nextLocalDrawStrokeId,
+    });
     if (notifyOverlay) {
       try {
         await AnnotationOverlayService.clear();
@@ -330,6 +368,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     // Helpee drew on the system overlay – use the native-selected color
     // (not the helper's currently selected color) so both sides see the same.
     final color = Color(colorValue);
+    final strokeId = ++_nextLocalDrawStrokeId;
     _previewTimer?.cancel();
     _previewTimer = null;
     _pendingPreviewPoints = null;
@@ -340,6 +379,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     });
     _sendRealtimeOrP2P({
       'type': 'draw_stroke',
+      'stroke_id': strokeId,
       'points': points
           .map(
             (p) => {
@@ -889,12 +929,27 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       };
       _engine.onIceStateChanged = (state) {
         if (kDebugMode) debugPrint('WebRTC ICE state: $state');
+        if (state.toLowerCase().contains('connected')) {
+          _relayFallbackAttempted = false;
+          _directIceRecoveryAttempted = false;
+        }
         if (state.toLowerCase().contains('failed') &&
             _engine.hasTurnServer &&
             !_relayFallbackAttempted &&
             mounted) {
           _relayFallbackAttempted = true;
           unawaited(_retryUsingRelay());
+        } else if (state.toLowerCase().contains('failed') &&
+            !_engine.hasTurnServer &&
+            !widget.isHelpee &&
+            !_directIceRecoveryAttempted &&
+            mounted) {
+          // Without TURN, a fresh host-candidate negotiation is the only
+          // automatic recovery available after a transient network change.
+          // Keep the helper as the requester; the helpee remains the sole
+          // offerer so both peers do not race to replace the connection.
+          _directIceRecoveryAttempted = true;
+          unawaited(_retryDirectConnection());
         }
       };
       _engine.onDiagnosticsUpdated = (metrics) {
@@ -985,6 +1040,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
+  Future<void> _retryDirectConnection() async {
+    await _recoverMedia(sendOffer: false);
+    if (mounted && !widget.isHelpee) {
+      _realtime?.send({'type': 'request_offer'});
+    }
+  }
+
   void _updateScreenShareState(bool started) {
     if (_screenShareStarted != started) {
       _screenShareStarted = started;
@@ -1071,6 +1133,29 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
+  bool _acceptRemoteDrawPreview(Map<String, dynamic> data) {
+    final rawStrokeId = data['stroke_id'];
+    final rawSequence = data['preview_sequence'];
+    // Accept legacy peers that do not send ordering metadata.
+    if (rawStrokeId is! num || rawSequence is! num) return true;
+
+    final strokeId = rawStrokeId.toInt();
+    final sequence = rawSequence.toInt();
+    if (strokeId <= _lastRemoteCommittedStrokeId ||
+        strokeId < _lastRemotePreviewStrokeId ||
+        (strokeId == _lastRemotePreviewStrokeId &&
+            sequence <= _lastRemotePreviewSequence)) {
+      return false;
+    }
+    if (strokeId > _lastRemotePreviewStrokeId) {
+      _lastRemotePreviewStrokeId = strokeId;
+      _lastRemotePreviewSequence = -1;
+    }
+    _lastRemotePreviewSequence = sequence;
+    _remoteDraftStrokeId = strokeId;
+    return true;
+  }
+
   Future<void> _onEvent(RealtimeEvent event) async {
     switch (event.type) {
       case 'assistance_requested':
@@ -1107,12 +1192,25 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               points.add(Offset(dx.toDouble(), dy.toDouble()));
             }
           }
+          final rawStrokeId = event.data['stroke_id'];
+          final strokeId = rawStrokeId is num ? rawStrokeId.toInt() : null;
+          final keepNewerDraft =
+              strokeId != null &&
+              _remoteDraftStrokeId != null &&
+              _remoteDraftStrokeId! > strokeId;
+          if (strokeId != null &&
+              strokeId > _lastRemoteCommittedStrokeId) {
+            _lastRemoteCommittedStrokeId = strokeId;
+          }
+          if (strokeId != null && _remoteDraftStrokeId == strokeId) {
+            _remoteDraftStrokeId = null;
+          }
           final rawColor = event.data['color'];
           final rawWidth = event.data['width'];
           _overlayTimer?.cancel();
           _overlayTimer = null;
           setState(() {
-            _draftStroke = null;
+            if (!keepNewerDraft) _draftStroke = null;
             _redoStrokes.clear();
             _strokes.add(
               DrawStroke(
@@ -1130,6 +1228,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'draw_preview':
+        if (!_acceptRemoteDrawPreview(event.data)) break;
         final raw = event.data['points'];
         if (raw is List) {
           final points = <Offset>[];
@@ -1189,6 +1288,12 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'draw_clear':
+        final rawStrokeId = event.data['stroke_id'];
+        if (rawStrokeId is num &&
+            rawStrokeId.toInt() > _lastRemoteCommittedStrokeId) {
+          _lastRemoteCommittedStrokeId = rawStrokeId.toInt();
+        }
+        _remoteDraftStrokeId = null;
         setState(() {
           _draftStroke = null;
           _strokes.clear();
@@ -2225,6 +2330,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     widget.annotationModeSink?.removeListener(_onAnnotationModeChanged);
     _disconnectCountdownTimer?.cancel();
     _previewTimer?.cancel();
+    _realtimePreviewTimer?.cancel();
     _overlayTimer?.cancel();
     _guideAudioLimitTimer?.cancel();
     unawaited(_guideAudioCapture.dispose());

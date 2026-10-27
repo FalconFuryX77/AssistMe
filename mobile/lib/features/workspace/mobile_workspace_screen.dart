@@ -305,7 +305,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
           Expanded(
             child: Text(
               sharing
-                  ? 'Your screen is live — helper can see and guide you'
+                  ? 'Screen capture is active'
                   : 'Tap Start Sharing below to begin',
               style: TextStyle(
                 color: sharing ? Colors.white : const Color(0xFF422006),

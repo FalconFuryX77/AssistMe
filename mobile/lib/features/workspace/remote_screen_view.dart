@@ -318,7 +318,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                 // Live remote screen stream (WebRTC), fallback placeholder.
                 if (_attachedStream != null &&
                     _rendererInitialized &&
-                    (_renderer.renderVideo || _renderer.srcObject != null))
+                    _renderer.renderVideo)
                   RTCVideoView(
                     _renderer,
                     objectFit:
@@ -346,7 +346,7 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                             const SizedBox(height: 14),
                             Text(
                               _attachedStream != null
-                                  ? 'Connecting to remote screen…'
+                                  ? 'No screen image yet'
                                   : 'Waiting for the other device to share…',
                               textAlign: TextAlign.center,
                               style: const TextStyle(
@@ -357,11 +357,14 @@ class _RemoteScreenViewState extends State<RemoteScreenView> {
                             ),
                             const SizedBox(height: 8),
                               Text(
-                              'Make sure the helpee tapped Start Sharing\nand granted screen permission',
+                              _attachedStream != null
+                                  ? 'Check that both phones have a working internet connection. Some networks need a media relay.'
+                                  : 'Ask them to tap Start Sharing and approve the system prompt.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 12,
+                                color: Colors.white70,
+                                fontSize: 14,
+                                height: 1.35,
                               ),
                             ),
                             if (!widget.isFlagSecureActive) ...[
