@@ -34,6 +34,7 @@ class LocalGuideSaveDialog extends StatefulWidget {
   final String suggestedTitle;
   final List<LocalGuideAudioRecording> audioRecordings;
   final bool helperCuratedFrames;
+  final bool guideOwner;
 
   const LocalGuideSaveDialog({
     super.key,
@@ -41,6 +42,7 @@ class LocalGuideSaveDialog extends StatefulWidget {
     required this.suggestedTitle,
     this.audioRecordings = const [],
     this.helperCuratedFrames = false,
+    this.guideOwner = false,
   });
 
   @override
@@ -322,7 +324,9 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
               children: [
                 Text(
                   widget.helperCuratedFrames
-                      ? 'Your helper chose and redacted these screenshots. Guide generation and encrypted storage happen on this phone.'
+                      ? widget.guideOwner
+                            ? 'You chose and redacted these steps during the call. Review the guide, add notes, and save it. The finished guide will be encrypted on your phone and synced to the other participant.'
+                            : 'Your helper chose and redacted these steps. The finished guide is saved automatically on this phone.'
                       : 'Your guide stays encrypted on this phone. To include a screenshot, select it and open it to cover private details. You can then generate and edit numbered steps on this phone.',
                   style: TextStyle(fontSize: AppTypography.body, height: 1.4),
                 ),

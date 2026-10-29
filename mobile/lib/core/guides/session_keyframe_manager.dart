@@ -109,11 +109,14 @@ class SessionKeyframeManager {
   Future<KeyframeCaptureResult> addPreReviewedFrame(
     Uint8List bytes, {
     required String title,
+    required String instruction,
+    String? id,
   }) => _storeFrameBytes(
     bytes,
     title: title,
-    instruction: 'Selected and redacted by the helper.',
+    instruction: instruction,
     privacyReviewed: true,
+    id: id,
   );
 
   Future<KeyframeCaptureResult> _storeFrameBytes(
@@ -121,6 +124,7 @@ class SessionKeyframeManager {
     required String title,
     required String instruction,
     required bool privacyReviewed,
+    String? id,
   }) async {
     if (bytes.isEmpty || bytes.length > _maxRetainedBytes) {
       return KeyframeCaptureResult.unavailable;
@@ -142,7 +146,8 @@ class SessionKeyframeManager {
     }
     _keyframes.add(
       CapturedKeyframe(
-        id: '${DateTime.now().microsecondsSinceEpoch}_${Random.secure().nextInt(1 << 32)}',
+        id: id ??
+            '${DateTime.now().microsecondsSinceEpoch}_${Random.secure().nextInt(1 << 32)}',
         timestamp: DateTime.now(),
         imageBytes: Uint8List.fromList(bytes),
         title: title,

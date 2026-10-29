@@ -14,6 +14,7 @@ library;
 import 'dart:convert';
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -122,6 +123,11 @@ class WebRTCEngine {
       }
     };
     _pc!.onTrack = (event) async {
+      debugPrint(
+        '[AssistMe][MEDIA] remote track kind=${event.track.kind} '
+        'enabled=${event.track.enabled} muted=${event.track.muted} '
+        'streams=${event.streams.length}',
+      );
       if (event.streams.isNotEmpty) {
         onRemoteStream?.call(event.streams.first);
       } else {
@@ -143,6 +149,7 @@ class WebRTCEngine {
       _setupDataChannel(channel);
     };
     _pc!.onConnectionState = (state) {
+      debugPrint('[AssistMe][MEDIA] peer connection state=$state');
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _setState(WebRTCEngineState.connected);
@@ -162,6 +169,7 @@ class WebRTCEngine {
       }
     };
     _pc!.onIceConnectionState = (state) {
+      debugPrint('[AssistMe][MEDIA] ICE connection state=$state');
       onIceStateChanged?.call(state.toString());
     };
 
@@ -291,6 +299,11 @@ class WebRTCEngine {
     }
     _screenStream = screen;
 
+    debugPrint(
+      '[AssistMe][MEDIA] screen capture returned '
+      'videoTracks=${screen.getVideoTracks().length} '
+      'audioTracks=${screen.getAudioTracks().length}',
+    );
     for (final track in screen.getVideoTracks()) {
       await _pc!.addTrack(track, screen);
       await _tuneVideoSender(track);
@@ -492,11 +505,17 @@ class WebRTCEngine {
           break;
         }
       }
-      if (pair == null) return;
+      if (pair == null) {
+        onDiagnosticsUpdated?.call({'candidatePairSelected': false});
+        return;
+      }
 
       final local = reportsById[pair.values['localCandidateId']];
       final remote = reportsById[pair.values['remoteCandidateId']];
       final inbound = reports.where((report) => report.type == 'inbound-rtp');
+      final inboundVideo = inbound.where((report) =>
+          report.values['kind'] == 'video' ||
+          report.values['mediaType'] == 'video');
       final outbound = reports.where((report) => report.type == 'outbound-rtp');
       final roundTripSeconds = pair.values['currentRoundTripTime'] as num?;
       final jitterSeconds = inbound
@@ -507,12 +526,21 @@ class WebRTCEngine {
           .map((report) => report.values['packetsLost'] as num?)
           .whereType<num>()
           .fold<num>(0, (sum, value) => sum + value);
-      final videoFps = inbound
+      final videoFps = inboundVideo
           .map((report) => report.values['framesPerSecond'] as num?)
           .whereType<num>()
           .fold<num>(0, (largest, value) => value > largest ? value : largest);
+      final videoFramesDecoded = inboundVideo
+          .map((report) => report.values['framesDecoded'] as num?)
+          .whereType<num>()
+          .fold<num>(0, (sum, value) => sum + value);
+      final videoBytesReceived = inboundVideo
+          .map((report) => report.values['bytesReceived'] as num?)
+          .whereType<num>()
+          .fold<num>(0, (sum, value) => sum + value);
 
       onDiagnosticsUpdated?.call({
+        'candidatePairSelected': true,
         'localCandidateType': local?.values['candidateType'],
         'remoteCandidateType': remote?.values['candidateType'],
         'protocol': local?.values['protocol'],
@@ -522,6 +550,8 @@ class WebRTCEngine {
         'jitterMs': (jitterSeconds * 1000).round(),
         'packetsLost': lost.round(),
         'incomingVideoFps': videoFps.round(),
+        'videoFramesDecoded': videoFramesDecoded.round(),
+        'videoBytesReceived': videoBytesReceived.round(),
         'outboundBytes': outbound
             .map((report) => report.values['bytesSent'] as num?)
             .whereType<num>()
@@ -543,6 +573,11 @@ class WebRTCEngine {
       await createDataChannel();
     }
     final offer = await _pc!.createOffer({});
+    debugPrint(
+      '[AssistMe][MEDIA] local offer created '
+      'audio=${_sdpHasMedia(offer.sdp, 'audio')} '
+      'video=${_sdpHasMedia(offer.sdp, 'video')}',
+    );
     await _pc!.setLocalDescription(offer);
     final desc = await _pc!.getLocalDescription();
     return {'type': desc!.type, 'sdp': desc.sdp};
@@ -550,6 +585,11 @@ class WebRTCEngine {
 
   Future<Map<String, dynamic>> createAnswer() async {
     final answer = await _pc!.createAnswer({});
+    debugPrint(
+      '[AssistMe][MEDIA] local answer created '
+      'audio=${_sdpHasMedia(answer.sdp, 'audio')} '
+      'video=${_sdpHasMedia(answer.sdp, 'video')}',
+    );
     await _pc!.setLocalDescription(answer);
     final desc = await _pc!.getLocalDescription();
     return {'type': desc!.type, 'sdp': desc.sdp};
@@ -563,10 +603,20 @@ class WebRTCEngine {
     final signalingState = await peer.getSignalingState();
     if (type == 'answer' &&
         signalingState == RTCSignalingState.RTCSignalingStateStable) {
+      debugPrint('[AssistMe][MEDIA] ignored stale answer in stable state');
       return;
     }
+    debugPrint(
+      '[AssistMe][MEDIA] applying remote $type '
+      'audio=${_sdpHasMedia(description, 'audio')} '
+      'video=${_sdpHasMedia(description, 'video')}',
+    );
     await peer.setRemoteDescription(RTCSessionDescription(description, type));
   }
+
+  bool _sdpHasMedia(String? sdp, String kind) =>
+      sdp?.split('\n').any((line) => line.trim().startsWith('m=$kind ')) ??
+      false;
 
   Future<void> addIceCandidate(Map<String, dynamic> candidate) async {
     final peer = _pc;

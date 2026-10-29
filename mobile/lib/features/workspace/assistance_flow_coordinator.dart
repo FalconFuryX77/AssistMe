@@ -38,6 +38,7 @@ import 'screenshot_redaction_editor.dart';
 class _IncomingGuideFrameTransfer {
   final String id;
   final String title;
+  final String instruction;
   final int expectedBytes;
   final int expectedChunks;
   final List<Uint8List> chunks = <Uint8List>[];
@@ -46,6 +47,7 @@ class _IncomingGuideFrameTransfer {
   _IncomingGuideFrameTransfer({
     required this.id,
     required this.title,
+    required this.instruction,
     required this.expectedBytes,
     required this.expectedChunks,
   });
@@ -137,6 +139,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   final List<Map<String, dynamic>> _pendingIceCandidates = [];
   bool _remoteDescriptionSet = false;
   bool _mediaRecovering = false;
+  DateTime? _lastSignalingWarningAt;
   bool _relayFallbackAttempted = false;
   bool _directIceRecoveryAttempted = false;
   DrawStroke? _draftStroke;
@@ -158,6 +161,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   int _totalAloneSeconds = 0;
   bool _sessionTerminationHandled = false;
   bool _guideReviewShown = false;
+  Completer<bool>? _pendingGuideFinalizationAck;
+  Completer<void>? _sessionEndCompleter;
+  bool _waitingForHelperFinalization = false;
   static const int _maxGuideFrameBytes = 2 * 1024 * 1024;
   static const int _guideFrameChunkBytes = 12 * 1024;
   _IncomingGuideFrameTransfer? _incomingGuideFrameTransfer;
@@ -726,9 +732,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   /// Helpee STOP – VISION §12.5 panic: immediately shuts down everything for
   /// both sides (screen, annotations, control, overlay) so helper never sees
   /// stale docs after helpee closed the app or tapped STOP.
-  Future<void> _panicStop({bool isLocalLeave = false}) async {
+  Future<void> _panicStop({
+    bool isLocalLeave = false,
+    bool skipGuideFinalization = false,
+  }) async {
     if (_sessionTerminationHandled) return;
     _sessionTerminationHandled = true;
+
+    // The helper owns the guide. Finalize and sync it while the secure data
+    // channel is still alive, before either participant leaves the session.
+    if (!widget.isHelpee && !skipGuideFinalization) {
+      await _offerLocalGuideSave();
+    }
+
     _sendRealtimeOrP2P({'type': 'session_ended'});
     _sendRealtimeOrP2P({'type': 'draw_clear'});
     try {
@@ -744,7 +760,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _helpeeOverlayRunning = false;
     if (mounted) setState(() {});
 
-    await _offerLocalGuideSave();
+    if (widget.isHelpee) await _offerLocalGuideSave();
 
     if (!isLocalLeave) {
       await widget.onSessionEnded?.call();
@@ -757,23 +773,36 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _guideReviewShown = true;
     _localGuideAudioConsent = false;
     _peerGuideAudioConsent = false;
-    await _stopGuideAudioCapture(discard: false);
+    await _stopGuideAudioCapture(discard: widget.isHelpee);
     if (!mounted) return;
     _setGuideAudioStatus(GuideAudioCaptureStatus.off);
+
+    // The helpee no longer has a save/redaction/review prompt. The helper's
+    // finalized guide arrives over the encrypted peer data channel and is
+    // stored automatically by _receiveFinalizedGuide().
+    if (widget.isHelpee) {
+      await _deletePendingGuideAudio();
+      return;
+    }
+
     final now = DateTime.now();
-    if (!widget.isHelpee) return;
     final input = await showDialog<LocalGuideSaveInput>(
       context: context,
       barrierDismissible: false,
       builder: (_) => LocalGuideSaveDialog(
         frames: _keyframeManager.keyframes,
-        audioRecordings: List.unmodifiable(_pendingGuideAudioRecordings),
+        audioRecordings: const [],
         helperCuratedFrames: true,
+        guideOwner: true,
         suggestedTitle:
             'Help guide ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
       ),
     );
-    if (input == null || !mounted) return;
+    if (!mounted) return;
+    if (input == null) {
+      await _sendGuideFinalization(saved: false);
+      return;
+    }
     try {
       final transcript = input.transcript;
       final includedFrames = _keyframeManager.keyframes
@@ -811,9 +840,22 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             frames: includedFrames,
             sessionId: widget.sessionId,
           );
+      final synced = await _sendGuideFinalization(
+        saved: true,
+        title: input.title,
+        summary: guide.summary,
+        transcript: transcript,
+        frames: includedFrames,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Saved “${guide.title}” on this device.')),
+          SnackBar(
+            content: Text(
+              synced
+                  ? 'Saved “${guide.title}” on both devices.'
+                  : 'Saved “${guide.title}” here. The other device could not be reached to sync it.',
+            ),
+          ),
         );
       }
     } catch (_) {
@@ -827,7 +869,174 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  Future<void> leave() => _panicStop(isLocalLeave: true);
+  Future<void> _deletePendingGuideAudio() async {
+    for (final recording in _pendingGuideAudioRecordings) {
+      try {
+        await recording.delete();
+      } catch (_) {}
+    }
+    _pendingGuideAudioRecordings.clear();
+  }
+
+  Future<bool> _sendGuideFinalization({
+    required bool saved,
+    String? title,
+    String? summary,
+    String? transcript,
+    List<CapturedKeyframe> frames = const [],
+  }) async {
+    final steps = frames
+        .map(
+          (frame) => {
+            'id': frame.id,
+            'title': frame.title,
+            'instruction': frame.instruction,
+          },
+        )
+        .toList(growable: false);
+    final payload = <String, dynamic>{
+      'type': 'guide_finalize',
+      'saved': saved,
+      if (saved) ...{
+        'title': title,
+        'summary': summary,
+        'transcript': transcript,
+        'steps': steps,
+      },
+    };
+    final ack = Completer<bool>();
+    _pendingGuideFinalizationAck = ack;
+    try {
+      var sent = false;
+      for (var attempt = 0; attempt < 20 && mounted; attempt++) {
+        if (_engine.sendData(payload)) {
+          sent = true;
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+      if (!sent) return false;
+      return await ack.future.timeout(const Duration(seconds: 15));
+    } catch (_) {
+      return false;
+    } finally {
+      if (identical(_pendingGuideFinalizationAck, ack)) {
+        _pendingGuideFinalizationAck = null;
+      }
+    }
+  }
+
+  Future<void> _receiveFinalizedGuide(Map<String, dynamic> data) async {
+    final saved = data['saved'] == true;
+    if (!saved) {
+      _engine.sendData({'type': 'guide_finalize_ack', 'saved': false});
+      return;
+    }
+    if (!widget.isHelpee) {
+      _engine.sendData({'type': 'guide_finalize_ack', 'saved': false});
+      return;
+    }
+
+    try {
+      final title = data['title'];
+      final summary = data['summary'];
+      final transcript = data['transcript'];
+      final rawSteps = data['steps'];
+      if (title is! String ||
+          title.trim().isEmpty ||
+          title.length > 100 ||
+          summary is! String ||
+          transcript is! String ||
+          transcript.length > 20000 ||
+          rawSteps is! List) {
+        throw const FormatException('Invalid finalized guide metadata.');
+      }
+      final cachedFrames = {
+        for (final frame in _keyframeManager.keyframes) frame.id: frame,
+      };
+      final frames = <CapturedKeyframe>[];
+      for (final rawStep in rawSteps) {
+        if (rawStep is! Map) {
+          throw const FormatException('Invalid guide step.');
+        }
+        final step = Map<String, dynamic>.from(rawStep);
+        final id = step['id'];
+        final stepTitle = step['title'];
+        final instruction = step['instruction'];
+        final cached = id is String ? cachedFrames[id] : null;
+        if (cached == null ||
+            stepTitle is! String ||
+            stepTitle.length > 100 ||
+            instruction is! String ||
+            instruction.length > 4000) {
+          throw const FormatException('A guide step is missing or invalid.');
+        }
+        frames.add(
+          CapturedKeyframe(
+            id: cached.id,
+            timestamp: cached.timestamp,
+            imageBytes: cached.imageBytes,
+            title: stepTitle,
+            instruction: instruction,
+            perceptualHash: cached.perceptualHash,
+            colorSignature: cached.colorSignature,
+            privacyReviewed: true,
+          ),
+        );
+      }
+      final guide = await LocalGuideStore(secureStorage: widget.secureStorage)
+          .saveSession(
+            title: title.trim(),
+            summary: summary,
+            transcript: transcript,
+            frames: frames,
+            sessionId: widget.sessionId,
+          );
+      _engine.sendData({'type': 'guide_finalize_ack', 'saved': true});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('“${guide.title}” was saved from your helper.')),
+        );
+      }
+    } catch (_) {
+      _engine.sendData({'type': 'guide_finalize_ack', 'saved': false});
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('The helper guide could not be synced.')),
+        );
+      }
+    }
+  }
+
+  Future<void> leave() async {
+    if (!widget.isHelpee) {
+      await _panicStop(isLocalLeave: true);
+      return;
+    }
+
+    if (_sessionTerminationHandled || _waitingForHelperFinalization) return;
+    _waitingForHelperFinalization = true;
+    final ended = Completer<void>();
+    _sessionEndCompleter = ended;
+    _sendRealtimeOrP2P({'type': 'session_end_requested'});
+    _showGuideMessage('Waiting for your helper to finish and sync the guide…');
+    try {
+      await ended.future.timeout(const Duration(seconds: 90));
+    } on TimeoutException {
+      // If the helper is gone, let the helpee leave cleanly after the bounded
+      // wait. The helper remains the only participant who can finalize a guide.
+      await _panicStop(isLocalLeave: true, skipGuideFinalization: true);
+    } finally {
+      _waitingForHelperFinalization = false;
+      if (identical(_sessionEndCompleter, ended)) _sessionEndCompleter = null;
+    }
+  }
+
+  Future<void> requestGuideScreenshot() async {
+    if (!widget.isHelpee) return;
+    _sendRealtimeOrP2P({'type': 'guide_screenshot_request'});
+    _showGuideMessage('Screenshot request sent to your helper.');
+  }
 
   Future<void> _bootstrap() async {
     final fingerprint = await DeviceIdentity.getFingerprint(
@@ -846,6 +1055,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           accessTokenProvider: widget.apiClient.getRealtimeAccessToken,
         );
         _realtime!.onConnected = _handleRealtimeConnected;
+        _realtime!.onConnectionIssue = _handleSignalingIssue;
         _realtime!.events.listen(_onEvent);
         await _realtime!.connect();
       } catch (e) {
@@ -872,6 +1082,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   /// replaced. This avoids a second Android capture consent flow and restores
   /// the remote video after either phone briefly drops off the network.
   Future<void> _handleRealtimeConnected() async {
+    debugPrint(
+      '[AssistMe][CALL] signaling connected '
+      'role=${widget.isHelpee ? 'helpee' : 'helper'} '
+      'shareActive=$_screenShareStarted bootstrapping=$_bootstrapping',
+    );
     // The first connection is part of bootstrap. Media setup sends the initial
     // offer once it is ready, so recovery here would rebuild an empty peer.
     if (_bootstrapping) return;
@@ -983,10 +1198,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
     try {
       _engine.onStateChanged = (state) {
-        if (kDebugMode) debugPrint('WebRTC peer state: ${state.name}');
+        debugPrint(
+          '[AssistMe][MEDIA] role=${widget.isHelpee ? 'helpee' : 'helper'} '
+          'peer=${state.name}',
+        );
       };
       _engine.onIceStateChanged = (state) {
-        if (kDebugMode) debugPrint('WebRTC ICE state: $state');
+        debugPrint(
+          '[AssistMe][MEDIA] role=${widget.isHelpee ? 'helpee' : 'helper'} '
+          'ICE=$state',
+        );
         if (state.toLowerCase().contains('connected')) {
           _relayFallbackAttempted = false;
           _directIceRecoveryAttempted = false;
@@ -1011,7 +1232,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       _engine.onDiagnosticsUpdated = (metrics) {
-        if (kDebugMode) debugPrint('WebRTC transport metrics: $metrics');
+        debugPrint('[AssistMe][MEDIA] transport=$metrics');
       };
       _engine.onLocalCandidate = (candidate) {
         _realtime?.send({
@@ -1022,7 +1243,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _engine.onDataChannelMessage = (data) {
         final type = data['type'] as String?;
         if (type == null) return;
-        if (type.startsWith('guide_frame_')) {
+        if (type.startsWith('guide_frame_') ||
+            type.startsWith('guide_finalize')) {
           unawaited(_onGuideFrameMessage(data));
         } else {
           _onEvent(RealtimeEvent(type, data));
@@ -1046,6 +1268,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // streams; keep whichever carries video for the viewport (remote
         // audio plays through the peer connection regardless).
         final current = remoteStreamNotifier.value;
+        debugPrint(
+          '[AssistMe][MEDIA] remote stream received '
+          'audioTracks=${stream.getAudioTracks().length} '
+          'videoTracks=${stream.getVideoTracks().length}',
+        );
         if (current == null || stream.getVideoTracks().isNotEmpty) {
           remoteStreamNotifier.value = stream;
         }
@@ -1116,6 +1343,39 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
+  void _handleSignalingIssue(String message) {
+    final sessionPrefix = widget.sessionId.length > 6
+        ? widget.sessionId.substring(0, 6)
+        : widget.sessionId;
+    debugPrint(
+      '[AssistMe][CALL] role=${widget.isHelpee ? 'helpee' : 'helper'} '
+      'session=$sessionPrefix signalingIssue=$message',
+    );
+    final now = DateTime.now();
+    final previous = _lastSignalingWarningAt;
+    if (!mounted ||
+        (previous != null && now.difference(previous).inSeconds < 15)) {
+      return;
+    }
+    _lastSignalingWarningAt = now;
+    final displayMessage = message.length > 180
+        ? '${message.substring(0, 180)}…'
+        : message;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 10),
+          content: Text(
+            'Call signaling is unavailable. Screen, voice, and annotations '
+            'cannot negotiate until it reconnects. $displayMessage',
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+  }
+
   /// Helpee: capture screen + mic, then offer to the room.
   Future<void> startScreenShare() async {
     if (_screenShareStarted || !_mediaReady) {
@@ -1128,15 +1388,32 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       }
       return;
     }
+    if (_realtime?.isConnected != true) {
+      debugPrint(
+        '[AssistMe][CALL] refusing to start screen share because signaling '
+        'websocket is disconnected',
+      );
+      _handleSignalingIssue(
+        'The session WebSocket is not connected. Rejoin the session before sharing.',
+      );
+      return;
+    }
     try {
       // Will pop system dialogs: microphone + screen capture
       await _engine.startScreenCapture();
       final offer = await _engine.createOffer();
-      _realtime?.send({'type': 'signal_offer', 'sdp': offer});
+      final offerSent = _realtime?.send({'type': 'signal_offer', 'sdp': offer}) ?? false;
+      if (!offerSent) {
+        await _engine.stopScreenCapture();
+        throw StateError('The session signaling socket closed before the screen offer was sent.');
+      }
       _realtime?.send({'type': 'screen_share_start', 'platform': 'android'});
       _updateScreenShareState(true);
       await _startHelpeeOverlay();
     } catch (e) {
+      try {
+        await _engine.stopScreenCapture();
+      } catch (_) {}
       debugPrint('Screen share failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1167,6 +1444,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       return;
     }
     try {
+      debugPrint('[AssistMe][CALL] received WebRTC offer; applying remote SDP');
       // Match the offer's transceiver order before adding the helper mic.
       // The caller adds screen video first and audio second; creating an audio
       // transceiver here first can make the answer's SDP m-lines disagree.
@@ -1180,7 +1458,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       }
       _pendingIceCandidates.clear();
       final answer = await _engine.createAnswer();
-      _realtime?.send({'type': 'signal_answer', 'sdp': answer});
+      final answerSent = _realtime?.send({'type': 'signal_answer', 'sdp': answer}) ?? false;
+      debugPrint('[AssistMe][CALL] answer written to signaling socket=$answerSent');
     } catch (e) {
       debugPrint('Answering offer failed: $e');
       if (mounted) {
@@ -1542,6 +1821,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       // --- WebRTC signaling relay ---
       case 'signal_offer':
         if (!widget.isHelpee) {
+          debugPrint('[AssistMe][CALL] signaling delivered signal_offer to helper');
           final sdp = event.data['sdp'];
           if (sdp is Map) _handleIncomingOffer(Map<String, dynamic>.from(sdp));
         }
@@ -1549,6 +1829,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
       case 'signal_answer':
         if (widget.isHelpee) {
+          debugPrint('[AssistMe][CALL] signaling delivered signal_answer to helpee');
           final sdp = event.data['sdp'];
           if (sdp is Map) {
             _engine
@@ -1578,6 +1859,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       case 'signal_ice_candidate':
         final candidate = event.data['candidate'];
         if (candidate is Map) {
+          debugPrint(
+            '[AssistMe][CALL] remote ICE candidate received '
+            'remoteDescriptionSet=$_remoteDescriptionSet',
+          );
           final normalized = Map<String, dynamic>.from(candidate);
           if (!_remoteDescriptionSet) {
             _pendingIceCandidates.add(normalized);
@@ -1599,6 +1884,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       case 'screen_share_stop':
         if (!widget.isHelpee) remoteStreamNotifier.value = null;
         break;
+      case 'guide_screenshot_request':
+        if (!widget.isHelpee) unawaited(captureGuideStep());
+        break;
+      case 'session_end_requested':
+        if (!widget.isHelpee) {
+          unawaited(_panicStop(isLocalLeave: false));
+        }
+        break;
       case 'user_left':
       case 'session_ended':
       case 'session_closed':
@@ -1616,6 +1909,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         } catch (_) {}
         _remoteControlGranted = false;
         widget.remoteControlSink?.value = false;
+        if (event.type == 'session_ended' &&
+            _sessionEndCompleter != null &&
+            !_sessionEndCompleter!.isCompleted) {
+          _sessionEndCompleter!.complete();
+        }
         await _offerLocalGuideSave();
         remoteStreamNotifier.value = null;
         _helpeeOverlayRunning = false;
@@ -2359,8 +2657,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final transferId =
           '${DateTime.now().microsecondsSinceEpoch}_${_guideFrameOrdinal + 1}';
       pendingTransferId = transferId;
-      final title = await _requestGuideStepTitle(_guideFrameOrdinal + 1);
-      if (title == null || !mounted) return;
+      final details = await _requestGuideStepDetails(_guideFrameOrdinal + 1);
+      if (details == null || !mounted) return;
+      final title = details['title']!;
+      final instruction = details['instruction']!;
       final chunkCount =
           (redacted.length + _guideFrameChunkBytes - 1) ~/
           _guideFrameChunkBytes;
@@ -2370,6 +2670,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         'type': 'guide_frame_start',
         'transfer_id': transferId,
         'title': title,
+        'instruction': instruction,
         'byte_count': redacted.length,
         'chunk_count': chunkCount,
       })) {
@@ -2421,9 +2722,21 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       if (!mounted) return;
       switch (result) {
         case KeyframeCaptureResult.saved:
+          final localResult = await _keyframeManager.addPreReviewedFrame(
+            Uint8List.fromList(redacted),
+            title: title,
+            instruction: instruction,
+            id: transferId,
+          );
+          if (localResult != KeyframeCaptureResult.saved) {
+            _showGuideMessage(
+              'The other device received the step, but it could not be retained for your guide.',
+            );
+            return;
+          }
           _guideFrameOrdinal++;
           _showGuideMessage(
-            'Redacted step added to the private guide on ${widget.peerName}’s phone.',
+            'Redacted step added to the guide on both devices.',
           );
         case KeyframeCaptureResult.duplicate:
           _showGuideMessage('That screen is already in the guide.');
@@ -2444,22 +2757,38 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  Future<String?> _requestGuideStepTitle(int stepNumber) async {
-    final controller = TextEditingController(text: 'Step $stepNumber');
+  Future<Map<String, String>?> _requestGuideStepDetails(int stepNumber) async {
+    final titleController = TextEditingController(text: 'Step $stepNumber');
+    final instructionController = TextEditingController();
     try {
-      return await showDialog<String>(
+      return await showDialog<Map<String, String>>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Name this guide step'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            maxLength: 100,
-            textCapitalization: TextCapitalization.sentences,
-            decoration: const InputDecoration(
-              labelText: 'Step name',
-              hintText: 'For example, Open account settings',
-            ),
+          title: const Text('Write this guide step'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleController,
+                autofocus: true,
+                maxLength: 100,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Step name',
+                  hintText: 'For example, Open account settings',
+                ),
+              ),
+              TextField(
+                controller: instructionController,
+                maxLength: 4000,
+                minLines: 2,
+                maxLines: 4,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'What should the user do?',
+                ),
+              ),
+            ],
           ),
           actions: [
             TextButton(
@@ -2468,8 +2797,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             ),
             FilledButton(
               onPressed: () {
-                final value = controller.text.trim();
-                if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+                final title = titleController.text.trim();
+                final instruction = instructionController.text.trim();
+                if (title.isNotEmpty && instruction.isNotEmpty) {
+                  Navigator.pop(dialogContext, {
+                    'title': title,
+                    'instruction': instruction,
+                  });
+                }
               },
               child: const Text('Add step'),
             ),
@@ -2477,7 +2812,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         ),
       );
     } finally {
-      controller.dispose();
+      titleController.dispose();
+      instructionController.dispose();
     }
   }
 
@@ -2491,6 +2827,17 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Future<void> _onGuideFrameMessage(Map<String, dynamic> data) async {
     final type = data['type'] as String?;
     final transferId = data['transfer_id'] as String?;
+    if (type == 'guide_finalize') {
+      await _receiveFinalizedGuide(data);
+      return;
+    }
+    if (type == 'guide_finalize_ack') {
+      final ack = _pendingGuideFinalizationAck;
+      if (ack != null && !ack.isCompleted) {
+        ack.complete(data['saved'] == true);
+      }
+      return;
+    }
     if (type == null || transferId == null) return;
     if (type == 'guide_frame_ack') {
       if (widget.isHelpee) return;
@@ -2515,6 +2862,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final byteCount = data['byte_count'];
       final chunkCount = data['chunk_count'];
       final title = (data['title'] as String? ?? '').trim();
+      final instruction = (data['instruction'] as String? ?? '').trim();
       if (_incomingGuideFrameTransfer != null ||
           byteCount is! int ||
           byteCount < 1 ||
@@ -2525,7 +2873,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               (_maxGuideFrameBytes + _guideFrameChunkBytes - 1) ~/
                   _guideFrameChunkBytes ||
           title.isEmpty ||
-          title.length > 100) {
+          title.length > 100 ||
+          instruction.isEmpty ||
+          instruction.length > 4000) {
         _engine.sendData({
           'type': 'guide_frame_ack',
           'transfer_id': transferId,
@@ -2536,6 +2886,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _incomingGuideFrameTransfer = _IncomingGuideFrameTransfer(
         id: transferId,
         title: title,
+        instruction: instruction,
         expectedBytes: byteCount,
         expectedChunks: chunkCount,
       );
@@ -2598,6 +2949,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final result = await _keyframeManager.addPreReviewedFrame(
         builder.takeBytes(),
         title: transfer.title,
+        instruction: transfer.instruction,
+        id: transfer.id,
       );
       _engine.sendData({
         'type': 'guide_frame_ack',

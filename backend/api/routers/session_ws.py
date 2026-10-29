@@ -7,6 +7,7 @@ changes.  Full WebRTC signaling is handled in Phase 3.
 
 import json
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -24,6 +25,7 @@ from models.session_participant import SessionParticipant
 from models.user import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # In-memory connection registry (per-process)
@@ -134,6 +136,10 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     # Authenticate
     user = await _authenticate_ws(websocket)
     if user is None:
+        logger.warning(
+            "[AssistMe][SIGNALING] websocket rejected session=%s reason=authentication_failed",
+            session_id[:8],
+        )
         await websocket.close(code=4001, reason="Authentication failed")
         return
 
@@ -152,19 +158,36 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         row = result.one_or_none()
 
     if row is None:
+        logger.warning(
+            "[AssistMe][SIGNALING] websocket rejected session=%s reason=not_participant",
+            session_id[:8],
+        )
         await websocket.close(code=4003, reason="Not a session participant")
         return
 
     session, participant = row
     if session.status == "ended":
+        logger.warning(
+            "[AssistMe][SIGNALING] websocket rejected session=%s reason=session_ended",
+            session_id[:8],
+        )
         await websocket.close(code=4004, reason="Session has ended")
         return
     if participant.status == "left":
+        logger.warning(
+            "[AssistMe][SIGNALING] websocket rejected session=%s reason=participant_left",
+            session_id[:8],
+        )
         await websocket.close(code=4003, reason="Not a session participant")
         return
 
     # Accept the connection
     await websocket.accept()
+    logger.info(
+        "[AssistMe][SIGNALING] websocket accepted session=%s role=%s",
+        session_id[:8],
+        participant.role,
+    )
 
     # Register in connection pool
     if session_id not in _connections:
@@ -245,6 +268,7 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 "heartbeat", "leave", "signal_offer", "signal_answer",
                 "signal_ice_candidate", "request_offer", "request_relay_offer", "screen_share_start", "screen_share_stop",
                 "screen_share_orientation", "screen_share_security_event",
+                "guide_screenshot_request", "session_end_requested", "session_ended",
                 "audio_call_start", "audio_call_stop", "audio_mute_toggle",
                 "audio_route_change", "audio_degradation_report",
                 "remote_control_input",
@@ -278,6 +302,39 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
             elif msg_type in ("signal_offer", "signal_answer", "signal_ice_candidate"):
                 # Forward WebRTC signaling payload to target user or broadcast
                 room = _connections.get(session_id, {})
+                if msg_type == "signal_ice_candidate":
+                    candidate = msg.get("candidate") or {}
+                    candidate_line = (
+                        candidate.get("candidate", "")
+                        if isinstance(candidate, dict)
+                        else ""
+                    )
+                    if not isinstance(candidate_line, str):
+                        candidate_line = ""
+                    candidate_type = next(
+                        (
+                            kind
+                            for kind in ("host", "srflx", "relay", "prflx")
+                            if f" typ {kind}" in candidate_line
+                        ),
+                        "unknown",
+                    )
+                    logger.info(
+                        "[AssistMe][SIGNALING] session=%s type=%s candidate_type=%s",
+                        session_id[:8],
+                        msg_type,
+                        candidate_type,
+                    )
+                else:
+                    sdp = msg.get("sdp") or {}
+                    description = sdp.get("sdp", "") if isinstance(sdp, dict) else ""
+                    logger.info(
+                        "[AssistMe][SIGNALING] session=%s type=%s audio=%s video=%s",
+                        session_id[:8],
+                        msg_type,
+                        "m=audio " in description,
+                        "m=video " in description,
+                    )
                 target_user_id = msg.get("target_user_id")
                 payload = {
                     "type": msg_type,
@@ -288,6 +345,7 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 if target_user_id:
                     room = _connections.get(session_id, {})
                     target_ws = room.get(target_user_id)
+                    buffered = target_ws is None
                     if target_ws:
                         await target_ws.send_json(payload)
                     else:
@@ -297,6 +355,12 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                     await publish(
                         f"assistme:session:{session_id}",
                         {"message": payload, "exclude_user": user.id},
+                    )
+                    logger.info(
+                        "[AssistMe][SIGNALING] session=%s delivered type=%s target_connected=%s",
+                        session_id[:8],
+                        msg_type,
+                        not buffered,
                     )
                 else:
                     # The mobile clients intentionally use room signaling. If
@@ -309,20 +373,44 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                     recipients = [uid for uid in room if uid != user.id]
                     if recipients:
                         await _broadcast(session_id, payload, exclude_user=user.id)
+                        buffered = False
                     else:
                         queue = _pending_signals.setdefault(session_id, [])
                         if len(queue) < 64:
                             queue.append(payload)
+                        buffered = True
+                    logger.info(
+                        "[AssistMe][SIGNALING] session=%s delivered type=%s recipients=%d buffered=%s",
+                        session_id[:8],
+                        msg_type,
+                        len(recipients),
+                        buffered,
+                    )
 
-            elif msg_type == "request_offer":
-                await _broadcast(session_id, {"type": "request_offer", "sender_user_id": user.id}, exclude_user=user.id)
-
-            elif msg_type == "request_relay_offer":
-                await _broadcast(
-                    session_id,
-                    {"type": "request_relay_offer", "sender_user_id": user.id},
-                    exclude_user=user.id,
-                )
+            elif msg_type in (
+                "request_offer",
+                "request_relay_offer",
+                "guide_screenshot_request",
+                "session_end_requested",
+                "session_ended",
+            ):
+                payload = {"type": msg_type, "sender_user_id": user.id}
+                room = _connections.get(session_id, {})
+                recipients = [uid for uid in room if uid != user.id]
+                if recipients:
+                    await _broadcast(session_id, payload, exclude_user=user.id)
+                elif msg_type in (
+                    "request_offer",
+                    "request_relay_offer",
+                    "guide_screenshot_request",
+                    "session_end_requested",
+                    "session_ended",
+                ):
+                    # Preserve one-shot requests if the other participant is
+                    # between WebSocket connections during session recovery.
+                    queue = _pending_signals.setdefault(session_id, [])
+                    if len(queue) < 64:
+                        queue.append(payload)
 
             elif msg_type in (
                 "screen_share_start",

@@ -266,7 +266,19 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                     ),
                   ),
                 ),
-              ],
+              ] else
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () => _flowCoordinatorKey.currentState
+                          ?.requestGuideScreenshot(),
+                      icon: const Icon(Icons.add_a_photo_outlined),
+                      label: const Text('Request a guide screenshot'),
+                    ),
+                  ),
+                ),
 
               // Voice controls
               Padding(
