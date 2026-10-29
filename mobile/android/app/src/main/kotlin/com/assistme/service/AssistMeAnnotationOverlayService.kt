@@ -74,6 +74,8 @@ class AssistMeAnnotationOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        // A live help call takes over the screen; close any Clicky walkthrough.
+        AssistMeAccessibilityService.instance?.stopClickyGuide()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, notification())

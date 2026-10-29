@@ -7,6 +7,8 @@ import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import androidx.annotation.RequiresApi
+import com.assistme.clicky.ClickyGuideController
+import com.assistme.clicky.ClickyGuideStepInput
 
 /**
  * Native Android Accessibility Service for AssistMe.
@@ -29,6 +31,12 @@ class AssistMeAccessibilityService : AccessibilityService() {
     var isSensitiveWindowFocused: Boolean = false
         private set
 
+    /** Clicky guide walkthrough; created lazily the first time a guide is started. */
+    private var clickyGuide: ClickyGuideController? = null
+
+    val isClickyGuideActive: Boolean
+        get() = clickyGuide?.isActive == true
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
@@ -42,6 +50,11 @@ class AssistMeAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
                 val packageName = event.packageName?.toString()?.lowercase() ?: ""
+                // Clicky's own card can emit window events. They must not clear a
+                // sensitive-screen latch that belongs to the app underneath it.
+                if (isClickyGuideActive && packageName == this.packageName.lowercase()) {
+                    return
+                }
                 val className = event.className?.toString()?.lowercase() ?: ""
 
                 // Check for sensitive windows (passwords, banking apps, 2FA, system permission prompts)
@@ -65,6 +78,24 @@ class AssistMeAccessibilityService : AccessibilityService() {
                 }
             }
         }
+
+        clickyGuide?.let { guide -> if (guide.isActive) guide.onAccessibilityEvent(event) }
+    }
+
+    /** Starts (or restarts) a Clicky walkthrough of a saved guide. Main thread only. */
+    fun startClickyGuide(title: String, steps: List<ClickyGuideStepInput>, startIndex: Int): Boolean {
+        val guide = clickyGuide ?: ClickyGuideController(this) { isSensitiveWindowFocused }
+            .also { clickyGuide = it }
+        return guide.start(title, steps, startIndex)
+    }
+
+    fun stopClickyGuide() {
+        clickyGuide?.stop()
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        clickyGuide?.stop()
+        return super.onUnbind(intent)
     }
 
     override fun onInterrupt() {
@@ -72,6 +103,8 @@ class AssistMeAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        clickyGuide?.stop()
+        clickyGuide = null
         super.onDestroy()
         instance = null
         Log.i(TAG, "AssistMe Accessibility Service destroyed.")

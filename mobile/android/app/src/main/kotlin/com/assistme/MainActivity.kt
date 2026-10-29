@@ -7,6 +7,7 @@ import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.assistme.clicky.ClickyGuideStepInput
 import com.assistme.service.AssistMeAccessibilityService
 import com.assistme.service.AssistMeAnnotationOverlayService
 import com.assistme.service.AssistMeMediaProjectionService
@@ -109,6 +110,35 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        val clickyChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.assistme/clicky"
+        )
+        clickyChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> result.success(mapOf("status" to startClickyGuide(call.arguments)))
+                "stop" -> {
+                    AssistMeAccessibilityService.instance?.stopClickyGuide()
+                    result.success(null)
+                }
+                "isActive" -> result.success(
+                    AssistMeAccessibilityService.instance?.isClickyGuideActive == true
+                )
+                else -> result.notImplemented()
+            }
+        }
+
+        val localAiChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.assistme/local_ai_device"
+        )
+        localAiChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getDeviceInfo" -> result.success(localAiDeviceInfo())
+                else -> result.notImplemented()
+            }
+        }
+
         val guideAudioChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.assistme/local_guide_audio"
@@ -142,6 +172,63 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    /**
+     * Facts the on-device AI needs before it downloads gigabytes: LiteRT-LM
+     * ships only arm64-v8a libraries, and Gemma 4 E2B needs several GB of RAM.
+     * [nativeAbi] is the ABI this process actually loaded its libraries for;
+     * a 64-bit CPU running 32-bit Android reports armeabi-v7a here.
+     */
+    private fun localAiDeviceInfo(): Map<String, Any?> {
+        val memory = android.app.ActivityManager.MemoryInfo()
+        (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).getMemoryInfo(memory)
+        val storage = android.os.StatFs(filesDir.absolutePath)
+        val nativeLibDir = applicationInfo.nativeLibraryDir ?: ""
+        val nativeAbi = when {
+            nativeLibDir.endsWith("arm64") -> "arm64-v8a"
+            nativeLibDir.endsWith("/arm") -> "armeabi-v7a"
+            nativeLibDir.endsWith("x86_64") -> "x86_64"
+            nativeLibDir.endsWith("x86") -> "x86"
+            else -> Build.SUPPORTED_ABIS.firstOrNull() ?: ""
+        }
+        val hasLiteRtLm = java.io.File(nativeLibDir, "libLiteRtLm.so").exists()
+        return mapOf(
+            "sdk_int" to Build.VERSION.SDK_INT,
+            "release" to Build.VERSION.RELEASE,
+            "model" to "${Build.MANUFACTURER} ${Build.MODEL}",
+            "supported_abis" to Build.SUPPORTED_ABIS.toList(),
+            "native_abi" to nativeAbi,
+            "has_litert_lm" to hasLiteRtLm,
+            "total_ram_bytes" to memory.totalMem,
+            "available_ram_bytes" to memory.availMem,
+            "low_ram_device" to (getSystemService(ACTIVITY_SERVICE) as android.app.ActivityManager).isLowRamDevice,
+            "free_storage_bytes" to storage.availableBytes,
+            "is_emulator" to (Build.FINGERPRINT.contains("generic") || Build.HARDWARE.contains("ranchu")),
+        )
+    }
+
+    /** Validates the guide sent from Flutter and starts Clicky. Returns a status code. */
+    private fun startClickyGuide(arguments: Any?): String {
+        val args = arguments as? Map<*, *> ?: return "invalid_guide"
+        val title = args["title"] as? String ?: ""
+        val steps = (args["steps"] as? List<*>).orEmpty().mapNotNull { raw ->
+            val step = raw as? Map<*, *> ?: return@mapNotNull null
+            ClickyGuideStepInput(
+                title = step["title"] as? String ?: "",
+                instruction = step["instruction"] as? String ?: ""
+            )
+        }
+        val startIndex = (args["start_index"] as? Number)?.toInt() ?: 0
+        if (steps.none { it.title.isNotBlank() || it.instruction.isNotBlank() }) return "invalid_guide"
+
+        val service = AssistMeAccessibilityService.instance
+            ?: return if (isAccessibilityEnabled()) "accessibility_starting" else "accessibility_disabled"
+        if (AssistMeAnnotationOverlayService.instance != null) return "help_session_active"
+        if (!service.startClickyGuide(title, steps, startIndex)) return "failed"
+        // Start from the home screen so the first step ("Open Settings") is visible.
+        service.dispatchGlobalAction("home")
+        return "started"
     }
 
     private fun isAccessibilityEnabled(): Boolean {

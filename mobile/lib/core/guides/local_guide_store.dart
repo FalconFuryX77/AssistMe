@@ -137,6 +137,19 @@ class LocalGuideStore {
     try {
       for (var i = 0; i < selectedFrames.length; i++) {
         final frame = selectedFrames[i];
+        if (frame.imageBytes.isEmpty) {
+          // A written step with no screenshot.
+          steps.add(
+            GuideStepItem(
+              id: frame.id,
+              stepNumber: i + 1,
+              title: frame.title,
+              instruction: frame.instruction,
+              createdAt: frame.timestamp,
+            ),
+          );
+          continue;
+        }
         final imageName = '${guideId}_$i.frame.enc';
         final imageFile = File(
           '${directory.path}${Platform.pathSeparator}$imageName',

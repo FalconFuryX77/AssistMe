@@ -23,14 +23,16 @@ class LocalGuideTranscriptionService {
   static const int _overlapBytes =
       sampleRate * bytesPerSample * overlapDurationSeconds;
 
+  static bool get isModelInstalled =>
+      FlutterEdgeAi.activeSttSpec?.sttModelType == SttModelType.whisper;
+
   static Future<void> installModel({
     required void Function(int progress) onProgress,
     required CancelToken cancelToken,
   }) async {
-    await LocalGuideAiService.initialize();
-    if (FlutterEdgeAi.activeSttSpec?.sttModelType == SttModelType.whisper) {
-      return;
-    }
+    // Whisper runs on the same LiteRT runtime: 64-bit ARM Android only.
+    await LocalGuideAiService.ensureSupported();
+    if (isModelInstalled) return;
     await FlutterEdgeAi.installStt()
         .modelFromNetwork(
           'https://huggingface.co/litert-community/whisper-tiny/resolve/main/whisper_tiny_30s_f32.tflite',
@@ -61,8 +63,8 @@ class LocalGuideTranscriptionService {
       if (!Platform.isAndroid) {
         throw UnsupportedError('Call-audio transcription is Android only.');
       }
-      await LocalGuideAiService.initialize();
-      if (FlutterEdgeAi.activeSttSpec?.sttModelType != SttModelType.whisper) {
+      await LocalGuideAiService.ensureSupported();
+      if (!isModelInstalled) {
         throw StateError('Install the on-device speech model first.');
       }
       final recognizer = await FlutterEdgeAi.getActiveStt(language: language);

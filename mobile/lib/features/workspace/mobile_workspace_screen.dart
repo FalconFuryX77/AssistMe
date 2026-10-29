@@ -259,8 +259,11 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                   child: SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed:
-                          _flowCoordinatorKey.currentState?.captureGuideStep,
+                      // A closure: the coordinator's state does not exist yet
+                      // on the first build, and a null tear-off would leave
+                      // the button disabled for the whole call.
+                      onPressed: () =>
+                          _flowCoordinatorKey.currentState?.captureGuideStep(),
                       icon: const Icon(Icons.add_photo_alternate_outlined),
                       label: const Text('Add redacted step to guide'),
                     ),

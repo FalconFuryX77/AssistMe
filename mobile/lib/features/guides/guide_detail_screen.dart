@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/guides/guide_models.dart';
 import '../../core/guides/local_guide_store.dart';
+import '../../core/platform/accessibility_bridge.dart';
+import '../../core/platform/clicky_bridge.dart';
 import '../../theme/app_theme.dart';
 
 class GuideDetailScreen extends StatefulWidget {
@@ -26,6 +28,7 @@ class GuideDetailScreen extends StatefulWidget {
 class _GuideDetailScreenState extends State<GuideDetailScreen> {
   int _currentStepIndex = 0;
   bool _speaking = false;
+  bool _clickyStarting = false;
 
   List<GuideStepItem> get _steps => widget.guide.steps;
   GuideStepItem get _currentStep => _steps.isNotEmpty
@@ -58,6 +61,105 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
 
   void _toggleSpeak() {
     setState(() => _speaking = !_speaking);
+  }
+
+  /// Hands this guide to Clicky, which points at each control on screen while
+  /// the user performs the steps themselves in any app.
+  Future<void> _useClicky() async {
+    if (_clickyStarting) return;
+    setState(() => _clickyStarting = true);
+    try {
+      var status = await ClickyBridge.start(
+        widget.guide,
+        startStepIndex: _currentStepIndex,
+      );
+      if (status == ClickyStartStatus.accessibilityDisabled) {
+        if (!await _enableAccessibilityForClicky()) return;
+        status = await _startClickyOnceServiceIsReady();
+      } else if (status == ClickyStartStatus.accessibilityStarting) {
+        status = await _startClickyOnceServiceIsReady();
+      }
+      if (!mounted) return;
+      final message = switch (status) {
+        ClickyStartStatus.started =>
+          'Clicky is guiding you. Tap \u2715 on the Clicky card to stop.',
+        ClickyStartStatus.accessibilityDisabled => 'Clicky was not turned on.',
+        ClickyStartStatus.accessibilityStarting =>
+          'Clicky is still getting ready. Please tap Use Clicky again.',
+        ClickyStartStatus.helpSessionActive =>
+          'Clicky can\'t run during a live help call.',
+        ClickyStartStatus.invalidGuide =>
+          'This guide has no steps Clicky can follow.',
+        ClickyStartStatus.unsupported =>
+          'Clicky is available on Android phones.',
+        ClickyStartStatus.failed => 'Clicky couldn\'t start. Please try again.',
+      };
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => _clickyStarting = false);
+    }
+  }
+
+  /// Explains why Clicky needs the accessibility service, opens Settings and
+  /// waits for the user to switch it on and come back to AssistMe.
+  Future<bool> _enableAccessibilityForClicky() async {
+    if (!mounted) return false;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.bgSecondary,
+        title: const Text('Turn on Clicky'),
+        content: const Text(
+          'Clicky needs AssistMe\'s accessibility service so it can see the '
+          'names of buttons on your screen and point at them. Clicky only '
+          'points. It never taps for you, and nothing it sees leaves your '
+          'phone.\n\nIn Settings, open AssistMe, turn it on, then come back '
+          'here.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Not now'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+    if (open != true) return false;
+    try {
+      await AccessibilityBridge.openSettings();
+    } on Exception {
+      return false;
+    }
+    for (var i = 0; i < 240 && mounted; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      final backInApp =
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+      if (backInApp && await AccessibilityBridge.isEnabled()) return true;
+    }
+    return false;
+  }
+
+  /// The service can take a moment to connect after it is switched on.
+  Future<ClickyStartStatus> _startClickyOnceServiceIsReady() async {
+    var status = ClickyStartStatus.accessibilityStarting;
+    for (var attempt = 0; attempt < 10 && mounted; attempt++) {
+      status = await ClickyBridge.start(
+        widget.guide,
+        startStepIndex: _currentStepIndex,
+      );
+      if (status != ClickyStartStatus.accessibilityStarting &&
+          status != ClickyStartStatus.accessibilityDisabled) {
+        return status;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    return status;
   }
 
   Widget _buildStepImage(String? imageUrl, String? localImagePath) {
@@ -363,61 +465,100 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                   ),
                 ],
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (_currentStepIndex > 0)
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.chevron_left),
+                  if (ClickyBridge.isSupported) ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: _clickyStarting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.ads_click),
                         label: const Text(
-                          'Previous',
-                          style: TextStyle(fontSize: AppTypography.body),
+                          'Use Clicky',
+                          style: TextStyle(
+                            fontSize: AppTypography.body,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppTheme.textPrimary,
-                          side: BorderSide(color: AppTheme.borderGlassStrong),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.accentPrimary,
+                          foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        onPressed: _prevStep,
+                        onPressed: _clickyStarting ? null : _useClicky,
                       ),
                     ),
-                  if (_currentStepIndex > 0) const SizedBox(width: 12),
-                  Expanded(
-                    flex: 2,
-                    child: ElevatedButton.icon(
-                      icon: Icon(
-                        _currentStepIndex == totalSteps - 1
-                            ? Icons.check_circle
-                            : Icons.chevron_right,
-                      ),
-                      label: Text(
-                        _currentStepIndex == totalSteps - 1
-                            ? 'Finish Guide'
-                            : 'Next Step',
-                        style: const TextStyle(
-                          fontSize: AppTypography.body,
-                          fontWeight: FontWeight.w700,
+                    const SizedBox(height: 12),
+                  ],
+                  Row(
+                    children: [
+                      if (_currentStepIndex > 0)
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.chevron_left),
+                            label: const Text(
+                              'Previous',
+                              style: TextStyle(fontSize: AppTypography.body),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.textPrimary,
+                              side: BorderSide(color: AppTheme.borderGlassStrong),
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: _prevStep,
+                          ),
+                        ),
+                      if (_currentStepIndex > 0) const SizedBox(width: 12),
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton.icon(
+                          icon: Icon(
+                            _currentStepIndex == totalSteps - 1
+                                ? Icons.check_circle
+                                : Icons.chevron_right,
+                          ),
+                          label: Text(
+                            _currentStepIndex == totalSteps - 1
+                                ? 'Finish Guide'
+                                : 'Next Step',
+                            style: const TextStyle(
+                              fontSize: AppTypography.body,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.accentEmeraldAccessible,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () {
+                            if (_currentStepIndex == totalSteps - 1) {
+                              Navigator.pop(context);
+                            } else {
+                              _nextStep();
+                            }
+                          },
                         ),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.accentEmeraldAccessible,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: () {
-                        if (_currentStepIndex == totalSteps - 1) {
-                          Navigator.pop(context);
-                        } else {
-                          _nextStep();
-                        }
-                      },
-                    ),
+                    ],
                   ),
                 ],
               ),

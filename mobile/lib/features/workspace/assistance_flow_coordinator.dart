@@ -33,6 +33,7 @@ import 'drawing_overlay.dart';
 import 'incoming_help_request_popup.dart';
 import 'risk_disclaimer_modal.dart';
 import 'local_guide_save_dialog.dart';
+import 'guide_step_details_dialog.dart';
 import 'screenshot_redaction_editor.dart';
 
 class _IncomingGuideFrameTransfer {
@@ -132,6 +133,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   );
   bool _mediaReady = false;
   bool _bootstrapping = false;
+  bool _screenShareStarting = false;
+  bool _shareWaitingForSignaling = false;
   bool _screenShareStarted = false;
   bool _remoteControlGranted = false;
   bool _helpeeOverlayRunning = false;
@@ -441,8 +444,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _sendRealtimeOrP2P({'type': 'audio_mute_toggle', 'is_muted': mute});
   }
 
-  /// Helper requests permission, then controls start/stop. The helpee's phone
-  /// alone records and stores temporary audio; the helpee can revoke anytime.
+  /// Helper requests permission, then starts and stops recording. Audio is
+  /// recorded on the helper's phone, which hears both sides of the call (its
+  /// mic and the call playback) and is where the guide is curated, transcribed
+  /// and drafted. The helpee can revoke at any time, which discards it.
   Future<void> toggleGuideAudioControl() async {
     if (!Platform.isAndroid || !_mediaReady || !_engine.isDataChannelOpen) {
       _showGuideMessage('Guide audio needs a ready Android call connection.');
@@ -467,16 +472,50 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       return;
     }
     if (status == GuideAudioCaptureStatus.awaitingConsent) return;
-    final action = status == GuideAudioCaptureStatus.recording
-        ? 'stop'
-        : 'start';
-    if (!_engine.sendData({
-      'type': 'guide_audio_capture_control',
-      'action': action,
-    })) {
-      _showGuideMessage('Could not send the audio control.');
+    if (status == GuideAudioCaptureStatus.recording) {
+      await _stopGuideAudioCapture(discard: false);
+      _setGuideAudioStatus(GuideAudioCaptureStatus.consented);
+      _sendGuideAudioStatus('consented');
+    } else {
+      await _startHelperGuideAudio();
     }
   }
+
+  /// Starts recording on the helper's phone after the helpee consented.
+  Future<void> _startHelperGuideAudio() async {
+    if (widget.isHelpee || !_peerGuideAudioConsent) return;
+    if (_guideAudioCapture.isRecording) return;
+    final remaining = _maxGuideAudioDuration - _guideAudioRecordedDuration;
+    if (remaining <= Duration.zero) {
+      _showGuideMessage('The 20 minute guide-audio limit was reached.');
+      return;
+    }
+    try {
+      await _guideAudioCapture.start();
+    } catch (_) {
+      _showGuideMessage('Audio capture could not start on this phone.');
+      _setGuideAudioStatus(GuideAudioCaptureStatus.consented);
+      return;
+    }
+    _guideAudioStartedAt = DateTime.now();
+    _setGuideAudioStatus(GuideAudioCaptureStatus.recording);
+    _sendGuideAudioStatus('recording');
+    _guideAudioLimitTimer?.cancel();
+    _guideAudioLimitTimer = Timer(remaining, () async {
+      await _stopGuideAudioCapture(discard: false);
+      _setGuideAudioStatus(GuideAudioCaptureStatus.consented);
+      _sendGuideAudioStatus('consented', error: 'limit');
+      _showGuideMessage('The 20 minute guide-audio limit was reached.');
+    });
+  }
+
+  /// Lets the helpee's phone show whether the helper is recording.
+  bool _sendGuideAudioStatus(String state, {String? error}) =>
+      _engine.sendData({
+        'type': 'guide_audio_capture_status',
+        'state': state,
+        'error': ?error,
+      });
 
   /// Kept as a small UI compatibility wrapper: only the helpee may revoke.
   Future<void> setGuideAudioConsent(bool consented) async {
@@ -508,7 +547,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         backgroundColor: AppTheme.bgSecondary,
         title: const Text('Allow guide audio capture?'),
         content: Text(
-          'Your helper is asking to record selected parts of this call. Audio is captured on this phone, kept temporarily in its private storage, and transcribed on this phone. It is not uploaded to AssistMe or an AI service. You will see when recording starts and can revoke permission at any time.',
+          'Your helper is asking to record selected parts of this call to write your step-by-step guide. The audio is kept temporarily in private storage on your helper\'s phone and turned into text there. It is deleted after that, and it is never uploaded to AssistMe or an AI service. You will see when recording starts and can stop it at any time.',
           style: TextStyle(color: AppTheme.textSecondary, height: 1.4),
         ),
         actions: [
@@ -786,12 +825,18 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
 
     final now = DateTime.now();
+    // The dialog now owns these files and deletes them after transcription,
+    // save or discard.
+    final audioRecordings = List<LocalGuideAudioRecording>.of(
+      _pendingGuideAudioRecordings,
+    );
+    _pendingGuideAudioRecordings.clear();
     final input = await showDialog<LocalGuideSaveInput>(
       context: context,
       barrierDismissible: false,
       builder: (_) => LocalGuideSaveDialog(
         frames: _keyframeManager.keyframes,
-        audioRecordings: const [],
+        audioRecordings: audioRecordings,
         helperCuratedFrames: true,
         guideOwner: true,
         suggestedTitle:
@@ -814,9 +859,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               id: frame.id,
               timestamp: frame.timestamp,
               imageBytes: input.redactedImages[frame.id] ?? frame.imageBytes,
-              title: frame.privacyReviewed
-                  ? frame.title
-                  : (input.generatedTitles[frame.id] ?? frame.title),
+              // The dialog's titles are the helper's own or reviewed AI drafts.
+              title: input.generatedTitles[frame.id] ?? frame.title,
               instruction:
                   generatedInstruction == null || generatedInstruction.isEmpty
                   ? frame.instruction
@@ -825,6 +869,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
               colorSignature: frame.colorSignature,
             );
           })
+          .followedBy(
+            input.textSteps.indexed.map(
+              (entry) => CapturedKeyframe(
+                id: 'text-${now.microsecondsSinceEpoch}-${entry.$1}',
+                timestamp: now,
+                imageBytes: Uint8List(0),
+                title: entry.$2.title,
+                instruction: entry.$2.instruction,
+                perceptualHash: null,
+                colorSignature: null,
+                privacyReviewed: true,
+              ),
+            ),
+          )
           .toList(growable: false);
       final guide = await LocalGuideStore(secureStorage: widget.secureStorage)
           .saveSession(
@@ -891,6 +949,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             'id': frame.id,
             'title': frame.title,
             'instruction': frame.instruction,
+            // Written steps have no screenshot for the helpee to look up.
+            'has_image': frame.imageBytes.isNotEmpty,
           },
         )
         .toList(growable: false);
@@ -963,6 +1023,30 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         final id = step['id'];
         final stepTitle = step['title'];
         final instruction = step['instruction'];
+        if (step['has_image'] == false) {
+          if (id is! String ||
+              id.isEmpty ||
+              id.length > 100 ||
+              stepTitle is! String ||
+              stepTitle.length > 100 ||
+              instruction is! String ||
+              instruction.length > 4000) {
+            throw const FormatException('A written guide step is invalid.');
+          }
+          frames.add(
+            CapturedKeyframe(
+              id: id,
+              timestamp: DateTime.now(),
+              imageBytes: Uint8List(0),
+              title: stepTitle,
+              instruction: instruction,
+              perceptualHash: null,
+              colorSignature: null,
+              privacyReviewed: true,
+            ),
+          );
+          continue;
+        }
         final cached = id is String ? cachedFrames[id] : null;
         if (cached == null ||
             stepTitle is! String ||
@@ -1087,6 +1171,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       'role=${widget.isHelpee ? 'helpee' : 'helper'} '
       'shareActive=$_screenShareStarted bootstrapping=$_bootstrapping',
     );
+    if (widget.isHelpee && _shareWaitingForSignaling && !_screenShareStarted) {
+      _shareWaitingForSignaling = false;
+      debugPrint(
+        '[AssistMe][CALL] signaling ready; starting the screen share that was waiting for it',
+      );
+      unawaited(startScreenShare());
+      return;
+    }
     // The first connection is part of bootstrap. Media setup sends the initial
     // offer once it is ready, so recovery here would rebuild an empty peer.
     if (_bootstrapping) return;
@@ -1259,7 +1351,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           unawaited(_stopGuideAudioCapture(discard: true));
           _setGuideAudioStatus(GuideAudioCaptureStatus.off);
         } else if (!isOpen && !widget.isHelpee) {
+          // The helpee can no longer see or revoke recording, so stop. What
+          // was recorded while consent was given is kept for the guide.
           _peerGuideAudioConsent = false;
+          unawaited(_stopGuideAudioCapture(discard: false));
           _setGuideAudioStatus(GuideAudioCaptureStatus.off);
         }
       };
@@ -1378,6 +1473,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
 
   /// Helpee: capture screen + mic, then offer to the room.
   Future<void> startScreenShare() async {
+    if (_screenShareStarting) return;
     if (_screenShareStarted || !_mediaReady) {
       if (!_mediaReady && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1393,11 +1489,20 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         '[AssistMe][CALL] refusing to start screen share because signaling '
         'websocket is disconnected',
       );
-      _handleSignalingIssue(
-        'The session WebSocket is not connected. Rejoin the session before sharing.',
-      );
+      // Media setup and the signaling socket start in parallel, so the
+      // auto-start can arrive a few milliseconds before the socket opens.
+      // Start sharing as soon as it does instead of leaving the helper on
+      // "Waiting for the other device to share" for the whole call.
+      if (widget.isHelpee) _shareWaitingForSignaling = true;
+      if (!_bootstrapping) {
+        _handleSignalingIssue(
+          'The session WebSocket is not connected. Rejoin the session before sharing.',
+        );
+      }
       return;
     }
+    _shareWaitingForSignaling = false;
+    _screenShareStarting = true;
     try {
       // Will pop system dialogs: microphone + screen capture
       await _engine.startScreenCapture();
@@ -1423,6 +1528,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           ),
         );
       }
+    } finally {
+      _screenShareStarting = false;
     }
   }
 
@@ -1786,6 +1893,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
                 : GuideAudioCaptureStatus.off,
           );
           if (!_peerGuideAudioConsent) {
+            // Revoked: nothing recorded on this phone may be kept.
+            await _stopGuideAudioCapture(discard: true);
             _showGuideMessage(
               'Guide-audio permission was declined or revoked.',
             );
@@ -1800,7 +1909,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'guide_audio_capture_status':
-        if (!widget.isHelpee) {
+        if (widget.isHelpee) {
+          // The helper records; mirror its state so the helpee always sees it.
+          if (_localGuideAudioConsent) {
+            _setGuideAudioStatus(
+              event.data['state'] == 'recording'
+                  ? GuideAudioCaptureStatus.recording
+                  : GuideAudioCaptureStatus.consented,
+            );
+          }
+        } else {
           final state = event.data['state'] as String?;
           _setGuideAudioStatus(switch (state) {
             'recording' => GuideAudioCaptureStatus.recording,
@@ -2757,65 +2875,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  Future<Map<String, String>?> _requestGuideStepDetails(int stepNumber) async {
-    final titleController = TextEditingController(text: 'Step $stepNumber');
-    final instructionController = TextEditingController();
-    try {
-      return await showDialog<Map<String, String>>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Write this guide step'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: titleController,
-                autofocus: true,
-                maxLength: 100,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'Step name',
-                  hintText: 'For example, Open account settings',
-                ),
-              ),
-              TextField(
-                controller: instructionController,
-                maxLength: 4000,
-                minLines: 2,
-                maxLines: 4,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  labelText: 'What should the user do?',
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final title = titleController.text.trim();
-                final instruction = instructionController.text.trim();
-                if (title.isNotEmpty && instruction.isNotEmpty) {
-                  Navigator.pop(dialogContext, {
-                    'title': title,
-                    'instruction': instruction,
-                  });
-                }
-              },
-              child: const Text('Add step'),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      titleController.dispose();
-      instructionController.dispose();
-    }
-  }
+  Future<Map<String, String>?> _requestGuideStepDetails(int stepNumber) =>
+      GuideStepDetailsDialog.show(context, stepNumber: stepNumber);
 
   void _showGuideMessage(String message) {
     if (!mounted) return;

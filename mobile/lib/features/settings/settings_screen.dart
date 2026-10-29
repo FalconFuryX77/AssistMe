@@ -6,6 +6,7 @@ import '../../core/network/api_client.dart';
 import '../../core/security/secure_storage_service.dart';
 import '../../main.dart';
 import '../../theme/app_theme.dart';
+import 'local_ai_settings_card.dart';
 
 class SettingsScreen extends StatefulWidget {
   final ApiClient apiClient;
@@ -250,6 +251,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 20),
+
+          // Section: On-device guide AI (prepare models before a call)
+          _sectionHeader('On-device guide AI', Icons.auto_awesome_outlined),
+          _card(child: const LocalAiSettingsCard()),
           const SizedBox(height: 20),
 
           // Section: How-To Guide

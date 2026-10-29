@@ -33,7 +33,12 @@ class WebRTCEngine {
   bool _isScreenSharing = false;
   bool _isAudioMuted = false;
   List<Map<String, dynamic>> _iceServers = const [];
-  bool _relayOnly = false;
+
+  /// Diagnostic build flag (`--dart-define=FORCE_TURN_RELAY=true`): every call
+  /// uses relay-only ICE, so it connects only if TURN really works. Off by
+  /// default; normal builds keep choosing direct paths when possible.
+  static const bool forceTurnRelay = bool.fromEnvironment('FORCE_TURN_RELAY');
+  bool _relayOnly = forceTurnRelay;
 
   RTCPeerConnection? _pc;
   RTCDataChannel? _dataChannel;
