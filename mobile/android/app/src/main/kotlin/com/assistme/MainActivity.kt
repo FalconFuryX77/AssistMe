@@ -71,6 +71,11 @@ class MainActivity : FlutterActivity() {
                     AssistMeAnnotationOverlayService.instance?.clearStrokes()
                     result.success(null)
                 }
+                "hideControlsFor" -> {
+                    val ms = (call.arguments as? Number)?.toLong() ?: 1500L
+                    AssistMeAnnotationOverlayService.instance?.hideControlsFor(ms)
+                    result.success(null)
+                }
                 "stop" -> {
                     AssistMeAnnotationOverlayService.stop(this)
                     result.success(null)

@@ -1994,6 +1994,19 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // another offer here can collide with the first negotiation.
         break;
 
+      case 'hide_controls_for_capture':
+        if (widget.isHelpee) {
+          final ms = (event.data['ms'] as num?)?.toInt() ?? 1500;
+          try {
+            await AnnotationOverlayService.hideControlsFor(
+              Duration(milliseconds: ms.clamp(200, 5000)),
+            );
+          } catch (_) {
+            // Overlay not running: nothing to hide.
+          }
+        }
+        break;
+
       case 'guide_audio_consent_request':
         await _requestHelpeeGuideAudioConsent();
         break;
@@ -2873,6 +2886,14 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
     _setGuideStepBusy(true);
     try {
+      // Ask the helpee's phone to hide its AssistMe toolbar for a moment, then
+      // wait for a fresh frame without it before capturing.
+      if (_engine.sendData({
+        'type': 'hide_controls_for_capture',
+        'ms': 1500,
+      })) {
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+      }
       final captured = await _engine.captureScreenFrame(remoteStream: stream);
       if (captured == null || captured.isEmpty) {
         debugPrint('[AssistMe][GUIDE] capture returned no frame');

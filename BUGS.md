@@ -236,12 +236,47 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
   could not be dragged sideways.
 - **Fix:** the window is sized to the pill; tapping the ⋮⋮ handle folds it to handle +
   STOP (tap again to open). The black area the helper sees is only the pill.
-- **Inherent limit:** what is *under* the toolbar cannot be shown to the helper.
+- **Follow-up (30 Oct, after phone testing):** the black area still hid the screen, so
+  `FLAG_SECURE` was removed from the toolbar and pickers. The toolbar now starts folded
+  (handle + STOP), is translucent (45% folded, 90% open) so the helper sees the screen
+  through it, folds itself 6 s after its last use, still passes the helper's taps through,
+  and hides for 1.5 s when the helper taps "Add redacted step" (`hide_controls_for_capture`)
+  so guide screenshots do not include it. Android gives normal apps no way to leave
+  their own window out of a screen share entirely; this keeps it out of the way instead.
 
 ### B25. Helper drawings did not appear on the helpee phone
 - **Cause (setup, not code):** the ASUS had neither "Display over other apps" nor the
   AssistMe accessibility service enabled. Granted the overlay permission during the
   test; drawing then worked. Make sure both phones have it before the demo.
+
+### B26. Helpee shared, helper never got the offer ("Waiting for the other device to share")
+- **Seen on phones (30 Oct, 20:41):** ASUS log `local offer created` at 20:41:33; the
+  Samsung helper never logged `signaling delivered signal_offer`; both session sockets
+  were accepted by the backend.
+- **Cause (backend):** the API runs 4 workers. For room signaling, when the other
+  participant had no socket on the *same* worker, the offer was only buffered in that
+  worker's memory and never published, so it was lost whenever the two phones' sockets
+  landed on different workers (most of the time). Likely the root cause of the
+  handover's intermittent "no remote frames" P0. Earlier relay tests passed because the
+  test backend ran a single worker.
+- **Fix:** participant presence and parked signals live in Redis
+  (`core/realtime_bus.py`). A signal for a peer on another worker is published; a
+  signal for a peer not connected anywhere is parked in Redis and replayed by whichever
+  worker it connects to. The sweeper re-asserts presence every 30 s. Falls back to the
+  old per-worker buffer if Redis is down. Tests: `tests/test_cross_worker_signaling.py`.
+
+### B27. Helper drawings appeared lower on the helpee's screen than where they were drawn (regression)
+- **Seen on phones (30 Oct):** strokes landed noticeably below the helper's finger.
+- **Cause:** the helpee's drawing layer mapped stroke points (fractions of the whole
+  display, like the shared video) through *its own window's* size. Since B19 put the
+  layer in an accessibility overlay when the service is on, the window can start
+  below the status bar / use a different height, so every stroke shifted down.
+- **Fix:** strokes and the helpee's own touches are mapped through the real display
+  size (`currentWindowMetrics`) and the window's on-screen position; the drawing
+  window ignores insets and extends into the cutout. Checked the helper side too:
+  remote taps and the helper's drawing both use the decoded video's real aspect, and
+  flutter_webrtc captures at the true display size (the 720x1280 request is ignored),
+  so there are no letterbox offsets there.
 
 ### B18. "Step 1 of 0" on guides saved with notes only
 - **Fix:** the viewer shows "Session notes" for a guide with no steps.

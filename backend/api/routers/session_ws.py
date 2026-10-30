@@ -18,7 +18,15 @@ from api.services.session_service import SessionService
 from api.schemas.remote_control import RemoteControlInputEvent
 from api.services.remote_control_service import RemoteControlService
 from core.database import async_session_factory
-from core.realtime_bus import listen, publish
+from core.realtime_bus import (
+    listen,
+    others_present,
+    park_signal,
+    presence_add,
+    presence_remove,
+    publish,
+    take_parked_signals,
+)
 from core.security import decode_access_token
 from models.session import Session
 from models.session_participant import SessionParticipant
@@ -195,6 +203,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         _connections[session_id] = {}
     _connections[session_id][user.id] = websocket
     _ensure_session_bus(session_id)
+    # Tell every worker this participant is reachable (signals for it are
+    # then published instead of parked).
+    await presence_add(session_id, user.id)
     pending_disconnect = _disconnect_tasks.pop((session_id, user.id), None)
     if pending_disconnect:
         pending_disconnect.cancel()
@@ -217,6 +228,13 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         _pending_signals[session_id] = remaining_signals
     else:
         _pending_signals.pop(session_id, None)
+    # Signals another worker parked while this participant was not connected
+    # anywhere (e.g. the helpee's offer sent before the helper's socket opened).
+    for parked in await take_parked_signals(session_id, user.id) or []:
+        try:
+            await websocket.send_json(parked)
+        except Exception:
+            break
 
     # If they were disconnected, mark them as reconnected
     if participant.status == "disconnected":
@@ -376,10 +394,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                         await _broadcast(session_id, payload, exclude_user=user.id)
                         buffered = False
                     else:
-                        queue = _pending_signals.setdefault(session_id, [])
-                        if len(queue) < 64:
-                            queue.append(payload)
-                        buffered = True
+                        buffered = await _relay_to_absent_peer(
+                            session_id, user.id, payload, limit=64
+                        )
                     logger.info(
                         "[AssistMe][SIGNALING] session=%s delivered type=%s recipients=%d buffered=%s",
                         session_id[:8],
@@ -400,18 +417,10 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 recipients = [uid for uid in room if uid != user.id]
                 if recipients:
                     await _broadcast(session_id, payload, exclude_user=user.id)
-                elif msg_type in (
-                    "request_offer",
-                    "request_relay_offer",
-                    "guide_screenshot_request",
-                    "session_end_requested",
-                    "session_ended",
-                ):
-                    # Preserve one-shot requests if the other participant is
-                    # between WebSocket connections during session recovery.
-                    queue = _pending_signals.setdefault(session_id, [])
-                    if len(queue) < 64:
-                        queue.append(payload)
+                else:
+                    # Preserve one-shot requests if the other participant is on
+                    # another worker or between WebSocket connections.
+                    await _relay_to_absent_peer(session_id, user.id, payload, limit=64)
 
             elif msg_type in (
                 "screen_share_start",
@@ -743,13 +752,51 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     finally:
         # Remove from connection pool
         room = _connections.get(session_id, {})
-        room.pop(user.id, None)
+        if room.get(user.id) is websocket:
+            room.pop(user.id, None)
+            await presence_remove(session_id, user.id)
         if not room:
             _connections.pop(session_id, None)
             _pending_signals.pop(session_id, None)
             bus_task = _session_bus_tasks.pop(session_id, None)
             if bus_task:
                 bus_task.cancel()
+
+
+async def _relay_to_absent_peer(
+    session_id: str,
+    sender_id: str,
+    payload: dict,
+    *,
+    limit: int,
+) -> bool:
+    """Deliver a room message whose recipient has no socket on this worker.
+
+    With several workers the other phone is usually connected to a different
+    one. Previously the message was only buffered in this worker's memory, so
+    the helpee's offer never reached the helper and the helper stayed on
+    "Waiting for the other device to share". Returns True if it was parked
+    for a peer that is not connected anywhere yet.
+    """
+    present = await others_present(session_id, sender_id)
+    if present:
+        await publish(
+            f"assistme:session:{session_id}",
+            {"message": payload, "exclude_user": sender_id},
+        )
+        return False
+    if present is False and await park_signal(session_id, payload):
+        return True
+    # Redis unavailable: fall back to this worker's memory and a best-effort
+    # publish, as before.
+    queue = _pending_signals.setdefault(session_id, [])
+    if len(queue) < limit:
+        queue.append(payload)
+    await publish(
+        f"assistme:session:{session_id}",
+        {"message": payload, "exclude_user": sender_id},
+    )
+    return True
 
 
 async def _end_after_disconnect(session_id: str, user_id: str) -> None:
@@ -792,6 +839,10 @@ async def run_session_sweeper(stop: asyncio.Event) -> None:
                 for session_id, room in list(_connections.items())
                 for user_id in list(room)
             ]
+            # Re-assert presence for this worker's sockets in case another
+            # worker's late cleanup removed it during a reconnect.
+            for session_id, user_id in pairs:
+                await presence_add(session_id, user_id)
             async with async_session_factory() as db:
                 await SessionService.touch_participants(pairs, db)
                 ended = await SessionService.expire_abandoned_sessions(db, idle_for)
