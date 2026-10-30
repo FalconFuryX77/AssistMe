@@ -20,7 +20,9 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/guides/session_keyframe_manager.dart';
 import '../../core/guides/local_guide_store.dart';
+import '../../core/guides/guide_delivery_service.dart';
 import '../../core/guides/local_guide_audio_capture.dart';
+import '../../core/guides/screenshot_redaction.dart' show shrinkGuideScreenshot;
 import '../../core/network/api_client.dart';
 import '../../core/platform/accessibility_bridge.dart';
 import '../../core/platform/annotation_overlay_service.dart';
@@ -173,6 +175,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   final Map<String, Completer<KeyframeCaptureResult>> _pendingGuideFrameAcks =
       {};
   int _guideFrameOrdinal = 0;
+  // Guide steps the helpee has confirmed it stored (helper side only).
+  final Set<String> _guideFramesOnHelpee = <String>{};
+  // Helper only: per-call key for the encrypted post-call guide delivery.
+  // It reaches the helpee only over the call's peer data channel.
+  final List<int> _guideSyncKey = GuideDeliveryService.newKey();
   bool _guideFrameTransferInProgress = false;
   final LocalGuideAudioCapture _guideAudioCapture = LocalGuideAudioCapture();
   bool _localGuideAudioConsent = false;
@@ -905,13 +912,34 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         transcript: transcript,
         frames: includedFrames,
       );
+      // The call is not needed for delivery: if the live sync failed, the
+      // guide goes through the backend, encrypted, whenever the other phone
+      // is next online.
+      var queued = false;
+      if (!synced) {
+        try {
+          queued = await GuideDeliveryService.sendAfterCall(
+            apiClient: widget.apiClient,
+            sessionId: widget.sessionId,
+            key: _guideSyncKey,
+            title: input.title,
+            summary: guide.summary,
+            transcript: transcript,
+            frames: includedFrames,
+          );
+        } catch (error) {
+          debugPrint('[AssistMe][GUIDE] post-call delivery failed: $error');
+        }
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
               synced
                   ? 'Saved “${guide.title}” on both devices.'
-                  : 'Saved “${guide.title}” here. The other device could not be reached to sync it.',
+                  : queued
+                  ? 'Saved “${guide.title}” here. It will reach the other phone the next time it is online.'
+                  : 'Saved “${guide.title}” here. It will be sent to the other phone when this phone is back online.',
             ),
           ),
         );
@@ -964,6 +992,23 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         'steps': steps,
       },
     };
+    if (saved) {
+      _sendGuideSyncKey();
+      // Steps captured while the channel was busy only exist here so far.
+      // Send them now so the helpee can attach every screenshot.
+      for (final frame in frames) {
+        if (frame.imageBytes.isEmpty || !mounted) continue;
+        final delivered = await _sendGuideFrameToHelpee(
+          id: frame.id,
+          bytes: frame.imageBytes,
+          title: frame.title,
+          instruction: frame.instruction,
+        );
+        if (!delivered) {
+          debugPrint('[AssistMe][GUIDE] screenshot ${frame.id} still missing on helpee');
+        }
+      }
+    }
     final ack = Completer<bool>();
     _pendingGuideFinalizationAck = ack;
     try {
@@ -1047,13 +1092,31 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           );
           continue;
         }
-        final cached = id is String ? cachedFrames[id] : null;
-        if (cached == null ||
+        if (id is! String ||
             stepTitle is! String ||
             stepTitle.length > 100 ||
             instruction is! String ||
             instruction.length > 4000) {
-          throw const FormatException('A guide step is missing or invalid.');
+          throw const FormatException('A guide step is invalid.');
+        }
+        final cached = cachedFrames[id];
+        if (cached == null) {
+          // The screenshot never arrived. Keep the written step rather than
+          // losing the whole guide.
+          debugPrint('[AssistMe][GUIDE] screenshot $id missing; saving step as text');
+          frames.add(
+            CapturedKeyframe(
+              id: id,
+              timestamp: DateTime.now(),
+              imageBytes: Uint8List(0),
+              title: stepTitle,
+              instruction: instruction,
+              perceptualHash: null,
+              colorSignature: null,
+              privacyReviewed: true,
+            ),
+          );
+          continue;
         }
         frames.add(
           CapturedKeyframe(
@@ -1105,7 +1168,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _sendRealtimeOrP2P({'type': 'session_end_requested'});
     _showGuideMessage('Waiting for your helper to finish and sync the guide…');
     try {
-      await ended.future.timeout(const Duration(seconds: 90));
+      // Transcribing and running Gemma on the helper's phone can take a few
+      // minutes; leaving earlier would lose the synced guide.
+      await ended.future.timeout(const Duration(minutes: 5));
     } on TimeoutException {
       // If the helper is gone, let the helpee leave cleanly after the bounded
       // wait. The helper remains the only participant who can finalize a guide.
@@ -1343,6 +1408,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       _engine.onDataChannelState = (isOpen) {
+        if (isOpen && !widget.isHelpee) _sendGuideSyncKey();
         if (!isOpen &&
             widget.isHelpee &&
             (_localGuideAudioConsent || _guideAudioCapture.isRecording)) {
@@ -2758,42 +2824,100 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       return;
     }
     setState(() => _guideFrameTransferInProgress = true);
-    String? pendingTransferId;
     try {
       final captured = await _engine.captureScreenFrame(remoteStream: stream);
       if (captured == null || captured.isEmpty) {
+        debugPrint('[AssistMe][GUIDE] capture returned no frame');
         _showGuideMessage('Could not capture the shared screen.');
         return;
       }
       if (!mounted) return;
       final redacted = await editScreenshotRedactions(context, captured);
       if (!mounted || redacted == null) return;
-      if (redacted.length > _maxGuideFrameBytes) {
+      // Full-resolution PNGs from real phones can pass the 2 MB step limit.
+      var image = await shrinkGuideScreenshot(redacted);
+      if (image.length > _maxGuideFrameBytes) {
+        image = await shrinkGuideScreenshot(image, maxSide: 960);
+      }
+      debugPrint(
+        '[AssistMe][GUIDE] step image ${captured.length} -> ${image.length} bytes',
+      );
+      if (image.length > _maxGuideFrameBytes) {
         _showGuideMessage('This screenshot is too large to send. Try again.');
         return;
       }
-      final transferId =
-          '${DateTime.now().microsecondsSinceEpoch}_${_guideFrameOrdinal + 1}';
-      pendingTransferId = transferId;
-      final details = await _requestGuideStepDetails(_guideFrameOrdinal + 1);
+      final stepNumber = _guideFrameOrdinal + 1;
+      final stepId = '${DateTime.now().microsecondsSinceEpoch}_$stepNumber';
+      final details = await _requestGuideStepDetails(stepNumber);
       if (details == null || !mounted) return;
       final title = details['title']!;
       final instruction = details['instruction']!;
-      final chunkCount =
-          (redacted.length + _guideFrameChunkBytes - 1) ~/
-          _guideFrameChunkBytes;
-      final ack = Completer<KeyframeCaptureResult>();
-      _pendingGuideFrameAcks[transferId] = ack;
+
+      // The helper owns the guide, so keep the step here first. Sending it to
+      // the helpee is best effort; anything missed is sent again on save.
+      final localResult = await _keyframeManager.addPreReviewedFrame(
+        image,
+        title: title,
+        instruction: instruction,
+        id: stepId,
+      );
+      debugPrint('[AssistMe][GUIDE] step $stepNumber kept on helper: ${localResult.name}');
+      if (localResult != KeyframeCaptureResult.saved) {
+        _showGuideMessage(
+          localResult == KeyframeCaptureResult.capacityReached
+              ? 'The private guide reached its on-device image limit. Save the current guide before adding more steps.'
+              : 'This step could not be kept on your phone. Try again.',
+        );
+        return;
+      }
+      _guideFrameOrdinal++;
+      if (mounted) setState(() {});
+      final delivered = await _sendGuideFrameToHelpee(
+        id: stepId,
+        bytes: image,
+        title: title,
+        instruction: instruction,
+      );
+      if (!mounted) return;
+      _showGuideMessage(
+        delivered
+            ? 'Step $stepNumber added to the guide on both devices.'
+            : 'Step $stepNumber saved on your phone. It will be sent to the other phone when you save the guide.',
+      );
+    } finally {
+      if (mounted) setState(() => _guideFrameTransferInProgress = false);
+    }
+  }
+
+  bool _sendGuideSyncKey() => _engine.sendData({
+    'type': 'guide_frame_sync_key',
+    'key': base64Encode(_guideSyncKey),
+  });
+
+  /// Sends one guide screenshot to the helpee in data-channel chunks and waits
+  /// for its acknowledgement. Returns true once the helpee has stored it.
+  Future<bool> _sendGuideFrameToHelpee({
+    required String id,
+    required Uint8List bytes,
+    required String title,
+    required String instruction,
+  }) async {
+    if (_guideFramesOnHelpee.contains(id)) return true;
+    final chunkCount =
+        (bytes.length + _guideFrameChunkBytes - 1) ~/ _guideFrameChunkBytes;
+    final ack = Completer<KeyframeCaptureResult>();
+    _pendingGuideFrameAcks[id] = ack;
+    try {
       if (!_engine.sendData({
         'type': 'guide_frame_start',
-        'transfer_id': transferId,
+        'transfer_id': id,
         'title': title,
         'instruction': instruction,
-        'byte_count': redacted.length,
+        'byte_count': bytes.length,
         'chunk_count': chunkCount,
       })) {
-        _showGuideMessage('The secure call channel is not ready.');
-        return;
+        debugPrint('[AssistMe][GUIDE] send $id: data channel not open');
+        return false;
       }
       for (var index = 0; index < chunkCount; index++) {
         final deadline = DateTime.now().add(const Duration(seconds: 8));
@@ -2801,77 +2925,36 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             DateTime.now().isBefore(deadline)) {
           await Future<void>.delayed(const Duration(milliseconds: 20));
         }
-        if (_engine.dataChannelBufferedAmount > 96 * 1024) {
-          _engine.sendData({
-            'type': 'guide_frame_abort',
-            'transfer_id': transferId,
-          });
-          _showGuideMessage('Network is busy. Try adding this step again.');
-          return;
-        }
         final start = index * _guideFrameChunkBytes;
-        final end = (start + _guideFrameChunkBytes).clamp(0, redacted.length);
-        final chunk = Uint8List.sublistView(redacted, start, end);
-        if (!_engine.sendData({
-          'type': 'guide_frame_chunk',
-          'transfer_id': transferId,
-          'index': index,
-          'data': base64Encode(chunk),
-        })) {
-          _engine.sendData({
-            'type': 'guide_frame_abort',
-            'transfer_id': transferId,
-          });
-          _showGuideMessage('The screenshot transfer stopped. Try again.');
-          return;
+        final end = (start + _guideFrameChunkBytes).clamp(0, bytes.length);
+        final sent =
+            _engine.dataChannelBufferedAmount <= 96 * 1024 &&
+            _engine.sendData({
+              'type': 'guide_frame_chunk',
+              'transfer_id': id,
+              'index': index,
+              'data': base64Encode(Uint8List.sublistView(bytes, start, end)),
+            });
+        if (!sent) {
+          _engine.sendData({'type': 'guide_frame_abort', 'transfer_id': id});
+          debugPrint('[AssistMe][GUIDE] send $id: stopped at chunk $index/$chunkCount');
+          return false;
         }
       }
-      if (!_engine.sendData({
-        'type': 'guide_frame_finish',
-        'transfer_id': transferId,
-      })) {
-        _showGuideMessage('The screenshot transfer stopped. Try again.');
-        return;
+      if (!_engine.sendData({'type': 'guide_frame_finish', 'transfer_id': id})) {
+        debugPrint('[AssistMe][GUIDE] send $id: finish not sent');
+        return false;
       }
       final result = await ack.future.timeout(
         const Duration(seconds: 20),
         onTimeout: () => KeyframeCaptureResult.unavailable,
       );
-      if (!mounted) return;
-      switch (result) {
-        case KeyframeCaptureResult.saved:
-          final localResult = await _keyframeManager.addPreReviewedFrame(
-            Uint8List.fromList(redacted),
-            title: title,
-            instruction: instruction,
-            id: transferId,
-          );
-          if (localResult != KeyframeCaptureResult.saved) {
-            _showGuideMessage(
-              'The other device received the step, but it could not be retained for your guide.',
-            );
-            return;
-          }
-          _guideFrameOrdinal++;
-          _showGuideMessage(
-            'Redacted step added to the guide on both devices.',
-          );
-        case KeyframeCaptureResult.duplicate:
-          _showGuideMessage('That screen is already in the guide.');
-        case KeyframeCaptureResult.capacityReached:
-          _showGuideMessage(
-            'The private guide reached its on-device image limit. Save the current guide before adding more steps.',
-          );
-        case KeyframeCaptureResult.unavailable:
-          _showGuideMessage(
-            'The screenshot did not reach the other phone. Try again.',
-          );
-      }
+      debugPrint('[AssistMe][GUIDE] send $id: helpee answered ${result.name}');
+      final stored = result == KeyframeCaptureResult.saved;
+      if (stored) _guideFramesOnHelpee.add(id);
+      return stored;
     } finally {
-      if (pendingTransferId != null) {
-        _pendingGuideFrameAcks.remove(pendingTransferId);
-      }
-      if (mounted) setState(() => _guideFrameTransferInProgress = false);
+      _pendingGuideFrameAcks.remove(id);
     }
   }
 
@@ -2896,6 +2979,22 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final ack = _pendingGuideFinalizationAck;
       if (ack != null && !ack.isCompleted) {
         ack.complete(data['saved'] == true);
+      }
+      return;
+    }
+    if (type == 'guide_frame_sync_key') {
+      final key = data['key'];
+      if (widget.isHelpee && key is String) {
+        try {
+          final bytes = base64Decode(key);
+          if (bytes.length == 32) {
+            await GuideDeliveryService.rememberKey(
+              widget.secureStorage,
+              widget.sessionId,
+              bytes,
+            );
+          }
+        } catch (_) {}
       }
       return;
     }
@@ -2924,8 +3023,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       final chunkCount = data['chunk_count'];
       final title = (data['title'] as String? ?? '').trim();
       final instruction = (data['instruction'] as String? ?? '').trim();
-      if (_incomingGuideFrameTransfer != null ||
-          byteCount is! int ||
+      // A transfer the helper abandoned (busy channel, timeout) must not
+      // block every later screenshot: a new start replaces it.
+      if (_incomingGuideFrameTransfer != null) {
+        debugPrint('[AssistMe][GUIDE] dropping unfinished transfer ${_incomingGuideFrameTransfer!.id}');
+        _incomingGuideFrameTransfer = null;
+      }
+      if (byteCount is! int ||
           byteCount < 1 ||
           byteCount > _maxGuideFrameBytes ||
           chunkCount is! int ||

@@ -30,7 +30,12 @@ class SecureStorageService implements SecureValueStore {
   static const String keyGuideEncryptionKey = 'local_guide_encryption_key_v1';
   static const String keyDeviceFingerprint = 'assistme_device_fingerprint';
 
+  /// Per-call keys (JSON map of session id -> base64 key) used to encrypt a
+  /// guide that is delivered through the backend after the call ended.
+  static const String keyGuideSyncKeys = 'guide_sync_keys_v1';
+
   static const Set<String> _secureKeys = {
+    keyGuideSyncKeys,
     keyAccessToken,
     keyRefreshToken,
     keyDeviceSecret,

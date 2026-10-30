@@ -77,3 +77,4 @@ __all__ = [
     "TrustedDevice",
     "User",
 ]
+from models.guide_delivery import GuideDelivery  # noqa: F401

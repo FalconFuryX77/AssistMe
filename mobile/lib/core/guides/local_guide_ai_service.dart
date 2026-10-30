@@ -65,6 +65,13 @@ class LocalGuideAiService {
   static const String _modelRepository =
       'litert-community/gemma-4-E2B-it-litert-lm';
 
+  // The repo ships no litertlm_manifest.json, so `fromHuggingFace(repo)`
+  // without a file fails before downloading anything. Name the generic bundle
+  // (GPU with CPU fallback, 2.59 GB) and pin the commit it was verified at.
+  static const String _modelFile = 'gemma-4-E2B-it.litertlm';
+  static const String _modelRevision =
+      '1caa527c1e88b55f046fcd8d2b4265606680663d';
+
   // Set before a GPU load and cleared after it returns. Still set on the next
   // launch means the GPU driver killed the app, so stay on the CPU.
   static const String _gpuLoadPendingKey = 'local_ai_gpu_load_pending';
@@ -158,7 +165,11 @@ When the ACTION names a button, tab, menu item or app, write its exact on-screen
             modelType: ModelType.gemma4,
             fileType: ModelFileType.litertlm,
           )
-          .fromHuggingFace(_modelRepository)
+          .fromHuggingFace(
+            _modelRepository,
+            file: _modelFile,
+            revision: _modelRevision,
+          )
           .withProgress(onProgress)
           .withCancelToken(cancelToken)
           .install();
@@ -444,12 +455,22 @@ No markdown or extra text.''';
       return LocalAiException('Cancelled.', error);
     }
     if (downloading) {
-      return LocalAiException('The model download did not finish. Try again.', error);
+      return LocalAiException(
+        'The model download did not finish (${_shortReason(error)}). Try again.',
+        error,
+      );
     }
     return LocalAiException(
       'Gemma stopped with an error (${error.runtimeType}). Try again, or write this step yourself.',
       error,
     );
+  }
+
+  /// First line of an error, trimmed, so the helper can report what failed.
+  /// Download errors carry URLs and HTTP status, never tokens or user data.
+  static String _shortReason(Object error) {
+    final text = error.toString().split('\n').first.trim();
+    return text.length <= 140 ? text : '${text.substring(0, 140)}…';
   }
 
   /// Decodes a screenshot at most [_maxImageSide] pixels on its long side.

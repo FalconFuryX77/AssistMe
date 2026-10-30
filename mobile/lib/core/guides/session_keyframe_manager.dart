@@ -106,18 +106,28 @@ class SessionKeyframeManager {
     }
   }
 
+  /// Stores a step the helper chose and reviewed. It is never rejected as a
+  /// "duplicate": two different screens of one app (e.g. two white Settings
+  /// lists) can share a 9x8 thumbnail, and the helper picked this one on
+  /// purpose. Re-sending the same [id] replaces nothing and reports saved.
   Future<KeyframeCaptureResult> addPreReviewedFrame(
     Uint8List bytes, {
     required String title,
     required String instruction,
     String? id,
-  }) => _storeFrameBytes(
-    bytes,
-    title: title,
-    instruction: instruction,
-    privacyReviewed: true,
-    id: id,
-  );
+  }) async {
+    if (id != null && _keyframes.any((frame) => frame.id == id)) {
+      return KeyframeCaptureResult.saved;
+    }
+    return _storeFrameBytes(
+      bytes,
+      title: title,
+      instruction: instruction,
+      privacyReviewed: true,
+      id: id,
+      checkDuplicates: false,
+    );
+  }
 
   Future<KeyframeCaptureResult> _storeFrameBytes(
     Uint8List bytes, {
@@ -125,12 +135,14 @@ class SessionKeyframeManager {
     required String instruction,
     required bool privacyReviewed,
     String? id,
+    bool checkDuplicates = true,
   }) async {
     if (bytes.isEmpty || bytes.length > _maxRetainedBytes) {
       return KeyframeCaptureResult.unavailable;
     }
     final fingerprint = await _differenceHash(bytes);
-    if (fingerprint != null &&
+    if (checkDuplicates &&
+        fingerprint != null &&
         _keyframes.any(
           (frame) =>
               frame.perceptualHash != null &&

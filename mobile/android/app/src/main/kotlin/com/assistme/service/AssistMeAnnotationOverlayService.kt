@@ -38,7 +38,8 @@ class AssistMeAnnotationOverlayService : Service() {
             private set
 
         fun start(context: Context) {
-            if (!Settings.canDrawOverlays(context)) return
+            // Accessibility overlays need no "draw over apps" permission.
+            if (!Settings.canDrawOverlays(context) && AssistMeAccessibilityService.instance == null) return
             val intent = Intent(context, AssistMeAnnotationOverlayService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -53,6 +54,15 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     private lateinit var windowManager: WindowManager
+
+    /**
+     * TYPE_ACCESSIBILITY_OVERLAY windows are drawn above the notification
+     * shade and quick settings; TYPE_APPLICATION_OVERLAY windows are always
+     * drawn below them, so the helper's drawings vanished whenever the helpee
+     * pulled the shade down. Use the accessibility service's window manager
+     * when AssistMe's service is on (it is required for Clicky and control).
+     */
+    private var windowType: Int = 0
     private var canvasView: AnnotationCanvasView? = null
     private var controlsView: LinearLayout? = null
     private val strokes = mutableListOf<Map<*, *>>()
@@ -76,7 +86,14 @@ class AssistMeAnnotationOverlayService : Service() {
         instance = this
         // A live help call takes over the screen; close any Clicky walkthrough.
         AssistMeAccessibilityService.instance?.stopClickyGuide()
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        val accessibility = AssistMeAccessibilityService.instance
+        if (accessibility != null) {
+            windowManager = accessibility.getSystemService(WINDOW_SERVICE) as WindowManager
+            windowType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            windowType = overlayType()
+        }
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, notification())
         addOverlayViews()
@@ -370,7 +387,9 @@ class AssistMeAnnotationOverlayService : Service() {
             }
             .setNegativeButton("Cancel", null)
             .create().apply {
-                window?.setType(controlsLayout().type)
+                window?.setType(overlayType())
+                // Like the toolbar, the picker stays out of the shared screen.
+                window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 show()
             }
     }
@@ -401,7 +420,9 @@ class AssistMeAnnotationOverlayService : Service() {
             .setView(container)
             .setPositiveButton("OK", null)
             .create().apply {
-                window?.setType(controlsLayout().type)
+                window?.setType(overlayType())
+                // Like the toolbar, the picker stays out of the shared screen.
+                window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                 show()
             }
     }
@@ -425,13 +446,68 @@ class AssistMeAnnotationOverlayService : Service() {
         canvasView?.invalidate()
     }
 
+    // ------------------------------------------------------------------
+    // Helper gestures pass through the helpee's controls
+    // ------------------------------------------------------------------
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var remoteGesturesInFlight = 0
+    private val restoreControlsTouch = Runnable {
+        remoteGesturesInFlight = 0
+        setControlsTouchable(true)
+    }
+
+    /** True while the toolbar is on screen, so a helper gesture could land on it. */
+    val hasVisibleControls: Boolean
+        get() = controlsView?.isAttachedToWindow == true
+
+    /**
+     * Called just before the helper's tap or drag is injected. The toolbar
+     * stops taking touches so the gesture reaches the app underneath, as if
+     * the toolbar were not there. A safety timer restores it even if the
+     * gesture result never arrives. Main thread only.
+     */
+    fun beginRemoteGesture(maxDurationMs: Long) {
+        remoteGesturesInFlight++
+        setControlsTouchable(false)
+        mainHandler.removeCallbacks(restoreControlsTouch)
+        mainHandler.postDelayed(restoreControlsTouch, maxDurationMs + 1500L)
+    }
+
+    /** Called when the injected gesture finished or was cancelled. */
+    fun endRemoteGesture() {
+        remoteGesturesInFlight = (remoteGesturesInFlight - 1).coerceAtLeast(0)
+        if (remoteGesturesInFlight == 0) {
+            mainHandler.removeCallbacks(restoreControlsTouch)
+            // Let the injected UP event clear the input pipeline first.
+            mainHandler.postDelayed(restoreControlsTouch, 80L)
+        }
+    }
+
+    private fun setControlsTouchable(touchable: Boolean) {
+        val view = controlsView ?: return
+        val params = view.layoutParams as? WindowManager.LayoutParams ?: return
+        val flags = controlsFlags(touchable)
+        if (params.flags == flags) return
+        params.flags = flags
+        try {
+            windowManager.updateViewLayout(view, params)
+        } catch (_: RuntimeException) {
+            // The toolbar was removed while the gesture ran.
+        }
+    }
+
     private fun setDrawingEnabled(enabled: Boolean) {
         drawingEnabled = enabled
         drawButton?.text = if (enabled) "DRAW ON" else "DRAW"
         canvasView?.let { view ->
             val params = view.layoutParams as WindowManager.LayoutParams
             params.flags = canvasFlags()
-            windowManager.updateViewLayout(view, params)
+            try {
+                windowManager.updateViewLayout(view, params)
+            } catch (_: RuntimeException) {
+                // Accessibility windows disappear if the service is turned off.
+            }
         }
     }
 
@@ -446,16 +522,29 @@ class AssistMeAnnotationOverlayService : Service() {
         overlayType(),
         canvasFlags(),
         PixelFormat.TRANSLUCENT
-    ).apply { gravity = Gravity.TOP or Gravity.START }
+    ).apply {
+        type = windowType
+        gravity = Gravity.TOP or Gravity.START
+    }
+
+    // FLAG_SECURE keeps the helpee's own controls out of the shared screen:
+    // screen capture renders a secure window as a blank (black) area, so the
+    // helper never sees the buttons. Only this small window is secure; the
+    // full-screen drawing layer must stay capturable.
+    private fun controlsFlags(touchable: Boolean): Int =
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_SECURE or
+            (if (touchable) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
 
     private fun controlsLayout() = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.WRAP_CONTENT,
         overlayType(),
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        controlsFlags(touchable = true),
         PixelFormat.TRANSLUCENT
     ).apply {
+        type = windowType
         gravity = Gravity.TOP or Gravity.START
         x = 16
         y = 24
@@ -476,6 +565,7 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         try { canvasView?.let(windowManager::removeView) } catch (_: Exception) {}
         try { controlsView?.let(windowManager::removeView) } catch (_: Exception) {}
         canvasView = null

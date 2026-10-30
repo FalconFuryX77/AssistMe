@@ -192,7 +192,7 @@ class MainActivity : FlutterActivity() {
             nativeLibDir.endsWith("x86") -> "x86"
             else -> Build.SUPPORTED_ABIS.firstOrNull() ?: ""
         }
-        val hasLiteRtLm = java.io.File(nativeLibDir, "libLiteRtLm.so").exists()
+        val hasLiteRtLm = hasNativeLibrary("libLiteRtLm.so", nativeAbi)
         return mapOf(
             "sdk_int" to Build.VERSION.SDK_INT,
             "release" to Build.VERSION.RELEASE,
@@ -206,6 +206,25 @@ class MainActivity : FlutterActivity() {
             "free_storage_bytes" to storage.availableBytes,
             "is_emulator" to (Build.FINGERPRINT.contains("generic") || Build.HARDWARE.contains("ranchu")),
         )
+    }
+
+    /**
+     * Release builds keep native libraries uncompressed inside the APK
+     * (`extractNativeLibs=false`) and load them from there, so the library
+     * folder is empty. Look in the folder first, then in the APK files.
+     */
+    private fun hasNativeLibrary(name: String, abi: String): Boolean {
+        val nativeLibDir = applicationInfo.nativeLibraryDir
+        if (nativeLibDir != null && java.io.File(nativeLibDir, name).exists()) return true
+        val apks = listOfNotNull(applicationInfo.sourceDir) +
+            (applicationInfo.splitSourceDirs?.toList() ?: emptyList())
+        return apks.any { path ->
+            try {
+                java.util.zip.ZipFile(path).use { it.getEntry("lib/$abi/$name") != null }
+            } catch (_: java.io.IOException) {
+                false
+            }
+        }
     }
 
     /** Validates the guide sent from Flutter and starts Clicky. Returns a status code. */

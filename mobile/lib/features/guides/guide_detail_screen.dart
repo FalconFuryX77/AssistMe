@@ -267,7 +267,9 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
   @override
   Widget build(BuildContext context) {
     Theme.of(context); // Rebuild legacy color-token widgets when the app theme changes.
-    final totalSteps = _steps.length;
+    // A guide saved with notes only has no steps; show the notes as one page
+    // instead of "Step 1 of 0".
+    final totalSteps = _steps.isEmpty ? 1 : _steps.length;
     final progress = totalSteps > 0
         ? (_currentStepIndex + 1) / totalSteps
         : 1.0;
@@ -301,7 +303,9 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Step ${_currentStepIndex + 1} of $totalSteps',
+                        _steps.isEmpty
+                            ? 'Session notes'
+                            : 'Step ${_currentStepIndex + 1} of $totalSteps',
                         style: const TextStyle(
                           color: AppTheme.accentEmerald,
                           fontSize: AppTypography.body,

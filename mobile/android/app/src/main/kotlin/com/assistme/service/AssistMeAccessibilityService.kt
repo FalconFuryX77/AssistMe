@@ -25,6 +25,7 @@ class AssistMeAccessibilityService : AccessibilityService() {
 
         private const val CLICK_DURATION_MS = 50L
         private const val LONG_PRESS_DURATION_MS = 600L
+        private const val REMOTE_GESTURE_PASS_THROUGH_DELAY_MS = 60L
     }
 
     @Volatile
@@ -238,28 +239,53 @@ class AssistMeAccessibilityService : AccessibilityService() {
         val x = (normalizedX * screenW).coerceIn(0f, screenW - 1f)
         val y = (normalizedY * screenH).coerceIn(0f, screenH - 1f)
 
-        return when ((event["event_type"] as? String)?.lowercase()) {
-            "tap" -> dispatchTap(x, y)
-            "long_press" -> dispatchLongPress(x, y)
-            "drag" -> {
-                val normEndX = (event["normalized_end_x"] as? Number)?.toFloat()
-                    ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
-                val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
-                    ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
+        val eventType = (event["event_type"] as? String)?.lowercase()
+        if (eventType == "key_event") return dispatchGlobalAction(event["key_code"] as? String ?: "")
 
-                val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
-                val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
-
-                dispatchDrag(
-                    x,
-                    y,
-                    endX,
-                    endY,
-                    (event["duration_ms"] as? Number)?.toLong() ?: 180L
-                )
-            }
-            "key_event" -> dispatchGlobalAction(event["key_code"] as? String ?: "")
-            else -> false
+        val durationMs = when (eventType) {
+            "tap" -> CLICK_DURATION_MS
+            "long_press" -> LONG_PRESS_DURATION_MS
+            "drag" -> (event["duration_ms"] as? Number)?.toLong() ?: 180L
+            else -> return false
         }
+        val inject: (GestureResultCallback?) -> Boolean = { callback ->
+            when (eventType) {
+                "tap" -> dispatchTap(x, y, callback)
+                "long_press" -> dispatchLongPress(x, y, callback)
+                else -> {
+                    val normEndX = (event["normalized_end_x"] as? Number)?.toFloat()
+                        ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
+                    val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
+                        ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
+
+                    val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
+                    val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
+
+                    dispatchDrag(x, y, endX, endY, durationMs, callback)
+                }
+            }
+        }
+
+        // The helpee's toolbar is hidden from the helper's view, so the
+        // helper's gestures must reach the app underneath it instead of its
+        // buttons (STOP, Draw…). Make it pass-through for this gesture only.
+        val overlay = AssistMeAnnotationOverlayService.instance
+        if (overlay == null || !overlay.hasVisibleControls) return inject(null)
+        overlay.beginRemoteGesture(durationMs)
+        val done = object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                AssistMeAnnotationOverlayService.instance?.endRemoteGesture()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                AssistMeAnnotationOverlayService.instance?.endRemoteGesture()
+            }
+        }
+        // Give the window manager a moment to apply the pass-through flag
+        // before the touch is injected.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!inject(done)) AssistMeAnnotationOverlayService.instance?.endRemoteGesture()
+        }, REMOTE_GESTURE_PASS_THROUGH_DELAY_MS)
+        return true
     }
 }

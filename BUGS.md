@@ -60,6 +60,34 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
 - **Verified on emulator:** shows "This is an emulator (x86_64)…" in Settings, in the
   save dialog and on Transcribe. **Not verified:** a real Gemma run on a real phone.
 
+### B16. Release builds said "AI engine is not installed" on 64-bit phones
+- **Where:** `MainActivity.localAiDeviceInfo()` (added with B4).
+- **What:** the check looked for `libLiteRtLm.so` in the app's native-library
+  folder. Release builds use `extractNativeLibs=false`, so Android loads the
+  library straight from the APK and the folder is empty. Galaxy M34
+  (arm64-v8a, Android 16) was wrongly told the AI could not run.
+- **Fix:** `hasNativeLibrary()` also looks for `lib/<abi>/libLiteRtLm.so` inside the
+  installed APK files.
+- **Verified on the Galaxy M34:** "Reads screenshots and transcripts · arm64-v8a ·
+  5.3 GB RAM", Download models enabled.
+
+### B17. Gemma download always failed ("The model download did not finish")
+- **Where:** `LocalGuideAiService.installModel` (`.fromHuggingFace(repo)` with no file).
+- **What:** without a file name the plugin first fetches
+  `…/resolve/main/litertlm_manifest.json`. `litert-community/gemma-4-E2B-it-litert-lm`
+  is public and not gated, but it ships **no manifest** (HTTP 404), so every
+  install failed before any download started, on every network. The error was
+  then shown as the generic "did not finish".
+- **Fix:** download `gemma-4-E2B-it.litertlm` (2,588,147,712 bytes) explicitly,
+  pinned to commit `1caa527c1e88b55f046fcd8d2b4265606680663d`. Download errors now
+  include the first line of the real reason. Whisper URLs were checked and work.
+- **Verified on the Galaxy M34 (Wi-Fi):** Gemma 4 downloaded in ~12 min, then
+  Whisper; "Test on this phone" → `Gemma works on this phone (GPU). Loaded in 48 s,
+  answered in 6 s`, output `TITLE: Open Settings / ACTION: Tap "Settings"`.
+  Android's low-memory killer closed two other apps during the load; AssistMe
+  survived. Note: the model is released after each batch, so every "Improve
+  steps" press pays the ~48 s load again.
+
 ### B5. Steps without a screenshot could not be made or synced
 - **Fix:** "Add a written step" and "Write steps from the transcript" in the save
   dialog. The store saves steps with no image; the sync sends `has_image: false`.
@@ -107,8 +135,16 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
 
 ### B9. Guide screenshots include the helpee's own AssistMe toolbar
 - **Evidence:** the saved guide image shows the floating "Draw / STOP" overlay bar.
-- **Fix idea:** hide the helpee overlay for one frame before capture, or redact its
-  known rectangle automatically before the helper's redaction step.
+- **Fix (written and compiling, NOT yet verified on a device):** the toolbar window and its
+  colour/thickness pickers use `FLAG_SECURE`, so screen sharing shows a blank (black)
+  area instead of the buttons. Helper gestures pass through it:
+  `AssistMeAccessibilityService.dispatchInput` makes the toolbar `FLAG_NOT_TOUCHABLE`
+  (`AssistMeAnnotationOverlayService.beginRemoteGesture/endRemoteGesture`), waits
+  60 ms, injects the gesture, then restores it. The helpee's own touches are unchanged.
+- **To verify:** in a call, (1) the helper sees a black box where the toolbar is;
+  (2) with control approved, a helper tap on that box hits the app underneath and
+  does NOT trigger STOP; (3) the helpee can still tap STOP / Draw. Watch for OEMs
+  (Samsung, ColorOS) that black out the whole capture when a secure window shows.
 
 ### B10. Helper sees a black screen until the helpee's screen changes
 - **Evidence:** call 2: ICE connected, `videoFramesDecoded: 1`, then 0 fps for more
@@ -131,8 +167,40 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
   syncs over the live data channel. Transcription and Gemma can take minutes on a
   phone. If the helpee hangs up meanwhile, the guide is saved only on the helper
   ("other device could not be reached"), with no later retry.
-- **Fix idea:** queue an unsynced guide and send it on the next connection between
-  the same two devices.
+- **Fix (code + unit tests; not yet tested on phones):** delivery no longer depends
+  on the call. The helper's phone makes a random key per call and sends it to the
+  helpee only over the peer data channel (`guide_frame_sync_key`). If the live
+  sync fails, the guide (steps + screenshots) is AES-GCM encrypted on the helper
+  and uploaded to the new `/guide-deliveries` API; failed uploads wait in an outbox
+  and are retried every 60 s from Home. The helpee's Home checks every 60 s,
+  downloads, decrypts, saves and deletes it (skipping it if the live sync already
+  delivered that session). The backend only holds ciphertext, for at most 7 days.
+- **Deploy:** the live backend needs the new code and migration
+  `f6c3b8e1a920_guide_deliveries` (rebuild the backend image, then `alembic upgrade head`).
+- **Limit:** if the data channel never opened, the helpee never got the key and
+  cannot open a post-call delivery (but then no screenshots were sent either).
+
+### B20. Captured screenshots saved on neither phone
+- **Cause:** the helper kept a step only after the helpee confirmed it. Any failure
+  lost it on both phones: an aggressive 9×8 "duplicate" check (similar screens
+  rejected), full-size PNGs over the 2 MB limit, a stale unfinished transfer on
+  the helpee blocking every later one, or an ack timeout.
+- **Fix (code + tests; not yet tested on phones):** the helper keeps each step first;
+  sending to the helpee is best effort; screenshots are shrunk to ≤1280 px;
+  helper-chosen steps skip the duplicate check; the helpee replaces stale
+  transfers; missing screenshots are resent on save, and a step whose image
+  still never arrives is saved as text instead of failing the guide. The helpee
+  now waits up to 5 min for the helper to finish.
+
+### B18. "Step 1 of 0" on guides saved with notes only
+- **Fix:** the viewer shows "Session notes" for a guide with no steps.
+
+### B19. Helper drawings disappeared behind the notification panel
+- **Cause:** the helpee's drawing layer and toolbar were `TYPE_APPLICATION_OVERLAY`
+  windows, which Android always draws *below* the notification shade.
+- **Fix (compiles; not yet tested on phones):** when AssistMe's accessibility
+  service is on, both windows are `TYPE_ACCESSIBILITY_OVERLAY`, which Android draws
+  above the shade. Without the service it falls back to the old behaviour.
 
 ### B13. TURN depends entirely on Metered; failure silently means "no TURN"
 - **Evidence (live backend container, names/hosts only, no secrets read):**

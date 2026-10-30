@@ -21,6 +21,40 @@ class NormalizedRedaction {
   });
 }
 
+/// Re-encodes a guide screenshot so its longest side is at most [maxSide]
+/// pixels. Full-resolution phone frames saved as PNG can exceed the 2 MB
+/// per-step transfer limit; 1280 px keeps on-screen text readable.
+/// Images already small enough are returned unchanged.
+Future<Uint8List> shrinkGuideScreenshot(
+  Uint8List sourceBytes, {
+  int maxSide = 1280,
+}) async {
+  final buffer = await ui.ImmutableBuffer.fromUint8List(sourceBytes);
+  final descriptor = await ui.ImageDescriptor.encoded(buffer);
+  ui.Codec? codec;
+  ui.Image? image;
+  try {
+    final longSide = descriptor.width > descriptor.height
+        ? descriptor.width
+        : descriptor.height;
+    if (longSide <= maxSide) return sourceBytes;
+    final scale = maxSide / longSide;
+    codec = await descriptor.instantiateCodec(
+      targetWidth: (descriptor.width * scale).round(),
+      targetHeight: (descriptor.height * scale).round(),
+    );
+    image = (await codec.getNextFrame()).image;
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (data == null) throw StateError('Could not encode the screenshot.');
+    return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+  } finally {
+    image?.dispose();
+    codec?.dispose();
+    descriptor.dispose();
+    buffer.dispose();
+  }
+}
+
 Future<Uint8List> burnInScreenshotRedactions(
   Uint8List sourceBytes,
   List<NormalizedRedaction> regions,

@@ -12,6 +12,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/guides/guide_delivery_service.dart';
 import '../../core/network/api_client.dart';
 import '../../core/notifications/push_notification_service.dart';
 import '../../core/realtime/device_channel_service.dart';
@@ -67,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _generatingCode = false;
   Timer? _codePollTimer;
   Timer? _heartbeatTimer;
+  Timer? _guideSyncTimer;
   final TextEditingController _codeInputController = TextEditingController();
   bool _submittingCode = false;
 
@@ -91,8 +93,27 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _ringStatusTimer?.cancel();
     _codePollTimer?.cancel();
     _heartbeatTimer?.cancel();
+    _guideSyncTimer?.cancel();
     _codeInputController.dispose();
     super.dispose();
+  }
+
+  Future<void> _syncGuides() async {
+    await GuideDeliveryService.flushOutbox(widget.apiClient);
+    final saved = await GuideDeliveryService.checkInbox(
+      apiClient: widget.apiClient,
+      storage: widget.secureStorage,
+    );
+    if (!mounted || saved.isEmpty) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          saved.length == 1
+              ? '“${saved.first}” arrived from your helper. Open My Step Guides to see it.'
+              : '${saved.length} guides arrived from your helper. Open My Step Guides to see them.',
+        ),
+      ),
+    );
   }
 
   @override
@@ -129,6 +150,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     await _registerPushToken();
     await _checkMissedCalls();
     _heartbeatTimer?.cancel();
+    // Guides finished after a call ended travel through the backend,
+    // encrypted. Collect them (and resend any this phone could not upload)
+    // independently of any call.
+    _guideSyncTimer?.cancel();
+    _guideSyncTimer = Timer.periodic(
+      const Duration(seconds: 60),
+      (_) => _syncGuides(),
+    );
+    unawaited(_syncGuides());
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         _checkMissedCalls();

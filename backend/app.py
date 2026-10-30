@@ -10,6 +10,7 @@ from api.routers.assistance_requests import router as assistance_requests_router
 from api.routers.contacts import router as contacts_router
 from api.routers.context_engine import router as context_engine_router
 from api.routers.device_ws import router as device_ws_router
+from api.routers.guide_deliveries import router as guide_deliveries_router
 from api.routers.guides import router as guides_router
 from api.routers.health import router as health_router
 from api.routers.help_flow import router as help_flow_router
@@ -74,4 +75,5 @@ app.include_router(context_engine_router, prefix=INTERNAL_PREFIX)
 app.include_router(policy_engine_router, prefix=INTERNAL_PREFIX)
 app.include_router(intelligent_assistance_router)
 app.include_router(guides_router)
+app.include_router(guide_deliveries_router)
 
