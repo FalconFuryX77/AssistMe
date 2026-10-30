@@ -1,5 +1,6 @@
 """AssistMe API — FastAPI application entry point."""
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -17,7 +18,7 @@ from api.routers.help_flow import router as help_flow_router
 from api.routers.intelligent_assistance import router as intelligent_assistance_router
 from api.routers.policy_engine import router as policy_engine_router
 from api.routers.sessions import router as sessions_router
-from api.routers.session_ws import router as session_ws_router
+from api.routers.session_ws import router as session_ws_router, run_session_sweeper
 from api.routers.trusted_devices import router as trusted_devices_router
 from api.routers.users import router as users_router
 from core.config import settings
@@ -32,12 +33,21 @@ import models  # noqa: F401
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Run development bootstrap only; production uses migrations."""
+    """Run development bootstrap (production uses migrations) and the
+    background sweeper that ends sessions abandoned by crashed phones."""
     if settings.AUTO_CREATE_TABLES:
         await create_tables()
+    stop_sweeper = asyncio.Event()
+    sweeper = asyncio.create_task(run_session_sweeper(stop_sweeper))
     try:
         yield
     finally:
+        stop_sweeper.set()
+        sweeper.cancel()
+        try:
+            await sweeper
+        except (asyncio.CancelledError, Exception):
+            pass
         await engine.dispose()
 
 

@@ -8,7 +8,7 @@ changes.  Full WebRTC signaling is handled in Phase 3.
 import json
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -36,6 +36,7 @@ _connections: dict[str, dict[str, WebSocket]] = {}
 _pending_signals: dict[str, list[dict]] = {}
 _disconnect_tasks: dict[tuple[str, str], asyncio.Task] = {}
 _DISCONNECT_GRACE_SECONDS = 300
+_LIVENESS_STAMP_SECONDS = 30
 _session_bus_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -767,3 +768,34 @@ async def _end_after_disconnect(session_id: str, user_id: str) -> None:
         pass
     finally:
         _disconnect_tasks.pop((session_id, user_id), None)
+
+
+async def run_session_sweeper(stop: asyncio.Event) -> None:
+    """Keep the database's view of live calls current and end abandoned ones.
+
+    Runs in every worker. Each worker stamps the participants whose session
+    socket it holds, so a call stays "live" in the database whichever worker
+    serves it, then ends sessions nobody has been connected to for the
+    reconnect grace period. This is what ends calls left behind by crashed or
+    powered-off phones, or by grace timers lost when the backend restarted.
+    """
+    idle_for = timedelta(seconds=_DISCONNECT_GRACE_SECONDS)
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=_LIVENESS_STAMP_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        try:
+            pairs = [
+                (session_id, user_id)
+                for session_id, room in list(_connections.items())
+                for user_id in list(room)
+            ]
+            async with async_session_factory() as db:
+                await SessionService.touch_participants(pairs, db)
+                ended = await SessionService.expire_abandoned_sessions(db, idle_for)
+            for session_id in ended:
+                logger.info("[AssistMe][SESSION] ended abandoned session %s", session_id)
+        except Exception:  # pragma: no cover - keep sweeping on DB hiccups
+            logger.exception("[AssistMe][SESSION] sweeper pass failed")

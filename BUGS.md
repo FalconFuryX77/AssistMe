@@ -122,16 +122,27 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
 
 ## OPEN
 
-### B8. Sessions left "active" forever when an app dies mid-call — real-world, not test-only
+### B8. Sessions left "active" forever when an app dies mid-call (FIXED in code)
 - **Evidence:** `SessionService.check_and_expire_sessions()` (`backend/api/services/session_service.py:591`)
   is never called anywhere. After the apps were killed mid-call, the backend log
   shows four connections polling `GET /sessions/a493e69b-…` every second, and the
   session stayed `active` until it was ended by hand in the test DB.
 - **Real installs:** yes. An app crash (for example out of memory while Gemma runs),
   battery death, swipe-away or loss of network during a call leaves the same state.
-- **Fix idea:** run expiry periodically (startup task + interval), and also end a
-  session when both participants miss heartbeats for N seconds; make clients stop
-  polling a session the backend reports as ended or missing.
+- **Fix (backend code + tests; not yet deployed):** every worker runs
+  `run_session_sweeper` (started in `app.py` lifespan). Every 30 s it stamps
+  `last_seen_at` for the session sockets that worker holds, then
+  `SessionService.expire_abandoned_sessions` ends waiting/active sessions with no
+  stamp for 5 min (the existing reconnect grace). This covers crashed or dead
+  phones, phones that never opened the socket, and grace timers lost on a backend
+  restart. Clients already stop polling once a session reads `ended`.
+- **Second bug found and fixed here:** the backend runs `--workers 4`, and the
+  5-minute grace timer lives in the worker where the socket dropped. A phone that
+  reconnected through another worker never cancelled it, so the call was ended
+  5 minutes later while still in progress. `terminate_on_disconnect` now does
+  nothing if the participant is `connected` again in the database.
+- `check_and_expire_sessions` (ends any call 60 min after it *started*) is still
+  deliberately unused: it would cut long but healthy calls.
 
 ### B9. Guide screenshots include the helpee's own AssistMe toolbar
 - **Evidence:** the saved guide image shows the floating "Draw / STOP" overlay bar.
