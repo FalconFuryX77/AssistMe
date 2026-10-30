@@ -81,6 +81,9 @@ class AssistMeAnnotationOverlayService : Service() {
     private var initialLayoutY = 0
     private var isDragging = false
 
+    /** The tool row; hidden when the toolbar is folded down to handle + STOP. */
+    private var toolsRow: View? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -171,6 +174,12 @@ class AssistMeAnnotationOverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isDragging) return@setOnTouchListener true
+                        // A tap (not a drag) folds the tools away so the
+                        // toolbar covers as little of the screen as possible.
+                        toolsRow?.let { row ->
+                            row.visibility = if (row.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                        }
+                        return@setOnTouchListener true
                     }
                 }
                 false
@@ -182,7 +191,14 @@ class AssistMeAnnotationOverlayService : Service() {
         val scrollView = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            // Size to the tools, not the screen. A weighted row stretched the
+            // toolbar window across the full width, and screen sharing blanks
+            // the whole window (FLAG_SECURE), hiding a wide strip of the
+            // helpee's screen from the helper instead of just the pill.
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
         }
         val inner = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -316,6 +332,7 @@ class AssistMeAnnotationOverlayService : Service() {
 
         scrollView.addView(inner)
         outer.addView(scrollView)
+        toolsRow = scrollView
 
         // STOP – prominent high-contrast crimson red pill
         outer.addView(Button(this).apply {
@@ -570,6 +587,7 @@ class AssistMeAnnotationOverlayService : Service() {
         try { controlsView?.let(windowManager::removeView) } catch (_: Exception) {}
         canvasView = null
         controlsView = null
+        toolsRow = null
         drawButton = null
         penButton = null
         eraserButton = null

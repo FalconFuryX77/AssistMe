@@ -203,6 +203,46 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
   still never arrives is saved as text instead of failing the guide. The helpee
   now waits up to 5 min for the helper to finish.
 
+### B21. Video never came back after the helpee locked the phone, left the app, or on a second share
+- **Seen on phones (30 Oct, Samsung M34 helper + ASUS A069P helpee):** helper stuck
+  on "Waiting for the other device to share…" with the red banner *"Could not join the
+  call: … Failed to set remote offer sdp: The order of m-lines in subsequent offer
+  doesn't match order from previous offer/answer."* Helper log: socket closed 1002 →
+  reconnected → offer rejected at 19:49:26 and again at 19:49:41 (helpee restarted sharing).
+- **Cause:** after a signaling drop, a lock/unlock or a re-share, the helpee rebuilds
+  its peer connection and sends a fresh offer, but the helper applied it to its *old*
+  connection, which WebRTC refuses.
+- **Fix:** when an offer does not fit, the helper rebuilds its peer connection and
+  applies the offer to the fresh one (once), queueing ICE candidates meanwhile and
+  keeping its mute state. The raw WebRTC error is no longer shown to users.
+
+### B22. "Add redacted step to guide" ignored taps and the app lagged after "Add step"
+- **Cause:** after "Add step" the button stayed locked for up to 20 s while waiting
+  for the helpee's confirmation, so taps were silently dropped; full-size frames
+  were redacted and re-encoded on the UI thread.
+- **Fix:** the screenshot is shrunk *before* the redaction screen; the button is
+  released as soon as the step is saved on the helper and shows "Adding step…"
+  while busy; delivery to the helpee runs in the background, one at a time.
+
+### B23. "End call" on the helper took a long time
+- **Cause:** after Discard (or with the helpee already gone) the helper still waited up
+  to 25 s for the helpee's reply.
+- **Fix:** a discarded guide sends one message and returns at once; a closed channel
+  skips the live sync (post-call delivery takes over); retries cut to 3 s + 10 s.
+
+### B24. Helpee toolbar showed to the helper as a full-width black band that could not be moved
+- **Cause:** the tool row had layout weight 1, so the toolbar window stretched across
+  the screen; screen sharing blanks the whole secure window, and a full-width window
+  could not be dragged sideways.
+- **Fix:** the window is sized to the pill; tapping the ⋮⋮ handle folds it to handle +
+  STOP (tap again to open). The black area the helper sees is only the pill.
+- **Inherent limit:** what is *under* the toolbar cannot be shown to the helper.
+
+### B25. Helper drawings did not appear on the helpee phone
+- **Cause (setup, not code):** the ASUS had neither "Display over other apps" nor the
+  AssistMe accessibility service enabled. Granted the overlay permission during the
+  test; drawing then worked. Make sure both phones have it before the demo.
+
 ### B18. "Step 1 of 0" on guides saved with notes only
 - **Fix:** the viewer shows "Session notes" for a guide with no steps.
 

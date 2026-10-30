@@ -54,6 +54,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
     9 / 16,
   );
   final ValueNotifier<bool> _screenShareNotifier = ValueNotifier<bool>(false);
+  final ValueNotifier<bool> _guideStepBusy = ValueNotifier<bool>(false);
   final ValueNotifier<GuideAudioCaptureStatus> _guideAudioStatusNotifier =
       ValueNotifier<GuideAudioCaptureStatus>(GuideAudioCaptureStatus.off);
   bool _leaving = false;
@@ -242,6 +243,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                               contentAspectRatioNotifier: _aspectRatioNotifier,
                               screenSharingSink: _screenShareNotifier,
                               guideAudioStatusSink: _guideAudioStatusNotifier,
+                              guideStepBusySink: _guideStepBusy,
                             ),
                           ),
                         ],
@@ -258,14 +260,27 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                   padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
                   child: SizedBox(
                     width: double.infinity,
-                    child: FilledButton.icon(
-                      // A closure: the coordinator's state does not exist yet
-                      // on the first build, and a null tear-off would leave
-                      // the button disabled for the whole call.
-                      onPressed: () =>
-                          _flowCoordinatorKey.currentState?.captureGuideStep(),
-                      icon: const Icon(Icons.add_photo_alternate_outlined),
-                      label: const Text('Add redacted step to guide'),
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: _guideStepBusy,
+                      builder: (context, busy, _) => FilledButton.icon(
+                        // A closure: the coordinator's state does not exist
+                        // yet on the first build, and a null tear-off would
+                        // leave the button disabled for the whole call.
+                        onPressed: busy
+                            ? null
+                            : () => _flowCoordinatorKey.currentState
+                                  ?.captureGuideStep(),
+                        icon: busy
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2.5),
+                              )
+                            : const Icon(Icons.add_photo_alternate_outlined),
+                        label: Text(
+                          busy ? 'Adding step…' : 'Add redacted step to guide',
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -583,6 +598,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
     _annotationModeNotifier.dispose();
     _screenShareNotifier.dispose();
     _guideAudioStatusNotifier.dispose();
+    _guideStepBusy.dispose();
     super.dispose();
   }
 }

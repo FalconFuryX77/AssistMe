@@ -78,6 +78,9 @@ class AssistanceFlowCoordinator extends StatefulWidget {
   final ValueNotifier<bool>? screenSharingSink;
   final ValueNotifier<GuideAudioCaptureStatus>? guideAudioStatusSink;
 
+  /// True while a guide step is being captured, so the button can show it.
+  final ValueNotifier<bool>? guideStepBusySink;
+
   const AssistanceFlowCoordinator({
     super.key,
     required this.sessionId,
@@ -94,6 +97,7 @@ class AssistanceFlowCoordinator extends StatefulWidget {
     this.contentAspectRatioNotifier,
     this.screenSharingSink,
     this.guideAudioStatusSink,
+    this.guideStepBusySink,
   });
 
   @override
@@ -177,6 +181,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   int _guideFrameOrdinal = 0;
   // Guide steps the helpee has confirmed it stored (helper side only).
   final Set<String> _guideFramesOnHelpee = <String>{};
+  // Transfers to the helpee run one at a time; the helpee accepts one at once.
+  Future<void> _helpeeSendChain = Future<void>.value();
   // Helper only: per-call key for the encrypted post-call guide delivery.
   // It reaches the helpee only over the call's peer data channel.
   final List<int> _guideSyncKey = GuideDeliveryService.newKey();
@@ -992,8 +998,21 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         'steps': steps,
       },
     };
+    if (!saved) {
+      // Nothing to deliver: tell the helpee once and leave right away instead
+      // of waiting up to 25 s for a reply (that made "End call" feel stuck).
+      _engine.sendData(payload);
+      return false;
+    }
+    // The peer is gone: skip the live path, the post-call delivery takes over.
+    if (!_engine.isDataChannelOpen) return false;
     if (saved) {
       _sendGuideSyncKey();
+      // Let screenshots still being sent in the background finish first.
+      await _helpeeSendChain.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {},
+      );
       // Steps captured while the channel was busy only exist here so far.
       // Send them now so the helpee can attach every screenshot.
       for (final frame in frames) {
@@ -1013,7 +1032,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     _pendingGuideFinalizationAck = ack;
     try {
       var sent = false;
-      for (var attempt = 0; attempt < 20 && mounted; attempt++) {
+      for (var attempt = 0; attempt < 6 && mounted; attempt++) {
         if (_engine.sendData(payload)) {
           sent = true;
           break;
@@ -1021,7 +1040,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         await Future<void>.delayed(const Duration(milliseconds: 500));
       }
       if (!sent) return false;
-      return await ack.future.timeout(const Duration(seconds: 15));
+      return await ack.future.timeout(const Duration(seconds: 10));
     } catch (_) {
       return false;
     } finally {
@@ -1611,20 +1630,47 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   }
 
   /// Helper: answer an incoming screen-share offer with our mic attached.
-  Future<void> _handleIncomingOffer(Map<String, dynamic> sdp) async {
+  Future<void> _handleIncomingOffer(
+    Map<String, dynamic> sdp, {
+    bool onFreshPeer = false,
+  }) async {
     if (!_mediaReady || _mediaRecovering) {
       _pendingOffer = sdp;
       return;
     }
+    // Queue the offer's ICE candidates until it is applied; candidates sent
+    // to a connection that is about to be replaced would be lost.
+    _remoteDescriptionSet = false;
     try {
       debugPrint('[AssistMe][CALL] received WebRTC offer; applying remote SDP');
       // Match the offer's transceiver order before adding the helper mic.
       // The caller adds screen video first and audio second; creating an audio
       // transceiver here first can make the answer's SDP m-lines disagree.
-      await _engine.setRemoteDescription(sdp);
+      try {
+        await _engine.setRemoteDescription(sdp);
+      } catch (error) {
+        // After the helpee locks the phone, leaves the app or loses signaling,
+        // it rebuilds its connection and offers again. That fresh offer cannot
+        // be applied to the helper's old connection ("The order of m-lines in
+        // subsequent offer doesn't match"), which left the helper on "Waiting
+        // for the other device to share" for the rest of the call. Rebuild
+        // the helper side to match and apply the offer to the fresh one.
+        if (widget.isHelpee || onFreshPeer) rethrow;
+        debugPrint(
+          '[AssistMe][CALL] offer does not fit the current connection; rebuilding helper peer ($error)',
+        );
+        remoteStreamNotifier.value = null;
+        await _engine.rebuildPeerConnection();
+        await _handleIncomingOffer(sdp, onFreshPeer: true);
+        return;
+      }
       _remoteDescriptionSet = true;
       if (!widget.isHelpee) {
         await _engine.startMicOnly();
+        if (onFreshPeer) {
+          // Keep the helper's mute choice on the rebuilt connection.
+          await _engine.toggleAudioMute(_engine.isAudioMuted);
+        }
       }
       for (final candidate in _pendingIceCandidates) {
         await _engine.addIceCandidate(candidate);
@@ -1637,9 +1683,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       debugPrint('Answering offer failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             backgroundColor: AppTheme.accentRose,
-            content: Text('Could not join the call: $e'),
+            content: Text(
+              'The shared screen could not reconnect. Ask them to tap Stop Sharing, then share again.',
+            ),
           ),
         );
       }
@@ -2823,7 +2871,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       );
       return;
     }
-    setState(() => _guideFrameTransferInProgress = true);
+    _setGuideStepBusy(true);
     try {
       final captured = await _engine.captureScreenFrame(remoteStream: stream);
       if (captured == null || captured.isEmpty) {
@@ -2832,10 +2880,13 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         return;
       }
       if (!mounted) return;
-      final redacted = await editScreenshotRedactions(context, captured);
+      // Shrink before the redaction editor so drawing, the redaction burn-in
+      // and the transfer all work on a small image instead of a full frame.
+      final small = await shrinkGuideScreenshot(captured);
+      if (!mounted) return;
+      final redacted = await editScreenshotRedactions(context, small);
       if (!mounted || redacted == null) return;
-      // Full-resolution PNGs from real phones can pass the 2 MB step limit.
-      var image = await shrinkGuideScreenshot(redacted);
+      var image = redacted;
       if (image.length > _maxGuideFrameBytes) {
         image = await shrinkGuideScreenshot(image, maxSide: 960);
       }
@@ -2871,22 +2922,33 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         return;
       }
       _guideFrameOrdinal++;
-      if (mounted) setState(() {});
-      final delivered = await _sendGuideFrameToHelpee(
-        id: stepId,
-        bytes: image,
-        title: title,
-        instruction: instruction,
-      );
-      if (!mounted) return;
-      _showGuideMessage(
-        delivered
-            ? 'Step $stepNumber added to the guide on both devices.'
-            : 'Step $stepNumber saved on your phone. It will be sent to the other phone when you save the guide.',
-      );
+      // The step is safe on this phone: free the button now. Waiting for the
+      // helpee's confirmation here used to lock it for up to 20 seconds,
+      // silently swallowing taps.
+      _setGuideStepBusy(false);
+      _showGuideMessage('Step $stepNumber saved. Sending it to the other phone…');
+      _helpeeSendChain = _helpeeSendChain.then((_) async {
+        final delivered = await _sendGuideFrameToHelpee(
+          id: stepId,
+          bytes: image,
+          title: title,
+          instruction: instruction,
+        );
+        _showGuideMessage(
+          delivered
+              ? 'Step $stepNumber is on both devices.'
+              : 'Step $stepNumber is saved on your phone. It will be sent to the other phone when you save the guide.',
+        );
+      });
     } finally {
-      if (mounted) setState(() => _guideFrameTransferInProgress = false);
+      _setGuideStepBusy(false);
     }
+  }
+
+  void _setGuideStepBusy(bool busy) {
+    _guideFrameTransferInProgress = busy;
+    widget.guideStepBusySink?.value = busy;
+    if (mounted) setState(() {});
   }
 
   bool _sendGuideSyncKey() => _engine.sendData({
