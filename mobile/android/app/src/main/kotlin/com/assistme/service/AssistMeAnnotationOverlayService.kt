@@ -33,12 +33,16 @@ class AssistMeAnnotationOverlayService : Service() {
     companion object {
         private const val CHANNEL_ID = "assistme_annotation_overlay"
         private const val NOTIFICATION_ID = 4002
+        private const val AUTO_FOLD_MS = 6000L
+        private const val FOLDED_ALPHA = 0.45f
+        private const val EXPANDED_ALPHA = 0.9f
 
         var instance: AssistMeAnnotationOverlayService? = null
             private set
 
         fun start(context: Context) {
-            if (!Settings.canDrawOverlays(context)) return
+            // Accessibility overlays need no "draw over apps" permission.
+            if (!Settings.canDrawOverlays(context) && AssistMeAccessibilityService.instance == null) return
             val intent = Intent(context, AssistMeAnnotationOverlayService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -53,6 +57,15 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     private lateinit var windowManager: WindowManager
+
+    /**
+     * TYPE_ACCESSIBILITY_OVERLAY windows are drawn above the notification
+     * shade and quick settings; TYPE_APPLICATION_OVERLAY windows are always
+     * drawn below them, so the helper's drawings vanished whenever the helpee
+     * pulled the shade down. Use the accessibility service's window manager
+     * when AssistMe's service is on (it is required for Clicky and control).
+     */
+    private var windowType: Int = 0
     private var canvasView: AnnotationCanvasView? = null
     private var controlsView: LinearLayout? = null
     private val strokes = mutableListOf<Map<*, *>>()
@@ -71,10 +84,22 @@ class AssistMeAnnotationOverlayService : Service() {
     private var initialLayoutY = 0
     private var isDragging = false
 
+    /** The tool row; hidden when the toolbar is folded down to handle + STOP. */
+    private var toolsRow: View? = null
+
     override fun onCreate() {
         super.onCreate()
         instance = this
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        // A live help call takes over the screen; close any Clicky walkthrough.
+        AssistMeAccessibilityService.instance?.stopClickyGuide()
+        val accessibility = AssistMeAccessibilityService.instance
+        if (accessibility != null) {
+            windowManager = accessibility.getSystemService(WINDOW_SERVICE) as WindowManager
+            windowType = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+            windowType = overlayType()
+        }
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, notification())
         addOverlayViews()
@@ -152,6 +177,10 @@ class AssistMeAnnotationOverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         if (isDragging) return@setOnTouchListener true
+                        // A tap (not a drag) folds the tools away so the
+                        // toolbar covers as little of the screen as possible.
+                        setToolsExpanded(toolsRow?.visibility != View.VISIBLE)
+                        return@setOnTouchListener true
                     }
                 }
                 false
@@ -163,7 +192,12 @@ class AssistMeAnnotationOverlayService : Service() {
         val scrollView = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            // Size to the tools, not the screen: a weighted row stretched the
+            // toolbar window across the full width and covered the screen.
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            )
         }
         val inner = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -297,6 +331,9 @@ class AssistMeAnnotationOverlayService : Service() {
 
         scrollView.addView(inner)
         outer.addView(scrollView)
+        toolsRow = scrollView
+        // Start folded: only the handle and STOP show until the helpee opens it.
+        scrollView.visibility = View.GONE
 
         // STOP – prominent high-contrast crimson red pill
         outer.addView(Button(this).apply {
@@ -322,6 +359,7 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     private fun setTool(tool: String) {
+        keepToolsOpen()
         selectedTool = tool
         updateToolUI()
         // If eraser selected, drawingEnabled should still be true but we switch behavior
@@ -359,6 +397,7 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     private fun showColorPicker() {
+        keepToolsOpen()
         val colors = listOf(Color.RED, Color.YELLOW, Color.GREEN, Color.BLUE, Color.BLACK, Color.argb(255,255,140,0), Color.WHITE, Color.argb(255,128,0,128))
         val names = listOf("Red","Yellow","Green","Blue","Black","Orange","White","Purple")
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog)
@@ -368,12 +407,13 @@ class AssistMeAnnotationOverlayService : Service() {
             }
             .setNegativeButton("Cancel", null)
             .create().apply {
-                window?.setType(controlsLayout().type)
+                window?.setType(overlayType())
                 show()
             }
     }
 
     private fun showWidthPicker() {
+        keepToolsOpen()
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32,24,32,24)
@@ -399,7 +439,7 @@ class AssistMeAnnotationOverlayService : Service() {
             .setView(container)
             .setPositiveButton("OK", null)
             .create().apply {
-                window?.setType(controlsLayout().type)
+                window?.setType(overlayType())
                 show()
             }
     }
@@ -423,13 +463,105 @@ class AssistMeAnnotationOverlayService : Service() {
         canvasView?.invalidate()
     }
 
+    // ------------------------------------------------------------------
+    // Helper gestures pass through the helpee's controls
+    // ------------------------------------------------------------------
+
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var remoteGesturesInFlight = 0
+    private val restoreControlsTouch = Runnable {
+        remoteGesturesInFlight = 0
+        setControlsTouchable(true)
+    }
+
+    /** True while the toolbar is on screen, so a helper gesture could land on it. */
+    val hasVisibleControls: Boolean
+        get() = controlsView?.isAttachedToWindow == true
+
+    /**
+     * Called just before the helper's tap or drag is injected. The toolbar
+     * stops taking touches so the gesture reaches the app underneath, as if
+     * the toolbar were not there. A safety timer restores it even if the
+     * gesture result never arrives. Main thread only.
+     */
+    fun beginRemoteGesture(maxDurationMs: Long) {
+        remoteGesturesInFlight++
+        setControlsTouchable(false)
+        mainHandler.removeCallbacks(restoreControlsTouch)
+        mainHandler.postDelayed(restoreControlsTouch, maxDurationMs + 1500L)
+    }
+
+    /** Called when the injected gesture finished or was cancelled. */
+    fun endRemoteGesture() {
+        remoteGesturesInFlight = (remoteGesturesInFlight - 1).coerceAtLeast(0)
+        if (remoteGesturesInFlight == 0) {
+            mainHandler.removeCallbacks(restoreControlsTouch)
+            // Let the injected UP event clear the input pipeline first.
+            mainHandler.postDelayed(restoreControlsTouch, 80L)
+        }
+    }
+
+    private val autoFold = Runnable { setToolsExpanded(false) }
+    private val showControlsAgain = Runnable { controlsView?.visibility = View.VISIBLE }
+
+    /** Opens or folds the tool row; an open row folds itself after a pause. */
+    private fun setToolsExpanded(expanded: Boolean) {
+        val row = toolsRow ?: return
+        row.visibility = if (expanded) View.VISIBLE else View.GONE
+        mainHandler.removeCallbacks(autoFold)
+        if (expanded) mainHandler.postDelayed(autoFold, AUTO_FOLD_MS)
+        val view = controlsView ?: return
+        val params = view.layoutParams as? WindowManager.LayoutParams ?: return
+        params.alpha = if (expanded) EXPANDED_ALPHA else FOLDED_ALPHA
+        try {
+            windowManager.updateViewLayout(view, params)
+        } catch (_: RuntimeException) {
+        }
+    }
+
+    /** Any use of a tool keeps the row open a little longer. */
+    private fun keepToolsOpen() {
+        if (toolsRow?.visibility != View.VISIBLE) return
+        mainHandler.removeCallbacks(autoFold)
+        mainHandler.postDelayed(autoFold, AUTO_FOLD_MS)
+    }
+
+    /**
+     * Hides the toolbar for [durationMs] so the helper's guide screenshot shows
+     * only the helpee's screen. Called when the helper taps "Add step".
+     */
+    fun hideControlsFor(durationMs: Long) {
+        val view = controlsView ?: return
+        view.visibility = View.INVISIBLE
+        mainHandler.removeCallbacks(showControlsAgain)
+        mainHandler.postDelayed(showControlsAgain, durationMs.coerceIn(200L, 5000L))
+    }
+
+    private fun setControlsTouchable(touchable: Boolean) {
+        val view = controlsView ?: return
+        val params = view.layoutParams as? WindowManager.LayoutParams ?: return
+        val flags = controlsFlags(touchable)
+        if (params.flags == flags) return
+        params.flags = flags
+        try {
+            windowManager.updateViewLayout(view, params)
+        } catch (_: RuntimeException) {
+            // The toolbar was removed while the gesture ran.
+        }
+    }
+
     private fun setDrawingEnabled(enabled: Boolean) {
+        keepToolsOpen()
         drawingEnabled = enabled
         drawButton?.text = if (enabled) "DRAW ON" else "DRAW"
         canvasView?.let { view ->
             val params = view.layoutParams as WindowManager.LayoutParams
             params.flags = canvasFlags()
-            windowManager.updateViewLayout(view, params)
+            try {
+                windowManager.updateViewLayout(view, params)
+            } catch (_: RuntimeException) {
+                // Accessibility windows disappear if the service is turned off.
+            }
         }
     }
 
@@ -444,16 +576,35 @@ class AssistMeAnnotationOverlayService : Service() {
         overlayType(),
         canvasFlags(),
         PixelFormat.TRANSLUCENT
-    ).apply { gravity = Gravity.TOP or Gravity.START }
+    ).apply {
+        type = windowType
+        gravity = Gravity.TOP or Gravity.START
+        // Cover the whole display, status bar and camera cutout included, so
+        // a stroke drawn anywhere on the shared screen can be shown.
+        layoutInDisplayCutoutMode =
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        setFitInsetsTypes(0)
+    }
+
+    // No FLAG_SECURE: Android blanks a secure window to solid black in the
+    // share, which hid the screen under it from the helper. Instead the
+    // toolbar is small, folded and translucent (the helper sees the screen
+    // through it), the helper's taps pass through it, and it hides itself
+    // while the helper captures a guide screenshot.
+    private fun controlsFlags(touchable: Boolean): Int =
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            (if (touchable) 0 else WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
 
     private fun controlsLayout() = WindowManager.LayoutParams(
         WindowManager.LayoutParams.WRAP_CONTENT,
         WindowManager.LayoutParams.WRAP_CONTENT,
         overlayType(),
-        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+        controlsFlags(touchable = true),
         PixelFormat.TRANSLUCENT
     ).apply {
+        type = windowType
+        alpha = FOLDED_ALPHA
         gravity = Gravity.TOP or Gravity.START
         x = 16
         y = 24
@@ -474,10 +625,12 @@ class AssistMeAnnotationOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacksAndMessages(null)
         try { canvasView?.let(windowManager::removeView) } catch (_: Exception) {}
         try { controlsView?.let(windowManager::removeView) } catch (_: Exception) {}
         canvasView = null
         controlsView = null
+        toolsRow = null
         drawButton = null
         penButton = null
         eraserButton = null
@@ -523,8 +676,29 @@ class AssistMeAnnotationOverlayService : Service() {
             strokeJoin = Paint.Join.ROUND
         }
 
+        // Stroke points are fractions of the *whole display*, the same space
+        // as the shared video and remote taps. Map them through the real
+        // display size and this window's position on screen, never the
+        // window's own size: an overlay window that starts below the status
+        // bar (accessibility overlays and some OEMs lay it out that way)
+        // otherwise draws every stroke lower than where the helper drew it.
+        private val origin = IntArray(2)
+        private var screenW = 1f
+        private var screenH = 1f
+
+        private fun refreshScreenGeometry() {
+            val bounds = windowManager.currentWindowMetrics.bounds
+            screenW = bounds.width().coerceAtLeast(1).toFloat()
+            screenH = bounds.height().coerceAtLeast(1).toFloat()
+            getLocationOnScreen(origin)
+        }
+
+        private fun sx(normalized: Float): Float = normalized * screenW - origin[0]
+        private fun sy(normalized: Float): Float = normalized * screenH - origin[1]
+
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
+            refreshScreenGeometry()
             strokes.forEach { stroke ->
                 drawStroke(canvas, stroke["points"] as? List<*>, stroke)
             }
@@ -534,13 +708,13 @@ class AssistMeAnnotationOverlayService : Service() {
                     val p = activePoints.first()
                     paint.color = selectedColor
                     paint.style = Paint.Style.FILL
-                    canvas.drawCircle(p.x * width, p.y * height, maxOf(4f, selectedWidth/2), paint)
+                    canvas.drawCircle(sx(p.x), sy(p.y), maxOf(4f, selectedWidth/2), paint)
                     paint.style = Paint.Style.STROKE
                 } else {
                     val path = Path()
-                    path.moveTo(activePoints.first().x * width, activePoints.first().y * height)
+                    path.moveTo(sx(activePoints.first().x), sy(activePoints.first().y))
                     activePoints.drop(1).forEach { point ->
-                        path.lineTo(point.x * width, point.y * height)
+                        path.lineTo(sx(point.x), sy(point.y))
                     }
                     paint.color = selectedColor
                     paint.strokeWidth = maxOf(3f, selectedWidth)
@@ -556,16 +730,16 @@ class AssistMeAnnotationOverlayService : Service() {
                 paint.color = (stroke["color"] as? Number)?.toInt() ?: Color.RED
                 val w = maxOf(3f, number(stroke["width"]))
                 paint.style = Paint.Style.FILL
-                canvas.drawCircle(number(p["x"]) * width, number(p["y"]) * height, maxOf(4f, w/2), paint)
+                canvas.drawCircle(sx(number(p["x"])), sy(number(p["y"])), maxOf(4f, w/2), paint)
                 paint.style = Paint.Style.STROKE
                 return
             }
             val first = points[0] as? Map<*, *> ?: return
             val path = Path()
-            path.moveTo(number(first["x"]) * width, number(first["y"]) * height)
+            path.moveTo(sx(number(first["x"])), sy(number(first["y"])))
             points.drop(1).forEach { raw ->
                 val point = raw as? Map<*, *> ?: return@forEach
-                path.lineTo(number(point["x"]) * width, number(point["y"]) * height)
+                path.lineTo(sx(number(point["x"])), sy(number(point["y"])))
             }
             paint.color = (stroke["color"] as? Number)?.toInt() ?: Color.RED
             paint.strokeWidth = maxOf(3f, number(stroke["width"]))
@@ -597,8 +771,9 @@ class AssistMeAnnotationOverlayService : Service() {
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (!drawingEnabled) return false
-            val x = (event.x / width.coerceAtLeast(1)).coerceIn(0f, 1f)
-            val y = (event.y / height.coerceAtLeast(1)).coerceIn(0f, 1f)
+            refreshScreenGeometry()
+            val x = (event.rawX / screenW).coerceIn(0f, 1f)
+            val y = (event.rawY / screenH).coerceIn(0f, 1f)
             // Eraser mode – remove strokes near touch, no drawing preview
             if (selectedTool == "eraser") {
                 when (event.actionMasked) {

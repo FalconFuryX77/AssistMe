@@ -139,4 +139,31 @@ void main() {
     expect(await store.listGuides(), isEmpty);
     expect(await guideDirectory.list().toList(), isEmpty);
   });
+
+  test('saves a written step without a screenshot', () async {
+    final guide = await store.saveSession(
+      title: 'Bluetooth help',
+      summary: 'Written steps only',
+      transcript: '',
+      frames: [
+        CapturedKeyframe(
+          id: 'text-1',
+          timestamp: DateTime.utc(2026, 10, 29),
+          imageBytes: Uint8List(0),
+          title: 'Open Bluetooth',
+          instruction: 'Tap "Settings", then tap "Bluetooth".',
+          perceptualHash: null,
+          colorSignature: null,
+          privacyReviewed: true,
+        ),
+      ],
+    );
+
+    expect(guide.steps.single.localImagePath, isNull);
+    final files = await guideDirectory.list().toList();
+    expect(files.where((file) => file.path.endsWith('.frame.enc')), isEmpty);
+    final listed = (await store.listGuides()).single;
+    expect(listed.steps.single.instruction, 'Tap "Settings", then tap "Bluetooth".');
+    expect(listed.steps.single.localImagePath, isNull);
+  });
 }

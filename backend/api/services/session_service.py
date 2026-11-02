@@ -528,8 +528,13 @@ class SessionService:
         session_id: str,
         user_id: str,
         db: AsyncSession,
+        disconnected_at: datetime | None = None,
     ) -> Session | None:
-        """End a two-person session when either client disappears unexpectedly."""
+        """End a two-person session when either client disappears unexpectedly.
+
+        ``disconnected_at`` is when the dropped socket closed. A liveness stamp
+        newer than that means the user came back on another socket.
+        """
         result = await db.execute(
             select(Session)
             .where(Session.id == session_id)
@@ -538,8 +543,23 @@ class SessionService:
         session = result.scalar_one_or_none()
         if session is None or session.status == "ended":
             return session
-        if not any(p.user_id == user_id for p in session.participants):
+        participant = next(
+            (p for p in session.participants if p.user_id == user_id), None
+        )
+        if participant is None:
             return session
+        # The backend runs several workers and this grace timer lives in the
+        # worker where the socket dropped. If the phone reconnected through
+        # another worker, the participant is "connected" again in the
+        # database: the call is alive, so do not end it.
+        if participant.status == "connected":
+            return None
+        last_seen = participant.last_seen_at
+        if last_seen is not None and disconnected_at is not None:
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if last_seen > disconnected_at:
+                return None
 
         now = datetime.now(timezone.utc)
         session.status = "ended"
@@ -550,6 +570,80 @@ class SessionService:
                 participant.left_at = now
         await db.commit()
         return session
+
+    @staticmethod
+    async def touch_participants(
+        pairs: list[tuple[str, str]],
+        db: AsyncSession,
+    ) -> None:
+        """Record that these (session_id, user_id) pairs hold a live socket.
+
+        Each worker stamps only the sockets it owns; the stamp in the database
+        is what lets any worker tell a live call from an abandoned one.
+        """
+        if not pairs:
+            return
+        now = datetime.now(timezone.utc)
+        for session_id, user_id in pairs:
+            await db.execute(
+                update(SessionParticipant)
+                .where(
+                    SessionParticipant.session_id == session_id,
+                    SessionParticipant.user_id == user_id,
+                    SessionParticipant.status != "left",
+                )
+                # A late close of an older socket may have marked this user
+                # "disconnected" after they reconnected; the live socket wins.
+                .values(last_seen_at=now, status="connected")
+            )
+        await db.commit()
+
+    @staticmethod
+    async def expire_abandoned_sessions(
+        db: AsyncSession,
+        idle_for: timedelta,
+    ) -> list[str]:
+        """End waiting/active sessions nobody has been connected to recently.
+
+        A session is abandoned when no participant has held a session socket
+        (stamped by :meth:`touch_participants`) for ``idle_for``. This covers
+        apps that crashed or lost power mid-call, phones that never opened the
+        socket, and grace timers lost when the backend restarted.
+        """
+        now = datetime.now(timezone.utc)
+        cutoff = now - idle_for
+
+        def _aware(value: datetime | None) -> datetime | None:
+            if value is None:
+                return None
+            return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+        result = await db.execute(
+            select(Session)
+            .where(Session.status.in_(["waiting", "active"]))
+            .options(selectinload(Session.participants))
+        )
+        ended: list[str] = []
+        for session in result.scalars().all():
+            moments = [_aware(session.created_at)]
+            moments += [
+                _aware(p.last_seen_at)
+                for p in session.participants
+                if p.status != "left"
+            ]
+            latest = max((m for m in moments if m is not None), default=None)
+            if latest is None or latest >= cutoff:
+                continue
+            session.status = "ended"
+            session.ended_at = now
+            for participant in session.participants:
+                if participant.status in ("connected", "disconnected"):
+                    participant.status = "left"
+                    participant.left_at = now
+            ended.append(str(session.id))
+        if ended:
+            await db.commit()
+        return ended
 
     @staticmethod
     async def list_sessions(

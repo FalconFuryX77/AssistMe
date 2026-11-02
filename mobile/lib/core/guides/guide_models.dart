@@ -57,6 +57,10 @@ class SessionGuideItem {
   final String transcript;
   final bool isLocal;
 
+  /// True for a guide the helper wrote on this phone for someone else. Clicky
+  /// is not offered for these: the steps match the helpee's phone, not this one.
+  final bool madeByMe;
+
   const SessionGuideItem({
     required this.id,
     this.sessionId,
@@ -68,6 +72,7 @@ class SessionGuideItem {
     this.steps = const [],
     this.transcript = '',
     this.isLocal = false,
+    this.madeByMe = false,
   });
 
   factory SessionGuideItem.fromJson(Map<String, dynamic> json) {
@@ -87,6 +92,7 @@ class SessionGuideItem {
           .toList(),
       transcript: json['transcript'] as String? ?? '',
       isLocal: json['is_local'] as bool? ?? false,
+      madeByMe: json['made_by_me'] as bool? ?? false,
     );
   }
 
@@ -101,5 +107,6 @@ class SessionGuideItem {
     'steps': steps.map((step) => step.toJson()).toList(),
     'transcript': transcript,
     'is_local': isLocal,
+    'made_by_me': madeByMe,
   };
 }

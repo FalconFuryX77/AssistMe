@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Description shown to the user when enabling the AssistMe accessibility service -->
-    <string name="accessibility_service_description">AssistMe uses this accessibility service to enable a trusted helper to draw on your screen and (with your explicit consent) perform tap and drag actions while guiding you.</string>
+    <string name="accessibility_service_description">AssistMe uses this accessibility service to enable a trusted helper to draw on your screen and (with your explicit consent) perform tap and drag actions while guiding you. It also lets Clicky read the names of buttons on your screen so it can point at them while you follow a saved guide. Clicky never taps for you, does not read password fields, and nothing it reads leaves your phone.</string>
     <string name="app_name">AssistMe</string>
 </resources>

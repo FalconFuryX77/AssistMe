@@ -224,6 +224,31 @@ class RealtimeService {
     });
   }
 
+  /// After a Wi-Fi <-> mobile data switch the old socket can stay half-open
+  /// on the lost network for minutes. Drop it and connect over the new
+  /// network now, without the reconnect back-off.
+  Future<void> reconnectNow() async {
+    if (_disposed) return;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnectAttempt = 0;
+    final stale = _socket;
+    if (stale != null) {
+      debugPrint(
+        '[AssistMe][SIGNALING] session=${_shortSessionId()} network changed; reconnecting now',
+      );
+      await _sub?.cancel();
+      _sub = null;
+      _heartbeat?.cancel();
+      _heartbeat = null;
+      _socket = null;
+      _hasConnected = false;
+      onDisconnected?.call();
+      unawaited(stale.close().catchError((_) {}));
+    }
+    await connect();
+  }
+
   Future<void> disconnect() async {
     _disposed = true;
     _reconnectTimer?.cancel();

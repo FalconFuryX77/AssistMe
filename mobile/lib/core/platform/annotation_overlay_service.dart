@@ -83,6 +83,15 @@ class AnnotationOverlayService {
     await _channel.invokeMethod<void>('updateStrokes', strokes);
   }
 
+  /// Hides the helpee's toolbar briefly so a guide screenshot shows only the
+  /// screen underneath it.
+  static Future<void> hideControlsFor(Duration duration) async {
+    await _channel.invokeMethod<void>(
+      'hideControlsFor',
+      duration.inMilliseconds,
+    );
+  }
+
   static Future<void> clear() async {
     await _channel.invokeMethod<void>('clear');
   }

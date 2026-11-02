@@ -7,6 +7,8 @@ import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import androidx.annotation.RequiresApi
+import com.assistme.clicky.ClickyGuideController
+import com.assistme.clicky.ClickyGuideStepInput
 
 /**
  * Native Android Accessibility Service for AssistMe.
@@ -23,11 +25,18 @@ class AssistMeAccessibilityService : AccessibilityService() {
 
         private const val CLICK_DURATION_MS = 50L
         private const val LONG_PRESS_DURATION_MS = 600L
+        private const val REMOTE_GESTURE_PASS_THROUGH_DELAY_MS = 60L
     }
 
     @Volatile
     var isSensitiveWindowFocused: Boolean = false
         private set
+
+    /** Clicky guide walkthrough; created lazily the first time a guide is started. */
+    private var clickyGuide: ClickyGuideController? = null
+
+    val isClickyGuideActive: Boolean
+        get() = clickyGuide?.isActive == true
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -42,6 +51,11 @@ class AssistMeAccessibilityService : AccessibilityService() {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
                 val packageName = event.packageName?.toString()?.lowercase() ?: ""
+                // Clicky's own card can emit window events. They must not clear a
+                // sensitive-screen latch that belongs to the app underneath it.
+                if (isClickyGuideActive && packageName == this.packageName.lowercase()) {
+                    return
+                }
                 val className = event.className?.toString()?.lowercase() ?: ""
 
                 // Check for sensitive windows (passwords, banking apps, 2FA, system permission prompts)
@@ -65,6 +79,24 @@ class AssistMeAccessibilityService : AccessibilityService() {
                 }
             }
         }
+
+        clickyGuide?.let { guide -> if (guide.isActive) guide.onAccessibilityEvent(event) }
+    }
+
+    /** Starts (or restarts) a Clicky walkthrough of a saved guide. Main thread only. */
+    fun startClickyGuide(title: String, steps: List<ClickyGuideStepInput>, startIndex: Int): Boolean {
+        val guide = clickyGuide ?: ClickyGuideController(this) { isSensitiveWindowFocused }
+            .also { clickyGuide = it }
+        return guide.start(title, steps, startIndex)
+    }
+
+    fun stopClickyGuide() {
+        clickyGuide?.stop()
+    }
+
+    override fun onUnbind(intent: android.content.Intent?): Boolean {
+        clickyGuide?.stop()
+        return super.onUnbind(intent)
     }
 
     override fun onInterrupt() {
@@ -72,6 +104,8 @@ class AssistMeAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        clickyGuide?.stop()
+        clickyGuide = null
         super.onDestroy()
         instance = null
         Log.i(TAG, "AssistMe Accessibility Service destroyed.")
@@ -205,28 +239,53 @@ class AssistMeAccessibilityService : AccessibilityService() {
         val x = (normalizedX * screenW).coerceIn(0f, screenW - 1f)
         val y = (normalizedY * screenH).coerceIn(0f, screenH - 1f)
 
-        return when ((event["event_type"] as? String)?.lowercase()) {
-            "tap" -> dispatchTap(x, y)
-            "long_press" -> dispatchLongPress(x, y)
-            "drag" -> {
-                val normEndX = (event["normalized_end_x"] as? Number)?.toFloat()
-                    ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
-                val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
-                    ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
+        val eventType = (event["event_type"] as? String)?.lowercase()
+        if (eventType == "key_event") return dispatchGlobalAction(event["key_code"] as? String ?: "")
 
-                val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
-                val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
-
-                dispatchDrag(
-                    x,
-                    y,
-                    endX,
-                    endY,
-                    (event["duration_ms"] as? Number)?.toLong() ?: 180L
-                )
-            }
-            "key_event" -> dispatchGlobalAction(event["key_code"] as? String ?: "")
-            else -> false
+        val durationMs = when (eventType) {
+            "tap" -> CLICK_DURATION_MS
+            "long_press" -> LONG_PRESS_DURATION_MS
+            "drag" -> (event["duration_ms"] as? Number)?.toLong() ?: 180L
+            else -> return false
         }
+        val inject: (GestureResultCallback?) -> Boolean = { callback ->
+            when (eventType) {
+                "tap" -> dispatchTap(x, y, callback)
+                "long_press" -> dispatchLongPress(x, y, callback)
+                else -> {
+                    val normEndX = (event["normalized_end_x"] as? Number)?.toFloat()
+                        ?: (((event["end_x"] as? Number)?.toFloat() ?: normalizedX).let { if (it > 1f) it / screenW else it })
+                    val normEndY = (event["normalized_end_y"] as? Number)?.toFloat()
+                        ?: (((event["end_y"] as? Number)?.toFloat() ?: normalizedY).let { if (it > 1f) it / screenH else it })
+
+                    val endX = (normEndX * screenW).coerceIn(0f, screenW - 1f)
+                    val endY = (normEndY * screenH).coerceIn(0f, screenH - 1f)
+
+                    dispatchDrag(x, y, endX, endY, durationMs, callback)
+                }
+            }
+        }
+
+        // The helpee's toolbar is hidden from the helper's view, so the
+        // helper's gestures must reach the app underneath it instead of its
+        // buttons (STOP, Draw…). Make it pass-through for this gesture only.
+        val overlay = AssistMeAnnotationOverlayService.instance
+        if (overlay == null || !overlay.hasVisibleControls) return inject(null)
+        overlay.beginRemoteGesture(durationMs)
+        val done = object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                AssistMeAnnotationOverlayService.instance?.endRemoteGesture()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                AssistMeAnnotationOverlayService.instance?.endRemoteGesture()
+            }
+        }
+        // Give the window manager a moment to apply the pass-through flag
+        // before the touch is injected.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!inject(done)) AssistMeAnnotationOverlayService.instance?.endRemoteGesture()
+        }, REMOTE_GESTURE_PASS_THROUGH_DELAY_MS)
+        return true
     }
 }

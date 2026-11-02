@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_edge_ai/flutter_edge_ai.dart' show CancelToken;
 
 import '../../core/guides/session_keyframe_manager.dart';
+import '../../core/guides/local_ai_device_support.dart';
 import '../../core/guides/local_guide_ai_service.dart';
 import '../../core/guides/local_guide_audio_capture.dart';
 import '../../core/guides/local_guide_transcription_service.dart';
@@ -19,6 +20,9 @@ class LocalGuideSaveInput {
   final Map<String, String> generatedInstructions;
   final Map<String, String> generatedTitles;
 
+  /// Steps with no screenshot, in order, after the screenshot steps.
+  final List<GeneratedGuideStep> textSteps;
+
   const LocalGuideSaveInput({
     required this.title,
     required this.transcript,
@@ -26,7 +30,25 @@ class LocalGuideSaveInput {
     required this.redactedImages,
     required this.generatedInstructions,
     required this.generatedTitles,
+    this.textSteps = const [],
   });
+}
+
+class _WrittenStep {
+  final TextEditingController title;
+  final TextEditingController instruction;
+
+  _WrittenStep({String title = '', String instruction = ''})
+    : title = TextEditingController(text: title),
+      instruction = TextEditingController(text: instruction);
+
+  bool get isComplete =>
+      title.text.trim().isNotEmpty && instruction.text.trim().isNotEmpty;
+
+  void dispose() {
+    title.dispose();
+    instruction.dispose();
+  }
 }
 
 class LocalGuideSaveDialog extends StatefulWidget {
@@ -36,6 +58,11 @@ class LocalGuideSaveDialog extends StatefulWidget {
   final bool helperCuratedFrames;
   final bool guideOwner;
 
+  /// Transcribe the call and write the steps as soon as the dialog opens, when
+  /// the on-device models are already installed. Nothing is downloaded
+  /// without the helper asking.
+  final bool autoGenerate;
+
   const LocalGuideSaveDialog({
     super.key,
     required this.frames,
@@ -43,6 +70,7 @@ class LocalGuideSaveDialog extends StatefulWidget {
     this.audioRecordings = const [],
     this.helperCuratedFrames = false,
     this.guideOwner = false,
+    this.autoGenerate = false,
   });
 
   @override
@@ -54,13 +82,52 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   void initState() {
     super.initState();
     if (widget.helperCuratedFrames) {
-      for (final frame in widget.frames) {
+      for (final (index, frame) in widget.frames.indexed) {
         _includedFrameIds.add(frame.id);
         _reviewedFrameIds.add(frame.id);
         _reviewedImages[frame.id] = frame.imageBytes;
+        // Screenshots are taken with one tap during the call, so a step has
+        // no words yet; Gemma fills them in, and the helper can edit them.
+        _stepTitles[frame.id] = frame.title.trim().isEmpty
+            ? 'Step ${index + 1}'
+            : frame.title;
+        _stepControllers[frame.id] = TextEditingController(
+          text: frame.instruction,
+        );
       }
     }
+    unawaited(widget.autoGenerate ? _autoGenerate() : _loadAiSupport());
   }
+
+  /// Transcript first (Gemma reads it), then the steps: per screenshot, or
+  /// from the transcript alone when there are no screenshots.
+  Future<void> _autoGenerate() async {
+    await _loadAiSupport();
+    if (!mounted) return;
+    if (widget.audioRecordings.isNotEmpty &&
+        LocalGuideTranscriptionService.isModelInstalled) {
+      await _transcribeCallAudio();
+      if (!mounted) return;
+    }
+    if (!_aiAvailable || !LocalGuideAiService.isModelInstalled) return;
+    if (_includedFrameIds.isNotEmpty) {
+      await _generateGuide();
+    } else if (_transcript.text.trim().isNotEmpty && _writtenSteps.isEmpty) {
+      await _generateWrittenSteps();
+    }
+  }
+
+  Future<void> _loadAiSupport() async {
+    final report = await LocalAiDeviceSupport.check(
+      modelAlreadyInstalled: LocalGuideAiService.isModelInstalled,
+    );
+    if (mounted) setState(() => _aiReport = report);
+  }
+
+  bool get _aiAvailable => _aiReport?.canRunModel ?? false;
+
+  static String _errorText(Object error, String fallback) =>
+      error is LocalAiException ? error.message : fallback;
 
   late final TextEditingController _title = TextEditingController(
     text: widget.suggestedTitle,
@@ -80,6 +147,8 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   String? _generationError;
   String? _transcriptionError;
   CancelToken? _downloadCancelToken;
+  LocalAiDeviceReport? _aiReport;
+  final List<_WrittenStep> _writtenSteps = [];
 
   bool get _selectedFramesReviewed =>
       _includedFrameIds.every(_reviewedFrameIds.contains);
@@ -89,8 +158,18 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
     if (!_selectedFramesReviewed) {
       return 'Open and review every selected screenshot before saving.';
     }
-    if (_includedFrameIds.isEmpty && _transcript.text.trim().isEmpty) {
-      return 'Add notes or select a screenshot before saving.';
+    if (_writtenSteps.any(
+      (step) =>
+          !step.isComplete &&
+          (step.title.text.trim().isNotEmpty ||
+              step.instruction.text.trim().isNotEmpty),
+    )) {
+      return 'Give every written step a name and an instruction, or remove it.';
+    }
+    if (_includedFrameIds.isEmpty &&
+        _transcript.text.trim().isEmpty &&
+        !_writtenSteps.any((step) => step.isComplete)) {
+      return 'Add notes, a written step or a screenshot before saving.';
     }
     return null;
   }
@@ -107,6 +186,10 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
     for (final controller in _stepControllers.values) {
       controller.dispose();
     }
+    for (final step in _writtenSteps) {
+      step.dispose();
+    }
+    unawaited(LocalGuideAiService.releaseModel());
     super.dispose();
   }
 
@@ -152,49 +235,93 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
       _downloadCancelToken = CancelToken();
     });
     try {
-      await LocalGuideAiService.installModel(
-        cancelToken: _downloadCancelToken!,
-        onProgress: (progress) {
-          if (mounted) setState(() => _downloadProgress = progress / 100);
-        },
-      );
+      await _installGemma();
       if (!mounted) return;
-      if (mounted) setState(() => _downloadProgress = null);
       for (var index = 0; index < selectedFrames.length; index++) {
         final frame = selectedFrames[index];
-        final generated = await LocalGuideAiService.generateStep(
+        final step = await LocalGuideAiService.generateStep(
           imageBytes: _imageFor(frame),
           transcript: sessionNotes,
           stepNumber: index + 1,
+          helperTitle: frame.title,
+          helperInstruction: frame.instruction,
         );
         if (!mounted) return;
-        final title = RegExp(
-          r'^TITLE:\s*(.+)$',
-          multiLine: true,
-        ).firstMatch(generated)?.group(1)?.trim();
-        final action = RegExp(
-          r'^ACTION:\s*([\s\S]+)$',
-          multiLine: true,
-        ).firstMatch(generated)?.group(1)?.trim();
-        _stepTitles[frame.id] = title == null || title.isEmpty
-            ? 'Step ${index + 1}'
-            : title.substring(0, title.length.clamp(0, 100));
-        final controller = _stepControllers.putIfAbsent(
-          frame.id,
-          () => TextEditingController(),
-        );
-        controller.text = action == null || action.isEmpty ? generated : action;
-        if (mounted) setState(() {});
+        _stepTitles[frame.id] = step.title;
+        _stepControllers
+                .putIfAbsent(frame.id, () => TextEditingController())
+                .text =
+            step.instruction;
+        setState(() {});
       }
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(
           () => _generationError =
-              'Local generation failed. Your screenshots and notes remain on this device. You can save the notes and try again later.',
+              '${_errorText(error, 'Local generation failed.')} '
+              'The steps you wrote are kept, and you can still save them.',
         );
       }
     } finally {
-      if (mounted) setState(() => _generating = false);
+      await LocalGuideAiService.releaseModel();
+      if (mounted) {
+        setState(() {
+          _generating = false;
+          _downloadProgress = null;
+        });
+      }
+    }
+  }
+
+  Future<void> _installGemma() async {
+    await LocalGuideAiService.installModel(
+      cancelToken: _downloadCancelToken!,
+      onProgress: (progress) {
+        if (mounted) setState(() => _downloadProgress = progress / 100);
+      },
+    );
+    if (mounted) setState(() => _downloadProgress = null);
+  }
+
+  /// No screenshots (or extra steps): Gemma reads the transcript and writes
+  /// numbered text steps the helper can edit.
+  Future<void> _generateWrittenSteps() async {
+    final notes = _transcript.text.trim();
+    if (notes.isEmpty || _generating || _transcribing) return;
+    setState(() {
+      _generating = true;
+      _generationError = null;
+      _downloadCancelToken = CancelToken();
+    });
+    try {
+      await _installGemma();
+      final steps = await LocalGuideAiService.generateStepsFromTranscript(
+        notes,
+      );
+      if (!mounted) return;
+      setState(() {
+        for (final step in steps) {
+          _writtenSteps.add(
+            _WrittenStep(title: step.title, instruction: step.instruction),
+          );
+        }
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => _generationError =
+              '${_errorText(error, 'Local generation failed.')} '
+              'You can still add written steps yourself.',
+        );
+      }
+    } finally {
+      await LocalGuideAiService.releaseModel();
+      if (mounted) {
+        setState(() {
+          _generating = false;
+          _downloadProgress = null;
+        });
+      }
     }
   }
 
@@ -234,11 +361,12 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
       ].join('\n\n');
       _transcriptionCompleted = true;
       setState(() {});
-    } catch (_) {
+    } catch (error) {
       if (mounted) {
         setState(
           () => _transcriptionError =
-              'Local transcription failed. The audio was not uploaded. You can retry or save your notes without it.',
+              '${_errorText(error, 'Local transcription failed.')} '
+              'The audio was not uploaded. You can retry or save your notes without it.',
         );
       }
     } finally {
@@ -301,8 +429,99 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
             entry.key: entry.value.text.trim(),
         }),
         generatedTitles: Map.unmodifiable(_stepTitles),
+        textSteps: List.unmodifiable(
+          _writtenSteps
+              .where((step) => step.isComplete)
+              .map(
+                (step) => GeneratedGuideStep(
+                  title: step.title.text.trim(),
+                  instruction: step.instruction.text.trim(),
+                ),
+              ),
+        ),
       ),
     );
+  }
+
+  /// Steps that have no screenshot: typed by the helper or written by Gemma
+  /// from the transcript.
+  List<Widget> _buildWrittenSteps() {
+    final firstNumber = _includedFrameIds.length + 1;
+    final busy = _generating || _transcribing;
+    return [
+      const SizedBox(height: 14),
+      const Text(
+        'Steps without a screenshot',
+        style: TextStyle(
+          fontSize: AppTypography.bodyLarge,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      for (var index = 0; index < _writtenSteps.length; index++) ...[
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                children: [
+                  TextField(
+                    controller: _writtenSteps[index].title,
+                    maxLength: 100,
+                    decoration: InputDecoration(
+                      labelText: 'Step ${firstNumber + index} name',
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  TextField(
+                    controller: _writtenSteps[index].instruction,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 1000,
+                    decoration: const InputDecoration(
+                      labelText: 'What should the user do?',
+                      helperText:
+                          'Put button names in quotes so Clicky can point at them.',
+                      helperMaxLines: 2,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Remove this step',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: busy
+                  ? null
+                  : () =>
+                        setState(() => _writtenSteps.removeAt(index).dispose()),
+            ),
+          ],
+        ),
+      ],
+      const SizedBox(height: 6),
+      Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          OutlinedButton.icon(
+            onPressed: busy
+                ? null
+                : () => setState(() => _writtenSteps.add(_WrittenStep())),
+            icon: const Icon(Icons.add),
+            label: const Text('Add a written step'),
+          ),
+          OutlinedButton.icon(
+            onPressed: !_aiAvailable || busy || _transcript.text.trim().isEmpty
+                ? null
+                : _generateWrittenSteps,
+            icon: const Icon(Icons.auto_awesome),
+            label: const Text('Write steps from the transcript'),
+          ),
+        ],
+      ),
+    ];
   }
 
   @override
@@ -447,12 +666,14 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                               color: AppTheme.accentEmerald,
                             ),
                             title: Text(
-                              frame.title,
+                              _stepTitles[frame.id] ?? frame.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: const Text(
-                              'Chosen and privacy-reviewed by your helper.',
+                            subtitle: Text(
+                              widget.guideOwner
+                                  ? 'Reviewed by you.'
+                                  : 'Chosen and privacy-reviewed by your helper.',
                             ),
                             trailing: SizedBox(
                               width: 72,
@@ -527,7 +748,8 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                   const SizedBox(height: 8),
                   OutlinedButton.icon(
                     onPressed:
-                        _includedFrameIds.isEmpty ||
+                        !_aiAvailable ||
+                            _includedFrameIds.isEmpty ||
                             !_selectedFramesReviewed ||
                             _generating ||
                             _transcribing
@@ -549,9 +771,12 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                                 : (_downloadProgress == null
                                       ? 'Generating on this device…'
                                       : 'Downloading Gemma 4 · ${(_downloadProgress! * 100).round()}%'))
-                          : _selectedFramesReviewed
-                          ? 'Generate guide locally with Gemma 4'
-                          : 'Review selected screenshots first',
+                          : !_selectedFramesReviewed
+                          ? 'Review selected screenshots first'
+                          : _aiReport?.canUseScreenshots == false &&
+                                _aiAvailable
+                          ? 'Improve steps with Gemma 4 (text only)'
+                          : 'Improve steps with Gemma 4',
                     ),
                   ),
                   if (_downloadProgress != null) ...[
@@ -584,7 +809,9 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                         decoration: InputDecoration(
                           labelText:
                               'Step ${widget.frames.indexOf(frame) + 1}: ${_stepTitles[frame.id] ?? frame.title}',
-                          helperText: 'Review and edit these instructions.',
+                          helperText:
+                              'Review and edit these instructions. Put button names in quotes so Clicky can point at them.',
+                          helperMaxLines: 2,
                         ),
                       ),
                     ],
@@ -607,6 +834,31 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                         fontSize: AppTypography.bodySmall,
                       ),
                     ),
+                ],
+                if (widget.guideOwner || !widget.helperCuratedFrames)
+                  ..._buildWrittenSteps(),
+                if (_aiReport != null && _aiReport!.reason != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _aiAvailable
+                        ? _aiReport!.reason!
+                        : 'On-device AI is not available on this phone. '
+                              '${_aiReport!.reason} You can still save the steps you wrote.',
+                    style: TextStyle(
+                      color: _aiAvailable
+                          ? AppTheme.textSecondary
+                          : AppTheme.accentAmber,
+                      fontSize: AppTypography.bodySmall,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+                if (_generationError != null && widget.frames.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _generationError!,
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
                 ],
               ],
             ),

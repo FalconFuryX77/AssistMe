@@ -7,8 +7,9 @@ changes.  Full WebRTC signaling is handled in Phase 3.
 
 import json
 import asyncio
+import uuid
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import select
@@ -18,7 +19,15 @@ from api.services.session_service import SessionService
 from api.schemas.remote_control import RemoteControlInputEvent
 from api.services.remote_control_service import RemoteControlService
 from core.database import async_session_factory
-from core.realtime_bus import listen, publish
+from core.realtime_bus import (
+    listen,
+    others_present,
+    park_signal,
+    presence_add,
+    presence_release,
+    publish,
+    take_parked_signals,
+)
 from core.security import decode_access_token
 from models.session import Session
 from models.session_participant import SessionParticipant
@@ -36,6 +45,7 @@ _connections: dict[str, dict[str, WebSocket]] = {}
 _pending_signals: dict[str, list[dict]] = {}
 _disconnect_tasks: dict[tuple[str, str], asyncio.Task] = {}
 _DISCONNECT_GRACE_SECONDS = 300
+_LIVENESS_STAMP_SECONDS = 30
 _session_bus_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -194,6 +204,10 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         _connections[session_id] = {}
     _connections[session_id][user.id] = websocket
     _ensure_session_bus(session_id)
+    # Tell every worker this participant is reachable (signals for it are
+    # then published instead of parked), and which socket is the latest.
+    connection_id = uuid.uuid4().hex
+    await presence_add(session_id, user.id, connection_id)
     pending_disconnect = _disconnect_tasks.pop((session_id, user.id), None)
     if pending_disconnect:
         pending_disconnect.cancel()
@@ -216,6 +230,13 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
         _pending_signals[session_id] = remaining_signals
     else:
         _pending_signals.pop(session_id, None)
+    # Signals another worker parked while this participant was not connected
+    # anywhere (e.g. the helpee's offer sent before the helper's socket opened).
+    for parked in await take_parked_signals(session_id, user.id) or []:
+        try:
+            await websocket.send_json(parked)
+        except Exception:
+            break
 
     # If they were disconnected, mark them as reconnected
     if participant.status == "disconnected":
@@ -375,10 +396,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                         await _broadcast(session_id, payload, exclude_user=user.id)
                         buffered = False
                     else:
-                        queue = _pending_signals.setdefault(session_id, [])
-                        if len(queue) < 64:
-                            queue.append(payload)
-                        buffered = True
+                        buffered = await _relay_to_absent_peer(
+                            session_id, user.id, payload, limit=64
+                        )
                     logger.info(
                         "[AssistMe][SIGNALING] session=%s delivered type=%s recipients=%d buffered=%s",
                         session_id[:8],
@@ -399,18 +419,10 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 recipients = [uid for uid in room if uid != user.id]
                 if recipients:
                     await _broadcast(session_id, payload, exclude_user=user.id)
-                elif msg_type in (
-                    "request_offer",
-                    "request_relay_offer",
-                    "guide_screenshot_request",
-                    "session_end_requested",
-                    "session_ended",
-                ):
-                    # Preserve one-shot requests if the other participant is
-                    # between WebSocket connections during session recovery.
-                    queue = _pending_signals.setdefault(session_id, [])
-                    if len(queue) < 64:
-                        queue.append(payload)
+                else:
+                    # Preserve one-shot requests if the other participant is on
+                    # another worker or between WebSocket connections.
+                    await _relay_to_absent_peer(session_id, user.id, payload, limit=64)
 
             elif msg_type in (
                 "screen_share_start",
@@ -722,27 +734,40 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 )
 
     except (WebSocketDisconnect, Exception):
-        # Android may briefly suspend this socket while the MediaProjection
-        # consent activity is on screen. Keep the session alive while the
-        # client reconnects; only a sustained disconnect ends the call.
-        try:
-            async with async_session_factory() as db:
-                await SessionService.mark_disconnected(session_id, user.id, db)
-
-            await _broadcast(
-                session_id,
-                {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
-                exclude_user=user.id,
+        # After a network switch the phone opens a new socket (often on another
+        # worker) before this old one is noticed as closed. Reporting this
+        # stale close would tell the other phone "disconnected" while the user
+        # is back, start an auto-leave countdown there, and end the call later.
+        still_latest = await presence_release(session_id, user.id, connection_id)
+        if still_latest is False:
+            logger.info(
+                "[AssistMe][SIGNALING] session=%s ignored stale socket close; newer socket is live",
+                session_id[:8],
             )
-        except Exception:
-            pass
-        task = asyncio.create_task(_end_after_disconnect(session_id, user.id))
-        _disconnect_tasks[(session_id, user.id)] = task
+        else:
+            # Android may briefly suspend this socket while the MediaProjection
+            # consent activity is on screen. Keep the session alive while the
+            # client reconnects; only a sustained disconnect ends the call.
+            try:
+                async with async_session_factory() as db:
+                    await SessionService.mark_disconnected(session_id, user.id, db)
+
+                await _broadcast(
+                    session_id,
+                    {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
+                    exclude_user=user.id,
+                )
+            except Exception:
+                pass
+            task = asyncio.create_task(_end_after_disconnect(session_id, user.id))
+            _disconnect_tasks[(session_id, user.id)] = task
 
     finally:
         # Remove from connection pool
         room = _connections.get(session_id, {})
-        room.pop(user.id, None)
+        if room.get(user.id) is websocket:
+            room.pop(user.id, None)
+        await presence_release(session_id, user.id, connection_id)
         if not room:
             _connections.pop(session_id, None)
             _pending_signals.pop(session_id, None)
@@ -751,12 +776,51 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 bus_task.cancel()
 
 
+async def _relay_to_absent_peer(
+    session_id: str,
+    sender_id: str,
+    payload: dict,
+    *,
+    limit: int,
+) -> bool:
+    """Deliver a room message whose recipient has no socket on this worker.
+
+    With several workers the other phone is usually connected to a different
+    one. Previously the message was only buffered in this worker's memory, so
+    the helpee's offer never reached the helper and the helper stayed on
+    "Waiting for the other device to share". Returns True if it was parked
+    for a peer that is not connected anywhere yet.
+    """
+    present = await others_present(session_id, sender_id)
+    if present:
+        await publish(
+            f"assistme:session:{session_id}",
+            {"message": payload, "exclude_user": sender_id},
+        )
+        return False
+    if present is False and await park_signal(session_id, payload):
+        return True
+    # Redis unavailable: fall back to this worker's memory and a best-effort
+    # publish, as before.
+    queue = _pending_signals.setdefault(session_id, [])
+    if len(queue) < limit:
+        queue.append(payload)
+    await publish(
+        f"assistme:session:{session_id}",
+        {"message": payload, "exclude_user": sender_id},
+    )
+    return True
+
+
 async def _end_after_disconnect(session_id: str, user_id: str) -> None:
     """End the call only after the reconnect grace window expires."""
+    disconnected_at = datetime.now(timezone.utc)
     try:
         await asyncio.sleep(_DISCONNECT_GRACE_SECONDS)
         async with async_session_factory() as db:
-            session = await SessionService.terminate_on_disconnect(session_id, user_id, db)
+            session = await SessionService.terminate_on_disconnect(
+                session_id, user_id, db, disconnected_at=disconnected_at
+            )
         if session is not None:
             await _broadcast(
                 session_id,
@@ -767,3 +831,34 @@ async def _end_after_disconnect(session_id: str, user_id: str) -> None:
         pass
     finally:
         _disconnect_tasks.pop((session_id, user_id), None)
+
+
+async def run_session_sweeper(stop: asyncio.Event) -> None:
+    """Keep the database's view of live calls current and end abandoned ones.
+
+    Runs in every worker. Each worker stamps the participants whose session
+    socket it holds, so a call stays "live" in the database whichever worker
+    serves it, then ends sessions nobody has been connected to for the
+    reconnect grace period. This is what ends calls left behind by crashed or
+    powered-off phones, or by grace timers lost when the backend restarted.
+    """
+    idle_for = timedelta(seconds=_DISCONNECT_GRACE_SECONDS)
+    while not stop.is_set():
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=_LIVENESS_STAMP_SECONDS)
+            return
+        except asyncio.TimeoutError:
+            pass
+        try:
+            pairs = [
+                (session_id, user_id)
+                for session_id, room in list(_connections.items())
+                for user_id in list(room)
+            ]
+            async with async_session_factory() as db:
+                await SessionService.touch_participants(pairs, db)
+                ended = await SessionService.expire_abandoned_sessions(db, idle_for)
+            for session_id in ended:
+                logger.info("[AssistMe][SESSION] ended abandoned session %s", session_id)
+        except Exception:  # pragma: no cover - keep sweeping on DB hiccups
+            logger.exception("[AssistMe][SESSION] sweeper pass failed")

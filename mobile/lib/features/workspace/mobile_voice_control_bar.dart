@@ -92,11 +92,11 @@ class _MobileVoiceControlBarState extends State<MobileVoiceControlBar> {
                 if (!visible) return const SizedBox.shrink();
                 final tooltip = widget.isGuideAudioHelper
                     ? recording
-                        ? 'Stop guide audio on the other phone'
+                        ? 'Stop recording guide audio'
                         : awaiting
                         ? 'Waiting for permission on the other phone'
                         : consented
-                        ? 'Start guide audio on the other phone'
+                        ? 'Start recording guide audio'
                         : 'Ask permission to record guide audio'
                     : recording
                     ? 'Revoke permission and stop guide audio'

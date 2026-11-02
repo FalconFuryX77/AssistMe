@@ -111,6 +111,7 @@ class LocalGuideStore {
     required List<CapturedKeyframe> frames,
     String? sessionId,
     String category = 'general',
+    bool madeByMe = false,
   }) async {
     final cleanedTitle = title.trim();
     if (cleanedTitle.isEmpty) throw ArgumentError('A guide title is required.');
@@ -137,6 +138,19 @@ class LocalGuideStore {
     try {
       for (var i = 0; i < selectedFrames.length; i++) {
         final frame = selectedFrames[i];
+        if (frame.imageBytes.isEmpty) {
+          // A written step with no screenshot.
+          steps.add(
+            GuideStepItem(
+              id: frame.id,
+              stepNumber: i + 1,
+              title: frame.title,
+              instruction: frame.instruction,
+              createdAt: frame.timestamp,
+            ),
+          );
+          continue;
+        }
         final imageName = '${guideId}_$i.frame.enc';
         final imageFile = File(
           '${directory.path}${Platform.pathSeparator}$imageName',
@@ -167,6 +181,7 @@ class LocalGuideStore {
         steps: steps,
         transcript: transcript.trim(),
         isLocal: true,
+        madeByMe: madeByMe,
       );
       final metadataFile = File(
         '${directory.path}${Platform.pathSeparator}$guideId.guide.enc',
