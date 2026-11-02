@@ -109,4 +109,63 @@ class ClickyTargetMatcherTest {
         // Out-of-range start index must not crash.
         assertEquals(0, ClickyTargetMatcher.findBestMatch(phrases, 99, listOf(ClickyScreenElement("Bluetooth", true)))!!.phraseIndex)
     }
+
+    @Test
+    fun confirmButtonsStandInForEachOther() {
+        // The guide said "Next", but a home-screen-only wallpaper shows "Done".
+        val phrases = ClickyTargetMatcher.extractPhrases("Confirm", "Tap \"Next\"")
+        val wallpaperPreview = listOf(
+            ClickyScreenElement("Home screen", clickable = true),
+            ClickyScreenElement("Done", clickable = true),
+        )
+        val match = ClickyTargetMatcher.findBestMatch(phrases, 0, wallpaperPreview)!!
+        assertEquals(1, match.elementIndex)
+        // An exact "Next" still wins over a synonym.
+        val both = wallpaperPreview + ClickyScreenElement("Next", clickable = true)
+        assertEquals(2, ClickyTargetMatcher.findBestMatch(phrases, 0, both)!!.elementIndex)
+        // Synonyms only stand in for each other, not for ordinary labels.
+        assertNull(
+            ClickyTargetMatcher.findBestMatch(
+                ClickyTargetMatcher.extractPhrases("", "Tap \"Featured\""),
+                0,
+                wallpaperPreview,
+            ),
+        )
+    }
+
+    @Test
+    fun smallWordsDoNotBlockAMatch() {
+        val phrases = ClickyTargetMatcher.extractPhrases("", "Tap \"Set wallpaper\"")
+        val screen = listOf(ClickyScreenElement("Set as wallpaper", clickable = true))
+        assertEquals(0, ClickyTargetMatcher.findBestMatch(phrases, 0, screen)!!.elementIndex)
+    }
+
+    @Test
+    fun pressAndHoldOnTheHomeScreenTargetsTheScreen() {
+        val area = ClickyTargetMatcher.extractArea("Open wallpaper menu", "Long press on an empty part of the home screen.")
+        assertEquals(false, area!!.isSwipe)
+        // "home screen" is the place to press, not a button to look for.
+        assertEquals(
+            emptyList<ClickyTargetPhrase>(),
+            ClickyTargetMatcher.extractPhrases("Open wallpaper menu", "Long press on an empty part of the home screen."),
+        )
+        // A labelled item to hold keeps its label and needs no area.
+        assertNull(ClickyTargetMatcher.extractArea("", "Long press the \"Chrome\" icon"))
+        assertEquals(
+            listOf("Wallpaper & style"),
+            ClickyTargetMatcher.extractPhrases("", "Press and hold the home screen, then tap \"Wallpaper & style\"")
+                .map { it.display },
+        )
+        assertEquals(true, ClickyTargetMatcher.extractArea("", "Swipe up to see all apps")!!.isSwipe)
+    }
+
+    @Test
+    fun labelsGuessedFromViewIdsRankBelowRealLabels() {
+        val phrases = ClickyTargetMatcher.extractPhrases("", "Tap \"Wallpaper\"")
+        val screen = listOf(
+            ClickyScreenElement("wallpaper", clickable = true, weak = true),
+            ClickyScreenElement("Wallpaper", clickable = true),
+        )
+        assertEquals(1, ClickyTargetMatcher.findBestMatch(phrases, 0, screen)!!.elementIndex)
+    }
 }

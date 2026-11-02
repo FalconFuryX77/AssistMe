@@ -58,6 +58,11 @@ class LocalGuideSaveDialog extends StatefulWidget {
   final bool helperCuratedFrames;
   final bool guideOwner;
 
+  /// Transcribe the call and write the steps as soon as the dialog opens, when
+  /// the on-device models are already installed. Nothing is downloaded
+  /// without the helper asking.
+  final bool autoGenerate;
+
   const LocalGuideSaveDialog({
     super.key,
     required this.frames,
@@ -65,6 +70,7 @@ class LocalGuideSaveDialog extends StatefulWidget {
     this.audioRecordings = const [],
     this.helperCuratedFrames = false,
     this.guideOwner = false,
+    this.autoGenerate = false,
   });
 
   @override
@@ -76,19 +82,39 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
   void initState() {
     super.initState();
     if (widget.helperCuratedFrames) {
-      for (final frame in widget.frames) {
+      for (final (index, frame) in widget.frames.indexed) {
         _includedFrameIds.add(frame.id);
         _reviewedFrameIds.add(frame.id);
         _reviewedImages[frame.id] = frame.imageBytes;
-        // The helper wrote these during the call; keep them editable here
-        // whether or not the AI runs.
-        _stepTitles[frame.id] = frame.title;
+        // Screenshots are taken with one tap during the call, so a step has
+        // no words yet; Gemma fills them in, and the helper can edit them.
+        _stepTitles[frame.id] = frame.title.trim().isEmpty
+            ? 'Step ${index + 1}'
+            : frame.title;
         _stepControllers[frame.id] = TextEditingController(
           text: frame.instruction,
         );
       }
     }
-    unawaited(_loadAiSupport());
+    unawaited(widget.autoGenerate ? _autoGenerate() : _loadAiSupport());
+  }
+
+  /// Transcript first (Gemma reads it), then the steps: per screenshot, or
+  /// from the transcript alone when there are no screenshots.
+  Future<void> _autoGenerate() async {
+    await _loadAiSupport();
+    if (!mounted) return;
+    if (widget.audioRecordings.isNotEmpty &&
+        LocalGuideTranscriptionService.isModelInstalled) {
+      await _transcribeCallAudio();
+      if (!mounted) return;
+    }
+    if (!_aiAvailable || !LocalGuideAiService.isModelInstalled) return;
+    if (_includedFrameIds.isNotEmpty) {
+      await _generateGuide();
+    } else if (_transcript.text.trim().isNotEmpty && _writtenSteps.isEmpty) {
+      await _generateWrittenSteps();
+    }
   }
 
   Future<void> _loadAiSupport() async {
@@ -133,8 +159,10 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
       return 'Open and review every selected screenshot before saving.';
     }
     if (_writtenSteps.any(
-      (step) => !step.isComplete && (step.title.text.trim().isNotEmpty ||
-          step.instruction.text.trim().isNotEmpty),
+      (step) =>
+          !step.isComplete &&
+          (step.title.text.trim().isNotEmpty ||
+              step.instruction.text.trim().isNotEmpty),
     )) {
       return 'Give every written step a name and an instruction, or remove it.';
     }
@@ -466,7 +494,8 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
               icon: const Icon(Icons.delete_outline),
               onPressed: busy
                   ? null
-                  : () => setState(() => _writtenSteps.removeAt(index).dispose()),
+                  : () =>
+                        setState(() => _writtenSteps.removeAt(index).dispose()),
             ),
           ],
         ),
@@ -637,12 +666,14 @@ class _LocalGuideSaveDialogState extends State<LocalGuideSaveDialog> {
                               color: AppTheme.accentEmerald,
                             ),
                             title: Text(
-                              frame.title,
+                              _stepTitles[frame.id] ?? frame.title,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: const Text(
-                              'Chosen and privacy-reviewed by your helper.',
+                            subtitle: Text(
+                              widget.guideOwner
+                                  ? 'Reviewed by you.'
+                                  : 'Chosen and privacy-reviewed by your helper.',
                             ),
                             trailing: SizedBox(
                               width: 72,

@@ -133,6 +133,10 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        startNetworkWatch(
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "com.assistme/network")
+        )
+
         val localAiChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "com.assistme/local_ai_device"
@@ -265,7 +269,60 @@ class MainActivity : FlutterActivity() {
         return enabled.split(':').any { it.equals(component, ignoreCase = true) }
     }
 
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
+    /**
+     * Tells Dart when the phone's default network changes (Wi-Fi <-> mobile
+     * data). During a call the old signaling socket and media path can stay
+     * half-open on the lost network for a long time, so the call reconnects
+     * as soon as the new network is up instead of waiting for timeouts.
+     */
+    private fun startNetworkWatch(channel: MethodChannel) {
+        val manager = getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        var current: android.net.Network? = null
+        val callback = object : android.net.ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                main.post {
+                    val previous = current
+                    current = network
+                    // The first callback only reports the network we started on.
+                    if (previous == null || previous == network) return@post
+                    val caps = manager.getNetworkCapabilities(network)
+                    val transport = when {
+                        caps == null -> "unknown"
+                        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                        else -> "other"
+                    }
+                    channel.invokeMethod("changed", mapOf("available" to true, "transport" to transport))
+                }
+            }
+
+            override fun onLost(network: android.net.Network) {
+                main.post {
+                    if (current != network) return@post
+                    channel.invokeMethod("changed", mapOf("available" to false, "transport" to "none"))
+                }
+            }
+        }
+        try {
+            manager.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (_: RuntimeException) {
+            // Without the callback the call still recovers through its watchdog.
+        }
+    }
+
     override fun onDestroy() {
+        networkCallback?.let { callback ->
+            try {
+                (getSystemService(CONNECTIVITY_SERVICE) as android.net.ConnectivityManager)
+                    .unregisterNetworkCallback(callback)
+            } catch (_: RuntimeException) {
+            }
+        }
+        networkCallback = null
         AssistMeNativeBridge.channel = null
         super.onDestroy()
     }

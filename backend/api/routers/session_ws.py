@@ -7,6 +7,7 @@ changes.  Full WebRTC signaling is handled in Phase 3.
 
 import json
 import asyncio
+import uuid
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -23,7 +24,7 @@ from core.realtime_bus import (
     others_present,
     park_signal,
     presence_add,
-    presence_remove,
+    presence_release,
     publish,
     take_parked_signals,
 )
@@ -204,8 +205,9 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
     _connections[session_id][user.id] = websocket
     _ensure_session_bus(session_id)
     # Tell every worker this participant is reachable (signals for it are
-    # then published instead of parked).
-    await presence_add(session_id, user.id)
+    # then published instead of parked), and which socket is the latest.
+    connection_id = uuid.uuid4().hex
+    await presence_add(session_id, user.id, connection_id)
     pending_disconnect = _disconnect_tasks.pop((session_id, user.id), None)
     if pending_disconnect:
         pending_disconnect.cancel()
@@ -732,29 +734,40 @@ async def session_websocket(websocket: WebSocket, session_id: str) -> None:
                 )
 
     except (WebSocketDisconnect, Exception):
-        # Android may briefly suspend this socket while the MediaProjection
-        # consent activity is on screen. Keep the session alive while the
-        # client reconnects; only a sustained disconnect ends the call.
-        try:
-            async with async_session_factory() as db:
-                await SessionService.mark_disconnected(session_id, user.id, db)
-
-            await _broadcast(
-                session_id,
-                {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
-                exclude_user=user.id,
+        # After a network switch the phone opens a new socket (often on another
+        # worker) before this old one is noticed as closed. Reporting this
+        # stale close would tell the other phone "disconnected" while the user
+        # is back, start an auto-leave countdown there, and end the call later.
+        still_latest = await presence_release(session_id, user.id, connection_id)
+        if still_latest is False:
+            logger.info(
+                "[AssistMe][SIGNALING] session=%s ignored stale socket close; newer socket is live",
+                session_id[:8],
             )
-        except Exception:
-            pass
-        task = asyncio.create_task(_end_after_disconnect(session_id, user.id))
-        _disconnect_tasks[(session_id, user.id)] = task
+        else:
+            # Android may briefly suspend this socket while the MediaProjection
+            # consent activity is on screen. Keep the session alive while the
+            # client reconnects; only a sustained disconnect ends the call.
+            try:
+                async with async_session_factory() as db:
+                    await SessionService.mark_disconnected(session_id, user.id, db)
+
+                await _broadcast(
+                    session_id,
+                    {"type": "user_disconnected", "user_id": user.id, "reconnecting": True},
+                    exclude_user=user.id,
+                )
+            except Exception:
+                pass
+            task = asyncio.create_task(_end_after_disconnect(session_id, user.id))
+            _disconnect_tasks[(session_id, user.id)] = task
 
     finally:
         # Remove from connection pool
         room = _connections.get(session_id, {})
         if room.get(user.id) is websocket:
             room.pop(user.id, None)
-            await presence_remove(session_id, user.id)
+        await presence_release(session_id, user.id, connection_id)
         if not room:
             _connections.pop(session_id, None)
             _pending_signals.pop(session_id, None)
@@ -801,10 +814,13 @@ async def _relay_to_absent_peer(
 
 async def _end_after_disconnect(session_id: str, user_id: str) -> None:
     """End the call only after the reconnect grace window expires."""
+    disconnected_at = datetime.now(timezone.utc)
     try:
         await asyncio.sleep(_DISCONNECT_GRACE_SECONDS)
         async with async_session_factory() as db:
-            session = await SessionService.terminate_on_disconnect(session_id, user_id, db)
+            session = await SessionService.terminate_on_disconnect(
+                session_id, user_id, db, disconnected_at=disconnected_at
+            )
         if session is not None:
             await _broadcast(
                 session_id,
@@ -839,10 +855,6 @@ async def run_session_sweeper(stop: asyncio.Event) -> None:
                 for session_id, room in list(_connections.items())
                 for user_id in list(room)
             ]
-            # Re-assert presence for this worker's sockets in case another
-            # worker's late cleanup removed it during a reconnect.
-            for session_id, user_id in pairs:
-                await presence_add(session_id, user_id)
             async with async_session_factory() as db:
                 await SessionService.touch_participants(pairs, db)
                 ended = await SessionService.expire_abandoned_sessions(db, idle_for)

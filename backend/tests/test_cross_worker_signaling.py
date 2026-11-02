@@ -12,18 +12,23 @@ class _FakeRedis:
     """Just enough of redis.asyncio.Redis for presence and parked signals."""
 
     def __init__(self) -> None:
-        self.sets: dict[str, set[str]] = {}
+        self.hashes: dict[str, dict[str, str]] = {}
         self.lists: dict[str, list[str]] = {}
         self.published: list[tuple[str, dict]] = []
 
-    async def sadd(self, key, *values):
-        self.sets.setdefault(key, set()).update(values)
+    async def hset(self, key, field, value):
+        self.hashes.setdefault(key, {})[field] = value
 
-    async def srem(self, key, *values):
-        self.sets.get(key, set()).difference_update(values)
+    async def hkeys(self, key):
+        return list(self.hashes.get(key, {}))
 
-    async def smembers(self, key):
-        return set(self.sets.get(key, set()))
+    async def eval(self, script, numkeys, key, field, value):
+        # Only the compare-and-delete used by presence_release.
+        fields = self.hashes.get(key, {})
+        if fields.get(field) == value:
+            del fields[field]
+            return 1
+        return 0
 
     async def expire(self, key, seconds):
         return True
@@ -60,7 +65,7 @@ def _offer(sender: str) -> dict:
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_offer_is_published_when_peer_is_on_another_worker(fake_redis) -> None:
-    await bus.presence_add("s1", "helper")
+    await bus.presence_add("s1", "helper", "c1")
 
     parked = await session_ws._relay_to_absent_peer("s1", "helpee", _offer("helpee"), limit=64)
 
@@ -72,7 +77,7 @@ async def test_offer_is_published_when_peer_is_on_another_worker(fake_redis) -> 
 
 @pytest.mark.asyncio(loop_scope="session")
 async def test_offer_is_parked_until_peer_connects_anywhere(fake_redis) -> None:
-    await bus.presence_add("s2", "helpee")  # only the sender is connected
+    await bus.presence_add("s2", "helpee", "c1")  # only the sender is connected
 
     parked = await session_ws._relay_to_absent_peer("s2", "helpee", _offer("helpee"), limit=64)
 
@@ -105,3 +110,25 @@ async def test_falls_back_to_local_buffer_without_redis(monkeypatch) -> None:
     assert parked is True
     assert session_ws._pending_signals["s4"][0]["type"] == "signal_offer"
     session_ws._pending_signals.clear()
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_late_close_of_replaced_socket_is_stale(fake_redis) -> None:
+    # Wi-Fi -> mobile data: the new socket registers before the old one closes.
+    await bus.presence_add("s5", "helper", "old")
+    await bus.presence_add("s5", "helper", "new")
+
+    assert await bus.presence_release("s5", "helper", "old") is False
+    assert await bus.others_present("s5", "helpee") is True
+    assert await bus.presence_release("s5", "helper", "new") is True
+    assert await bus.others_present("s5", "helpee") is False
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_presence_release_is_unknown_without_redis(monkeypatch) -> None:
+    def _broken():
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(bus, "_redis", _broken)
+
+    assert await bus.presence_release("s6", "helper", "c1") is None

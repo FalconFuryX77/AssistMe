@@ -121,3 +121,23 @@ async def test_grace_timer_ends_call_when_participant_stays_away(
 
     assert result is not None
     assert await _status(db_session, session["id"]) == "ended"
+
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_grace_timer_spares_user_seen_after_the_drop(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # An old socket closed late and marked the user "disconnected", but a
+    # live socket on another worker has stamped them since.
+    helper, _, session = await _active_session(client)
+    user_id = helper["user"]["id"]
+    dropped_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    await SessionService.touch_participants([(session["id"], user_id)], db_session)
+    await SessionService.mark_disconnected(session["id"], user_id, db_session)
+
+    result = await SessionService.terminate_on_disconnect(
+        session["id"], user_id, db_session, disconnected_at=dropped_at
+    )
+
+    assert result is None
+    assert await _status(db_session, session["id"]) == "active"

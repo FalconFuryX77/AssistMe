@@ -5,6 +5,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -13,6 +14,7 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
+import android.media.AudioAttributes
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -29,6 +31,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.LinearLayout
 import android.widget.TextView
+import java.util.Locale
 
 /** One saved guide step as received from Flutter. */
 data class ClickyGuideStepInput(val title: String, val instruction: String)
@@ -57,9 +60,18 @@ class ClickyGuideController(
         val title: String,
         val instruction: String,
         val phrases: List<ClickyTargetPhrase>,
+        val area: ClickyAreaHint?,
     )
 
-    private class Candidate(val label: String, val highlight: Rect, val clickable: Boolean)
+    private class Candidate(
+        val label: String,
+        val highlight: Rect,
+        val clickable: Boolean,
+        val weak: Boolean,
+    )
+
+    /** Which app screen the user is on, so Back can return to a step's screen. */
+    private data class ScreenSignature(val packageName: String, val className: String?, val title: String?)
 
     companion object {
         private const val TAG = "AssistMeClicky"
@@ -71,6 +83,20 @@ class ClickyGuideController(
         private const val AUTO_ADVANCE_DELAY_MS = 900L
         private const val AUTO_CLOSE_DELAY_MS = 8000L
         private const val MAX_HIGHLIGHT_SCREEN_FRACTION = 0.35
+
+        // A new target must be seen on two scans this far apart before the
+        // pointer flies to it, so half-drawn screens do not make it jump.
+        private const val CONFIRM_TARGET_DELAY_MS = 250L
+        // Scans in a row without the target before the pointer is hidden.
+        private const val MISSES_BEFORE_CLEAR = 2
+        // Scans in a row without the target before Clicky checks whether the
+        // user is already on the next step.
+        private const val MISSES_BEFORE_LOOKAHEAD = 3
+        private const val LOOKAHEAD_MIN_SCORE = 80
+        private const val RECENT_CLICK_MS = 6000L
+        private const val RETURN_STEP_DELAY_MS = 700L
+        private const val RETURN_MAX_BACK_PRESSES = 4
+        private const val GOOGLE_TTS_ENGINE = "com.google.android.tts"
         private val CLICKY_BLUE = Color.rgb(61, 139, 255)
         private val CLICKY_BLUE_LIGHT = Color.rgb(147, 197, 253)
     }
@@ -86,7 +112,21 @@ class ClickyGuideController(
     private var phraseIndex = 0
     private var targetPhraseIndex = -1
     private var targetRect: Rect? = null
+    private var targetLabel: String? = null
+    private var pendingLabel: String? = null
+    private var pendingRect: Rect? = null
+    private var missCount = 0
+    private var areaShown = false
+    private var areaDone = false
     private var finished = false
+
+    // Where the user did each step, so Back can take them there again.
+    private val stepScreens = HashMap<Int, ScreenSignature>()
+    private var currentScreen: ScreenSignature? = null
+    private val recentClicks = ArrayDeque<Pair<Long, String>>()
+    private var returnStep = -1
+    private var returnAttempts = 0
+    private val returnRunnable = Runnable { continueReturn() }
 
     var isActive = false
         private set
@@ -121,7 +161,7 @@ class ClickyGuideController(
             handler.postDelayed(this, HEARTBEAT_MS)
         }
     }
-    private val advanceRunnable = Runnable { goToStep(stepIndex + 1) }
+    private val advanceRunnable = Runnable { goToStep(stepIndex + 1, automatic = true) }
     private val autoCloseRunnable = Runnable { stop() }
 
     // ------------------------------------------------------------------
@@ -139,11 +179,21 @@ class ClickyGuideController(
             }
             .filter { it.title.isNotEmpty() || it.instruction.isNotEmpty() }
             .take(MAX_STEPS)
-            .map { Step(it.title, it.instruction, ClickyTargetMatcher.extractPhrases(it.title, it.instruction)) }
+            .map {
+                Step(
+                    it.title,
+                    it.instruction,
+                    ClickyTargetMatcher.extractPhrases(it.title, it.instruction),
+                    ClickyTargetMatcher.extractArea(it.title, it.instruction),
+                )
+            }
             .toList()
         if (parsed.isEmpty()) return false
 
         steps = parsed
+        stepScreens.clear()
+        recentClicks.clear()
+        currentScreen = null
         guideTitle = title.trim().take(MAX_TITLE_CHARACTERS)
         sessionGeneration++
         muted = isScreenReaderRunning()
@@ -180,21 +230,66 @@ class ClickyGuideController(
         pendingSpeech = null
         steps = emptyList()
         targetRect = null
+        targetLabel = null
+        pendingLabel = null
+        pendingRect = null
         targetPhraseIndex = -1
+        missCount = 0
+        areaShown = false
+        areaDone = false
         finished = false
+        stepScreens.clear()
+        recentClicks.clear()
+        returnStep = -1
+    }
+
+    /** Stops partway through and brings the user back to the AssistMe guide they started from. */
+    private fun stopAndReturnToApp() {
+        val midGuide = !finished
+        stop()
+        if (!midGuide) return
+        try {
+            service.packageManager.getLaunchIntentForPackage(ownPackage)?.let { intent ->
+                // An existing task comes to the front as it was, on the guide screen.
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                service.startActivity(intent)
+            }
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not return to AssistMe.", error)
+        }
     }
 
     fun onAccessibilityEvent(event: AccessibilityEvent) {
         if (!isActive) return
         // Our own card and pointer also emit events; reacting to them would loop.
-        if (event.packageName?.toString() == ownPackage) return
+        val eventPackage = event.packageName?.toString() ?: return
+        if (eventPackage == ownPackage) return
         when (event.eventType) {
             AccessibilityEvent.TYPE_VIEW_CLICKED -> {
                 handleClick(event)
                 scheduleRefresh(400L)
             }
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> scheduleRefresh(200L)
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> scheduleRefresh(150L)
+            AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> {
+                rememberClick(event)
+                completeArea()
+                scheduleRefresh(400L)
+            }
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                val screen = ScreenSignature(
+                    eventPackage,
+                    event.className?.toString(),
+                    event.text?.joinToString(" ")?.trim()?.takeIf { it.isNotEmpty() },
+                )
+                val changed = screen != currentScreen
+                currentScreen = screen
+                // A press-and-hold or a swipe usually opens a new screen or menu.
+                if (changed && areaShown) completeArea()
+                scheduleRefresh(200L)
+            }
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                if (areaShown && steps.getOrNull(stepIndex)?.area?.isSwipe == true) completeArea()
+                scheduleRefresh(150L)
+            }
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> scheduleRefresh(300L)
         }
     }
@@ -203,7 +298,11 @@ class ClickyGuideController(
     // Step flow
     // ------------------------------------------------------------------
 
-    private fun goToStep(index: Int) {
+    /**
+     * Shows step [index]. [automatic] is true when Clicky moved on by itself
+     * after the user did the previous step.
+     */
+    private fun goToStep(index: Int, automatic: Boolean = false) {
         if (!isActive) return
         handler.removeCallbacks(advanceRunnable)
         handler.removeCallbacks(autoCloseRunnable)
@@ -214,6 +313,8 @@ class ClickyGuideController(
         stepIndex = index.coerceAtLeast(0)
         phraseIndex = 0
         clearTarget()
+        missCount = 0
+        areaDone = false
         finished = false
 
         val step = steps[stepIndex]
@@ -229,10 +330,22 @@ class ClickyGuideController(
         setButtonEnabled(backButton, stepIndex > 0)
         nextButton?.text = if (stepIndex == steps.size - 1) "Finish ✓" else "Next ▶"
         setStatus(
-            if (step.phrases.isEmpty()) "Do this step, then tap Next."
-            else "Looking for “${step.phrases[0].display}”…",
+            when {
+                step.phrases.isNotEmpty() -> "Looking for “${step.phrases[0].display}”…"
+                step.area != null -> step.area.prompt
+                else -> "Do this step, then tap Next."
+            },
         )
         speak("Step ${stepIndex + 1}. ${step.instruction.ifEmpty { step.title }}")
+        // A guide may repeat the button the user just pressed ("tap Done" after
+        // a "tap Next" that turned out to be Done). Do not wait for it again.
+        if (automatic && step.phrases.isNotEmpty() && step.area == null &&
+            step.phrases.all { phrase -> recentClickLabels().any { ClickyTargetMatcher.labelMatches(phrase, it) } }
+        ) {
+            setStatus("Already done ✓")
+            handler.postDelayed(advanceRunnable, AUTO_ADVANCE_DELAY_MS)
+            return
+        }
         scheduleRefresh(150L)
     }
 
@@ -262,13 +375,17 @@ class ClickyGuideController(
 
     private fun onBackPressed() {
         if (!isActive) return
-        when {
-            finished -> goToStep(steps.size - 1)
-            stepIndex > 0 -> goToStep(stepIndex - 1)
+        val previous = when {
+            finished -> steps.size - 1
+            stepIndex > 0 -> stepIndex - 1
+            else -> return
         }
+        goToStep(previous)
+        startReturn(previous)
     }
 
     private fun handleClick(event: AccessibilityEvent) {
+        val labels = rememberClick(event)
         if (finished) return
         val step = steps.getOrNull(stepIndex) ?: return
         val phrase = step.phrases.getOrNull(targetPhraseIndex) ?: return
@@ -283,17 +400,15 @@ class ClickyGuideController(
             area(clickedBounds) <= maxArea &&
             (clickedBounds.contains(target.centerX(), target.centerY()) ||
                 target.contains(clickedBounds.centerX(), clickedBounds.centerY()))
-
-        val labels = ArrayList<String>()
-        event.text?.forEach { text -> text?.toString()?.let(labels::add) }
-        event.contentDescription?.toString()?.let(labels::add)
-        if (source?.isPassword != true) source?.text?.toString()?.let(labels::add)
-        source?.contentDescription?.toString()?.let(labels::add)
         val labelHit = labels.any { ClickyTargetMatcher.labelMatches(phrase, it) }
         if (!boundsHit && !labelHit) return
 
         phraseIndex = targetPhraseIndex + 1
         clearTarget()
+        completePhraseOrStep(step)
+    }
+
+    private fun completePhraseOrStep(step: Step) {
         if (phraseIndex >= step.phrases.size) {
             setStatus("Nice! ✓")
             handler.removeCallbacks(advanceRunnable)
@@ -301,6 +416,124 @@ class ClickyGuideController(
         } else {
             setStatus("Nice! Next: “${step.phrases[phraseIndex].display}”")
         }
+    }
+
+    /** Records what the user just pressed and returns its labels. */
+    private fun rememberClick(event: AccessibilityEvent): List<String> {
+        val source = event.source
+        val labels = ArrayList<String>()
+        event.text?.forEach { text -> text?.toString()?.let(labels::add) }
+        event.contentDescription?.toString()?.let(labels::add)
+        if (source?.isPassword != true) source?.text?.toString()?.let(labels::add)
+        source?.contentDescription?.toString()?.let(labels::add)
+        val now = System.currentTimeMillis()
+        labels.filter { it.isNotBlank() }.forEach { recentClicks.addLast(now to it) }
+        while (recentClicks.size > 20) recentClicks.removeFirst()
+        return labels
+    }
+
+    private fun recentClickLabels(): List<String> {
+        val cutoff = System.currentTimeMillis() - RECENT_CLICK_MS
+        return recentClicks.filter { it.first >= cutoff }.map { it.second }
+    }
+
+    /** The user did the press-and-hold or swipe this step asked for. */
+    private fun completeArea() {
+        if (!areaShown || finished) return
+        val step = steps.getOrNull(stepIndex) ?: return
+        areaDone = true
+        clearTarget()
+        completePhraseOrStep(step)
+        if (phraseIndex < step.phrases.size) scheduleRefresh(300L)
+    }
+
+    // ------------------------------------------------------------------
+    // Going back to an earlier step's screen
+    // ------------------------------------------------------------------
+
+    /**
+     * Back on the card means "show me that step again", so Clicky also takes
+     * the phone back to the screen where that step is done, pressing the
+     * system Back key (or Home) until it gets there.
+     */
+    private fun startReturn(index: Int) {
+        handler.removeCallbacks(returnRunnable)
+        returnStep = index
+        returnAttempts = 0
+        if (stepScreens[index] == null && steps.getOrNull(index)?.phrases.isNullOrEmpty()) {
+            returnStep = -1
+            return
+        }
+        handler.postDelayed(returnRunnable, 150L)
+    }
+
+    private fun continueReturn() {
+        val index = returnStep
+        if (!isActive || index < 0 || index != stepIndex) return
+        if (isAtStepScreen(index)) {
+            returnStep = -1
+            scheduleRefresh(100L)
+            return
+        }
+        val wanted = stepScreens[index]
+        if (returnAttempts >= RETURN_MAX_BACK_PRESSES) {
+            returnStep = -1
+            // Back presses did not get there: reopen that app from its start.
+            val app = wanted?.packageName
+            if (app != null && app != currentScreen?.packageName && app != ownPackage) {
+                try {
+                    service.packageManager.getLaunchIntentForPackage(app)?.let { intent ->
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        service.startActivity(intent)
+                    }
+                } catch (error: RuntimeException) {
+                    Log.w(TAG, "Could not reopen $app.", error)
+                }
+            }
+            scheduleRefresh(RETURN_STEP_DELAY_MS)
+            return
+        }
+        returnAttempts++
+        setStatus("Taking you back to this step…")
+        val action = if (wanted != null && wanted.packageName == homePackage()) {
+            AccessibilityService.GLOBAL_ACTION_HOME
+        } else {
+            AccessibilityService.GLOBAL_ACTION_BACK
+        }
+        service.performGlobalAction(action)
+        handler.postDelayed(returnRunnable, RETURN_STEP_DELAY_MS)
+    }
+
+    /** True when the screen shows that step's control, or is the screen it was done on. */
+    private fun isAtStepScreen(index: Int): Boolean {
+        val root = activeRoot() ?: return false
+        if (root.packageName?.toString() == ownPackage) return false
+        val step = steps.getOrNull(index) ?: return true
+        if (step.phrases.isNotEmpty()) {
+            val elements = collectCandidates(root).map { ClickyScreenElement(it.label, it.clickable, it.weak) }
+            if (ClickyTargetMatcher.findBestMatch(step.phrases, 0, elements) != null) return true
+        }
+        val wanted = stepScreens[index] ?: return step.phrases.isEmpty()
+        val here = currentScreen ?: return false
+        if (wanted.packageName != here.packageName) return false
+        return when {
+            wanted.title != null && here.title != null -> wanted.title == here.title
+            wanted.className != null && here.className != null -> wanted.className == here.className
+            else -> true
+        }
+    }
+
+    private fun homePackage(): String? = try {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        service.packageManager.resolveActivity(home, 0)?.activityInfo?.packageName
+    } catch (_: RuntimeException) {
+        null
+    }
+
+    private fun activeRoot(): AccessibilityNodeInfo? = try {
+        service.rootInActiveWindow
+    } catch (_: RuntimeException) {
+        null
     }
 
     // ------------------------------------------------------------------
@@ -318,7 +551,9 @@ class ClickyGuideController(
         updateBubbleLayout(wantTop = bubbleAtTop) // Keeps the card width right after rotation.
         if (finished) return
         val step = steps.getOrNull(stepIndex) ?: return
-        if (step.phrases.isEmpty() || phraseIndex >= step.phrases.size) {
+        val phrasesLeft = phraseIndex < step.phrases.size
+        val areaLeft = step.area != null && !areaDone
+        if (!phrasesLeft && !areaLeft) {
             clearTarget()
             return
         }
@@ -327,43 +562,125 @@ class ClickyGuideController(
             setStatus("Clicky looks away on private screens like passwords or banking.")
             return
         }
-        val root = try {
-            service.rootInActiveWindow
-        } catch (_: RuntimeException) {
-            null
-        } ?: run {
+        val root = activeRoot() ?: run {
             clearTarget()
             return
         }
-        if (root.packageName?.toString() == ownPackage) {
+        val rootPackage = root.packageName?.toString()
+        if (rootPackage == ownPackage) {
             clearTarget()
             setStatus("Open the screen this step is about. I'll point when I see it.")
             return
         }
 
         val candidates = collectCandidates(root)
-        val match = ClickyTargetMatcher.findBestMatch(
-            step.phrases,
-            phraseIndex,
-            candidates.map { ClickyScreenElement(it.label, it.clickable) },
-        )
+        val elements = candidates.map { ClickyScreenElement(it.label, it.clickable, it.weak) }
+        val match = if (phrasesLeft) {
+            ClickyTargetMatcher.findBestMatch(step.phrases, phraseIndex, elements)
+        } else {
+            null
+        }
         if (match == null) {
-            clearTarget()
-            setStatus(
-                "Looking for “${step.phrases[phraseIndex].display}”… " +
-                    "If you don't see it, try scrolling or going back.",
-            )
+            missCount++
+            if (lookAheadToNextStep(elements)) return
+            if (areaLeft && phraseIndex == 0) {
+                showArea(step, rootPackage)
+                return
+            }
+            // One empty scan is often a screen mid-animation: keep pointing.
+            if (missCount >= MISSES_BEFORE_CLEAR) {
+                clearTarget()
+                if (phrasesLeft) {
+                    setStatus(
+                        "Looking for “${step.phrases[phraseIndex].display}”… " +
+                            "If you don't see it, try scrolling or going back.",
+                    )
+                }
+            }
             return
         }
+        missCount = 0
 
-        val candidate = candidates[match.elementIndex]
+        // Keep pointing at the same control while it is still there, even if
+        // another label scores the same, so the pointer does not hop around.
+        var candidate = candidates[match.elementIndex]
+        val current = targetRect
+        if (current != null && targetPhraseIndex == match.phraseIndex) {
+            candidates.firstOrNull { it.label == targetLabel && near(it.highlight, current, dp(64f)) }
+                ?.let { candidate = it }
+        }
+        val sameTarget = current != null && candidate.label == targetLabel
+        if (!sameTarget) {
+            // A new target must look the same on two scans before the pointer moves.
+            val pending = pendingRect
+            if (pendingLabel != candidate.label || pending == null || !near(pending, candidate.highlight, dp(24f))) {
+                pendingLabel = candidate.label
+                pendingRect = Rect(candidate.highlight)
+                handler.removeCallbacks(refreshRunnable)
+                refreshPending = false
+                scheduleRefresh(CONFIRM_TARGET_DELAY_MS)
+                return
+            }
+        }
+        pendingLabel = null
+        pendingRect = null
+
         phraseIndex = match.phraseIndex
         targetPhraseIndex = match.phraseIndex
+        targetLabel = candidate.label
         targetRect = Rect(candidate.highlight)
+        areaShown = false
+        if (rootPackage != null && stepScreens[stepIndex] == null) {
+            stepScreens[stepIndex] = currentScreen?.takeIf { it.packageName == rootPackage }
+                ?: ScreenSignature(rootPackage, null, null)
+        }
         setStatus("Tap “${step.phrases[match.phraseIndex].display}” 👆")
-        updateBubbleLayout(wantTop = candidate.highlight.centerY() > screenBounds().centerY())
-        pointerView?.pointAt(candidate.highlight)
+        placeBubbleAwayFrom(candidate.highlight)
+        pointerView?.pointAt(candidate.highlight, glide = sameTarget)
     }
+
+    /** Highlights the whole screen for a press-and-hold or swipe step. */
+    private fun showArea(step: Step, rootPackage: String?) {
+        val hint = step.area ?: return
+        if (rootPackage != null && stepScreens[stepIndex] == null) {
+            stepScreens[stepIndex] = currentScreen?.takeIf { it.packageName == rootPackage }
+                ?: ScreenSignature(rootPackage, null, null)
+        }
+        setStatus("${hint.prompt} 👆")
+        if (areaShown) return
+        val screen = screenBounds()
+        val areaRect = Rect(
+            screen.left + dp(20f),
+            screen.top + dp(56f),
+            screen.right - dp(20f),
+            screen.bottom - dp(56f),
+        )
+        targetRect = null
+        targetLabel = null
+        targetPhraseIndex = -1
+        areaShown = true
+        pointerView?.pointAt(areaRect, glide = false)
+    }
+
+    /**
+     * The user may already be past this step: the guide's wording did not
+     * match this phone, or they did it their own way. If the next step's
+     * control is clearly on screen, move on instead of waiting.
+     */
+    private fun lookAheadToNextStep(elements: List<ClickyScreenElement>): Boolean {
+        if (missCount < MISSES_BEFORE_LOOKAHEAD || returnStep >= 0) return false
+        val next = steps.getOrNull(stepIndex + 1) ?: return false
+        if (next.phrases.isEmpty()) return false
+        val match = ClickyTargetMatcher.findBestMatch(next.phrases, 0, elements) ?: return false
+        if (match.score < LOOKAHEAD_MIN_SCORE) return false
+        Log.i(TAG, "Step ${stepIndex + 1} target not found; step ${stepIndex + 2} is on screen, moving on.")
+        goToStep(stepIndex + 1, automatic = true)
+        setStatus("Looks like you're already here. On to the next step.")
+        return true
+    }
+
+    private fun near(a: Rect, b: Rect, distance: Int): Boolean =
+        Math.abs(a.centerX() - b.centerX()) <= distance && Math.abs(a.centerY() - b.centerY()) <= distance
 
     private fun collectCandidates(root: AccessibilityNodeInfo): List<Candidate> {
         val screen = screenBounds()
@@ -385,7 +702,12 @@ class ClickyGuideController(
                 if (!node.isPassword && !bounds.isEmpty && Rect.intersects(bounds, screen)) {
                     val label = (node.text ?: node.contentDescription ?: node.hintText)?.toString()?.trim()
                     if (!label.isNullOrEmpty()) {
-                        result += Candidate(label, clickableBounds ?: bounds, clickableBounds != null)
+                        result += Candidate(label, clickableBounds ?: bounds, clickableBounds != null, weak = false)
+                    } else if (node.isClickable && clickableBounds != null) {
+                        // Icon buttons often have no text, only an id like "wallpaper_button".
+                        viewIdLabel(node.viewIdResourceName)?.let { idLabel ->
+                            result += Candidate(idLabel, clickableBounds, clickable = true, weak = true)
+                        }
                     }
                 }
                 // Push children in reverse so they are visited in on-screen order.
@@ -399,9 +721,19 @@ class ClickyGuideController(
         return result
     }
 
+    /** "com.app:id/set_wallpaper_button" -> "set wallpaper button". */
+    private fun viewIdLabel(id: String?): String? {
+        val name = id?.substringAfter(":id/", "")?.takeIf { it.isNotEmpty() } ?: return null
+        return name.replace('_', ' ').replace(Regex("([a-z])([A-Z])"), "$1 $2").trim().takeIf { it.length >= 3 }
+    }
+
     private fun clearTarget() {
         targetRect = null
+        targetLabel = null
+        pendingLabel = null
+        pendingRect = null
         targetPhraseIndex = -1
+        areaShown = false
         pointerView?.hideTarget()
     }
 
@@ -414,17 +746,62 @@ class ClickyGuideController(
         return manager?.isTouchExplorationEnabled == true
     }
 
-    private fun initTextToSpeech(generation: Int) {
+    /**
+     * Starts a speech engine: the phone's default first, then the others. Some
+     * phones' default engine refuses third-party apps (Samsung's prints
+     * "not allowed to bind to private engine" and fails with status -1),
+     * which left Clicky silent although Google's engine was installed.
+     */
+    private fun initTextToSpeech(generation: Int, enginePackage: String? = null, tried: Set<String> = emptySet()) {
+        val attempted = tried + (enginePackage ?: "default")
         try {
-            tts = TextToSpeech(service.applicationContext) { status ->
+            val listener = TextToSpeech.OnInitListener { status ->
                 handler.post {
                     if (!isActive || generation != sessionGeneration) return@post
                     if (status == TextToSpeech.SUCCESS) {
+                        Log.i(TAG, "Text-to-speech ready (engine ${tts?.defaultEngine.takeIf { enginePackage == null } ?: enginePackage}).")
+                        configureVoice()
                         ttsReady = true
                         pendingSpeech?.let(::speakNow)
+                        pendingSpeech = null
+                        return@post
                     }
-                    pendingSpeech = null
+                    val failed = tts
+                    val defaultEngine = try {
+                        failed?.defaultEngine
+                    } catch (_: RuntimeException) {
+                        null
+                    }
+                    val installed = try {
+                        failed?.engines?.map { it.name }.orEmpty()
+                    } catch (_: RuntimeException) {
+                        emptyList()
+                    }
+                    try {
+                        failed?.shutdown()
+                    } catch (_: RuntimeException) {
+                    }
+                    tts = null
+                    // Google's engine first (it accepts every app), then the rest.
+                    val candidates = if (installed.isEmpty()) {
+                        listOf(GOOGLE_TTS_ENGINE)
+                    } else {
+                        installed.sortedBy { if (it == GOOGLE_TTS_ENGINE) 0 else 1 }
+                    }
+                    val next = candidates.firstOrNull { it !in attempted && it != defaultEngine }
+                    if (next != null) {
+                        Log.w(TAG, "Text-to-speech engine ${enginePackage ?: defaultEngine} failed (status $status); trying $next.")
+                        initTextToSpeech(generation, next, attempted + listOfNotNull(defaultEngine))
+                    } else {
+                        Log.w(TAG, "No text-to-speech engine would start (status $status); Clicky will stay silent.")
+                        pendingSpeech = null
+                    }
                 }
+            }
+            tts = if (enginePackage == null) {
+                TextToSpeech(service.applicationContext, listener)
+            } else {
+                TextToSpeech(service.applicationContext, listener, enginePackage)
             }
         } catch (error: RuntimeException) {
             Log.w(TAG, "Text-to-speech is unavailable; Clicky will stay silent.", error)
@@ -437,11 +814,39 @@ class ClickyGuideController(
         if (ttsReady) speakNow(text) else pendingSpeech = text
     }
 
+    /**
+     * Speaks on the accessibility stream, not the media stream: media volume
+     * is often turned down, and after a help call the media stream can stay
+     * routed to the earpiece, which made Clicky sound silent.
+     */
+    private fun configureVoice() {
+        val engine = tts ?: return
+        try {
+            engine.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            // A voice missing for the phone's language makes speak() silently
+            // do nothing; fall back to English, which every engine ships.
+            val language = engine.setLanguage(Locale.getDefault())
+            if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED) {
+                Log.w(TAG, "No ${Locale.getDefault()} voice installed (result $language); using English.")
+                engine.setLanguage(Locale.US)
+            }
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Could not configure the Clicky voice.", error)
+        }
+    }
+
     private fun speakNow(text: String) {
         if (muted) return
         try {
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "clicky-step")
-        } catch (_: RuntimeException) {
+            val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "clicky-step")
+            if (result != TextToSpeech.SUCCESS) Log.w(TAG, "Text-to-speech refused to speak (result $result).")
+        } catch (error: RuntimeException) {
+            Log.w(TAG, "Text-to-speech failed.", error)
         }
     }
 
@@ -535,7 +940,21 @@ class ClickyGuideController(
     private fun computeBubbleWidth(): Int =
         minOf(screenBounds().width() - dp(24f), dp(480f)).coerceAtLeast(dp(200f))
 
-    /** Keeps the card on the opposite half of the screen from the target. */
+    /**
+     * Moves the card to the other end of the screen only when it would cover
+     * the target. Flipping on every small move made the card jump up and down.
+     */
+    private fun placeBubbleAwayFrom(target: Rect) {
+        val height = bubbleView?.height?.takeIf { it > 0 } ?: dp(220f)
+        val screen = screenBounds()
+        val covered = if (bubbleAtTop) {
+            Rect(screen.left, screen.top + dp(36f), screen.right, screen.top + dp(36f) + height)
+        } else {
+            Rect(screen.left, screen.bottom - dp(56f) - height, screen.right, screen.bottom - dp(56f))
+        }
+        if (Rect.intersects(covered, target)) updateBubbleLayout(wantTop = !bubbleAtTop)
+    }
+
     private fun updateBubbleLayout(wantTop: Boolean) {
         val view = bubbleView ?: return
         val width = computeBubbleWidth()
@@ -582,7 +1001,7 @@ class ClickyGuideController(
         header.addView(pillButton("✕", filled = false).apply {
             contentDescription = "Stop Clicky"
             layoutParams = LinearLayout.LayoutParams(dp(44f), dp(44f))
-            setOnClickListener { handler.post { stop() } }
+            setOnClickListener { handler.post { stopAndReturnToApp() } }
         })
         card.addView(header)
 
@@ -711,7 +1130,12 @@ class ClickyGuideController(
         private var flight: ValueAnimator? = null
         private var pulseAnimator: ValueAnimator? = null
 
-        fun pointAt(rect: Rect) {
+        /**
+         * Points at [rect]. [glide] means it is the same control as before, moved
+         * by scrolling or a relayout: follow it in a straight line instead of
+         * flying a new arc, which looked like the pointer bouncing up and down.
+         */
+        fun pointAt(rect: Rect, glide: Boolean) {
             val newTarget = RectF(rect)
             val endX = newTarget.centerX()
             val endY = newTarget.centerY()
@@ -720,7 +1144,7 @@ class ClickyGuideController(
             val alreadyThere = previous != null && cursorX >= 0f &&
                 Math.hypot((cursorX - endX).toDouble(), (cursorY - endY).toDouble()) < dp(24f)
             if (alreadyThere) {
-                // Small moves (e.g. scrolling) follow the target without a new flight.
+                // Small moves follow the target without a new flight.
                 if (flight == null) {
                     cursorX = endX
                     cursorY = endY
@@ -731,7 +1155,7 @@ class ClickyGuideController(
             val screen = screenBounds()
             val startX = if (cursorX >= 0f) cursorX else screen.exactCenterX()
             val startY = if (cursorY >= 0f) cursorY else screen.exactCenterY()
-            flyTo(startX, startY, endX, endY)
+            flyTo(startX, startY, endX, endY, arc = !(glide && previous != null && arrived))
         }
 
         fun hideTarget() {
@@ -753,11 +1177,12 @@ class ClickyGuideController(
             pulse = 0f
         }
 
-        private fun flyTo(startX: Float, startY: Float, endX: Float, endY: Float) {
+        private fun flyTo(startX: Float, startY: Float, endX: Float, endY: Float, arc: Boolean) {
             val previousFlight = flight
             flight = null
             previousFlight?.cancel()
-            arrived = false
+            // A glide keeps the ring on the control; only a new flight hides it.
+            arrived = !arc && arrived
             if (!ValueAnimator.areAnimatorsEnabled()) {
                 cursorX = endX
                 cursorY = endY
@@ -765,11 +1190,11 @@ class ClickyGuideController(
                 invalidate()
                 return
             }
-            // Clicky-style arc: a quadratic bezier that bows upward.
+            // Clicky-style arc: a quadratic bezier that bows upward. A glide is straight.
             val controlX = (startX + endX) / 2f
-            val controlY = minOf(startY, endY) - dp(80f)
+            val controlY = if (arc) minOf(startY, endY) - dp(80f) else (startY + endY) / 2f
             val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-                duration = 650L
+                duration = if (arc) 650L else 220L
                 interpolator = AccelerateDecelerateInterpolator()
                 addUpdateListener { animation ->
                     val t = animation.animatedValue as Float

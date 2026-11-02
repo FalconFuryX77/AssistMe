@@ -528,8 +528,13 @@ class SessionService:
         session_id: str,
         user_id: str,
         db: AsyncSession,
+        disconnected_at: datetime | None = None,
     ) -> Session | None:
-        """End a two-person session when either client disappears unexpectedly."""
+        """End a two-person session when either client disappears unexpectedly.
+
+        ``disconnected_at`` is when the dropped socket closed. A liveness stamp
+        newer than that means the user came back on another socket.
+        """
         result = await db.execute(
             select(Session)
             .where(Session.id == session_id)
@@ -549,6 +554,12 @@ class SessionService:
         # database: the call is alive, so do not end it.
         if participant.status == "connected":
             return None
+        last_seen = participant.last_seen_at
+        if last_seen is not None and disconnected_at is not None:
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if last_seen > disconnected_at:
+                return None
 
         now = datetime.now(timezone.utc)
         session.status = "ended"
@@ -581,7 +592,9 @@ class SessionService:
                     SessionParticipant.user_id == user_id,
                     SessionParticipant.status != "left",
                 )
-                .values(last_seen_at=now)
+                # A late close of an older socket may have marked this user
+                # "disconnected" after they reconnected; the live socket wins.
+                .values(last_seen_at=now, status="connected")
             )
         await db.commit()
 

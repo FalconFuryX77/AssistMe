@@ -109,6 +109,9 @@ class WebRTCEngine {
         'sdpSemantics': 'unified-plan',
         'bundlePolicy': 'max-bundle',
         'rtcpMuxPolicy': 'require',
+        // Keep gathering candidates while connected, so when the phone moves
+        // between Wi-Fi and mobile data ICE can find a path on the new network.
+        'continualGatheringPolicy': 'gather_continually',
       },
       {
         'mandatory': {},

@@ -347,7 +347,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ),
                             ),
                             Text(
-                              'Version 1.1.0 (Build 2026.09)',
+                              'Version 1.2.0 (Build 2026.11)',
                               style: TextStyle(
                                 fontSize: AppTypography.caption,
                                 color: context.textSecondary,

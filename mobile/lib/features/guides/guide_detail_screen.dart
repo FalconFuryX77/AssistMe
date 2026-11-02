@@ -472,7 +472,9 @@ class _GuideDetailScreenState extends State<GuideDetailScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (ClickyBridge.isSupported) ...[
+                  // A guide the helper made follows the helpee's phone, whose
+                  // screens and button names can differ from this one.
+                  if (ClickyBridge.isSupported && !widget.guide.madeByMe) ...[
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(

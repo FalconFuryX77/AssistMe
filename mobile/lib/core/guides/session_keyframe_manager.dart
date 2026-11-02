@@ -129,6 +129,24 @@ class SessionKeyframeManager {
     );
   }
 
+  /// Stores a screenshot the helper took during the call with one tap. It is
+  /// not reviewed yet: the helper covers private details after the call, and
+  /// it is never sent to anyone before that. The step's words come later
+  /// from the transcript (or the helper), so none are asked for now.
+  Future<KeyframeCaptureResult> addHelperCapture(
+    Uint8List bytes, {
+    required String id,
+  }) {
+    return _storeFrameBytes(
+      bytes,
+      title: '',
+      instruction: '',
+      privacyReviewed: false,
+      id: id,
+      checkDuplicates: false,
+    );
+  }
+
   Future<KeyframeCaptureResult> _storeFrameBytes(
     Uint8List bytes, {
     required String title,
@@ -158,7 +176,8 @@ class SessionKeyframeManager {
     }
     _keyframes.add(
       CapturedKeyframe(
-        id: id ??
+        id:
+            id ??
             '${DateTime.now().microsecondsSinceEpoch}_${Random.secure().nextInt(1 << 32)}',
         timestamp: DateTime.now(),
         imageBytes: Uint8List.fromList(bytes),

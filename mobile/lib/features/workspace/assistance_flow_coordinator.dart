@@ -26,6 +26,7 @@ import '../../core/guides/screenshot_redaction.dart' show shrinkGuideScreenshot;
 import '../../core/network/api_client.dart';
 import '../../core/platform/accessibility_bridge.dart';
 import '../../core/platform/annotation_overlay_service.dart';
+import '../../core/platform/network_monitor.dart';
 import '../../core/realtime/realtime_service.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/secure_storage_service.dart';
@@ -35,8 +36,7 @@ import 'drawing_overlay.dart';
 import 'incoming_help_request_popup.dart';
 import 'risk_disclaimer_modal.dart';
 import 'local_guide_save_dialog.dart';
-import 'guide_step_details_dialog.dart';
-import 'screenshot_redaction_editor.dart';
+import 'screenshot_review_sequence.dart';
 
 class _IncomingGuideFrameTransfer {
   final String id;
@@ -141,6 +141,15 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   bool _bootstrapping = false;
   bool _screenShareStarting = false;
   bool _shareWaitingForSignaling = false;
+
+  // Network switches (Wi-Fi <-> mobile data) during a call.
+  StreamSubscription<NetworkChange>? _networkSub;
+  Timer? _networkSwitchDebounce;
+  Timer? _iceDisconnectedWatchdog;
+  DateTime? _lastNetworkRecoveryAt;
+  // Set when the network changed; the next signaling reconnect then renegotiates
+  // media even though the old (now frozen) remote stream object still exists.
+  bool _networkSwitchPending = false;
   bool _screenShareStarted = false;
   bool _remoteControlGranted = false;
   bool _helpeeOverlayRunning = false;
@@ -168,6 +177,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   Timer? _disconnectCountdownTimer;
   int? _disconnectCountdownSeconds;
   int _totalAloneSeconds = 0;
+  bool _iceConnected = false;
   bool _sessionTerminationHandled = false;
   bool _guideReviewShown = false;
   Completer<bool>? _pendingGuideFinalizationAck;
@@ -181,8 +191,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
   int _guideFrameOrdinal = 0;
   // Guide steps the helpee has confirmed it stored (helper side only).
   final Set<String> _guideFramesOnHelpee = <String>{};
-  // Transfers to the helpee run one at a time; the helpee accepts one at once.
-  Future<void> _helpeeSendChain = Future<void>.value();
   // Helper only: per-call key for the encrypted post-call guide delivery.
   // It reaches the helpee only over the call's peer data channel.
   final List<int> _guideSyncKey = GuideDeliveryService.newKey();
@@ -844,14 +852,24 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _pendingGuideAudioRecordings,
     );
     _pendingGuideAudioRecordings.clear();
+    // Screenshots were one tap each during the call. Review them now, one at
+    // a time, before anything is written up, saved or sent.
+    final reviewedFrames = await reviewScreenshotsInOrder(
+      context,
+      _keyframeManager.keyframes,
+    );
+    if (!mounted) return;
     final input = await showDialog<LocalGuideSaveInput>(
       context: context,
       barrierDismissible: false,
       builder: (_) => LocalGuideSaveDialog(
-        frames: _keyframeManager.keyframes,
+        frames: reviewedFrames,
         audioRecordings: audioRecordings,
         helperCuratedFrames: true,
         guideOwner: true,
+        // Transcribe and write the steps by itself when the models are on
+        // the phone, instead of waiting for the helper to press buttons.
+        autoGenerate: true,
         suggestedTitle:
             'Help guide ${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}',
       ),
@@ -863,7 +881,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
     try {
       final transcript = input.transcript;
-      final includedFrames = _keyframeManager.keyframes
+      final includedFrames = reviewedFrames
           .where((frame) => input.includedFrameIds.contains(frame.id))
           .map((frame) {
             final generatedInstruction = input.generatedInstructions[frame.id]
@@ -910,6 +928,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             transcript: transcript,
             frames: includedFrames,
             sessionId: widget.sessionId,
+            madeByMe: true,
           );
       final synced = await _sendGuideFinalization(
         saved: true,
@@ -1008,13 +1027,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     if (!_engine.isDataChannelOpen) return false;
     if (saved) {
       _sendGuideSyncKey();
-      // Let screenshots still being sent in the background finish first.
-      await _helpeeSendChain.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {},
-      );
-      // Steps captured while the channel was busy only exist here so far.
-      // Send them now so the helpee can attach every screenshot.
+      // Screenshots are only sent once the helper has reviewed them, so they
+      // all go now, before the guide that refers to them.
       for (final frame in frames) {
         if (frame.imageBytes.isEmpty || !mounted) continue;
         final delivered = await _sendGuideFrameToHelpee(
@@ -1214,6 +1228,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     setState(() => _helperDeviceFingerprint = fingerprint);
 
     _bootstrapping = true;
+    _networkSub ??= NetworkMonitor.changes.listen(_onNetworkChanged);
     Future<void> connectRealtime() async {
       if (token == null) return;
       try {
@@ -1273,13 +1288,49 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     } else if (!widget.isHelpee) {
       // Helper reconnected but still has no video – ask helpee to re-offer.
       // The video check uses notifier so we don't trigger when video already live.
-      if (remoteStreamNotifier.value == null) {
+      // After a network switch the old stream object still exists but is
+      // frozen, so renegotiate anyway.
+      final networkSwitched = _networkSwitchPending;
+      _networkSwitchPending = false;
+      if (remoteStreamNotifier.value == null || networkSwitched) {
         await _recoverMedia(sendOffer: false);
         // Nudge helpee to re-create offer if it hasn't already (e.g., helpee
         // didn't detect the reconnect). This also restores mic.
         _realtime?.send({'type': 'request_offer'});
       }
     }
+  }
+
+  void _onNetworkChanged(NetworkChange change) {
+    debugPrint(
+      '[AssistMe][CALL] network changed available=${change.available} '
+      'transport=${change.transport}',
+    );
+    if (!change.available) return;
+    // Several callbacks can arrive while the new network settles.
+    _networkSwitchDebounce?.cancel();
+    _networkSwitchDebounce = Timer(
+      const Duration(milliseconds: 800),
+      () => unawaited(_recoverFromNetworkChange('switched to ${change.transport}')),
+    );
+  }
+
+  /// Reconnects signaling over the current network and renegotiates media.
+  /// The helpee rebuilds and offers when its signaling reconnects; the helper
+  /// asks for a fresh offer. The helpee stays the only offerer, so the two
+  /// phones never race to replace the connection.
+  Future<void> _recoverFromNetworkChange(String reason) async {
+    if (!mounted || _sessionTerminationHandled || !_mediaReady) return;
+    final last = _lastNetworkRecoveryAt;
+    if (last != null &&
+        DateTime.now().difference(last) < const Duration(seconds: 8)) {
+      return;
+    }
+    _lastNetworkRecoveryAt = DateTime.now();
+    debugPrint('[AssistMe][CALL] recovering call after network change: $reason');
+    _networkSwitchPending = true;
+    // Triggers _handleRealtimeConnected, which renegotiates for this role.
+    await _realtime?.reconnectNow();
   }
 
   Future<void> _recoverMedia({
@@ -1384,9 +1435,30 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
           '[AssistMe][MEDIA] role=${widget.isHelpee ? 'helpee' : 'helper'} '
           'ICE=$state',
         );
-        if (state.toLowerCase().contains('connected')) {
+        final lower = state.toLowerCase();
+        // "Disconnected" also contains "connected": compare the suffix.
+        final iceDisconnected = lower.endsWith('disconnected');
+        final iceConnected =
+            !iceDisconnected &&
+            (lower.endsWith('connected') || lower.endsWith('completed'));
+        _iceConnected = iceConnected;
+        if (iceConnected) {
+          // Media flows again, so the helper is back even if the server's
+          // "reconnected" notice was lost or arrived before a stale
+          // "disconnected" one.
+          _endPeerAwayCountdown('ICE connected');
           _relayFallbackAttempted = false;
           _directIceRecoveryAttempted = false;
+          _iceDisconnectedWatchdog?.cancel();
+          _iceDisconnectedWatchdog = null;
+        } else if (iceDisconnected) {
+          // A Wi-Fi <-> mobile data switch first shows up as "disconnected";
+          // ICE may take ~30 s to declare "failed". Recover after 5 s instead.
+          _iceDisconnectedWatchdog?.cancel();
+          _iceDisconnectedWatchdog = Timer(
+            const Duration(seconds: 5),
+            () => unawaited(_recoverFromNetworkChange('ICE disconnected for 5 s')),
+          );
         }
         if (state.toLowerCase().contains('failed') &&
             _engine.hasTurnServer &&
@@ -1419,6 +1491,8 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
       _engine.onDataChannelMessage = (data) {
         final type = data['type'] as String?;
         if (type == null) return;
+        // Anything over the peer link comes straight from the other phone.
+        _endPeerAwayCountdown('data from peer');
         if (type.startsWith('guide_frame_') ||
             type.startsWith('guide_finalize')) {
           unawaited(_onGuideFrameMessage(data));
@@ -1427,6 +1501,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         }
       };
       _engine.onDataChannelState = (isOpen) {
+        if (isOpen) _endPeerAwayCountdown('data channel open');
         if (isOpen && !widget.isHelpee) _sendGuideSyncKey();
         if (!isOpen &&
             widget.isHelpee &&
@@ -1909,7 +1984,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         // Helper disconnected: Helpee gets the 10-second countdown with Wait (+30s) button
         _totalAloneSeconds = 0;
         setState(() {
-          _disconnectCountdownSeconds = 10;
+          // Long enough for a helper switching between Wi-Fi and mobile
+          // data to reconnect (it used to be 10 s).
+          _disconnectCountdownSeconds = 30;
         });
         _disconnectCountdownTimer = Timer.periodic(const Duration(seconds: 1), (
           timer,
@@ -1929,6 +2006,11 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
             return;
           }
           if ((_disconnectCountdownSeconds ?? 0) <= 1) {
+            if (_peerLinkAlive) {
+              // A helper that is really gone has lost ICE long before this.
+              _endPeerAwayCountdown('peer link still alive at expiry');
+              return;
+            }
             timer.cancel();
             _disconnectCountdownTimer = null;
             setState(() {
@@ -1945,23 +2027,7 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         break;
 
       case 'user_reconnected':
-        _disconnectCountdownTimer?.cancel();
-        _disconnectCountdownTimer = null;
-        _totalAloneSeconds = 0;
-        if (_disconnectCountdownSeconds != null) {
-          setState(() {
-            _disconnectCountdownSeconds = null;
-          });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${widget.peerName} reconnected.'),
-                backgroundColor: AppTheme.accentEmerald,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-          }
-        }
+        _endPeerAwayCountdown('server: user_reconnected');
         // A new WebSocket is not enough to restore an old ICE/DTLS session.
         // Rebuild the media transport on both sides; the helpee is the only
         // side that creates the fresh screen-share offer.
@@ -2901,13 +2967,9 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         return;
       }
       if (!mounted) return;
-      // Shrink before the redaction editor so drawing, the redaction burn-in
-      // and the transfer all work on a small image instead of a full frame.
-      final small = await shrinkGuideScreenshot(captured);
-      if (!mounted) return;
-      final redacted = await editScreenshotRedactions(context, small);
-      if (!mounted || redacted == null) return;
-      var image = redacted;
+      // Shrink now so the review after the call, the redaction burn-in and
+      // the transfer all work on a small image instead of a full frame.
+      var image = await shrinkGuideScreenshot(captured);
       if (image.length > _maxGuideFrameBytes) {
         image = await shrinkGuideScreenshot(image, maxSide: 960);
       }
@@ -2915,24 +2977,16 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         '[AssistMe][GUIDE] step image ${captured.length} -> ${image.length} bytes',
       );
       if (image.length > _maxGuideFrameBytes) {
-        _showGuideMessage('This screenshot is too large to send. Try again.');
+        _showGuideMessage('This screenshot is too large to keep. Try again.');
         return;
       }
       final stepNumber = _guideFrameOrdinal + 1;
       final stepId = '${DateTime.now().microsecondsSinceEpoch}_$stepNumber';
-      final details = await _requestGuideStepDetails(stepNumber);
-      if (details == null || !mounted) return;
-      final title = details['title']!;
-      final instruction = details['instruction']!;
 
-      // The helper owns the guide, so keep the step here first. Sending it to
-      // the helpee is best effort; anything missed is sent again on save.
-      final localResult = await _keyframeManager.addPreReviewedFrame(
-        image,
-        title: title,
-        instruction: instruction,
-        id: stepId,
-      );
+      // One tap and back to helping: no editor or form mid-call. The helper
+      // reviews every screenshot after the call, and only reviewed ones are
+      // ever sent to the helpee (with the guide, when it is saved).
+      final localResult = await _keyframeManager.addHelperCapture(image, id: stepId);
       debugPrint('[AssistMe][GUIDE] step $stepNumber kept on helper: ${localResult.name}');
       if (localResult != KeyframeCaptureResult.saved) {
         _showGuideMessage(
@@ -2943,24 +2997,10 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
         return;
       }
       _guideFrameOrdinal++;
-      // The step is safe on this phone: free the button now. Waiting for the
-      // helpee's confirmation here used to lock it for up to 20 seconds,
-      // silently swallowing taps.
       _setGuideStepBusy(false);
-      _showGuideMessage('Step $stepNumber saved. Sending it to the other phone…');
-      _helpeeSendChain = _helpeeSendChain.then((_) async {
-        final delivered = await _sendGuideFrameToHelpee(
-          id: stepId,
-          bytes: image,
-          title: title,
-          instruction: instruction,
-        );
-        _showGuideMessage(
-          delivered
-              ? 'Step $stepNumber is on both devices.'
-              : 'Step $stepNumber is saved on your phone. It will be sent to the other phone when you save the guide.',
-        );
-      });
+      _showGuideMessage(
+        'Screenshot $stepNumber saved. You\'ll review it after the call.',
+      );
     } finally {
       _setGuideStepBusy(false);
     }
@@ -3041,8 +3081,6 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     }
   }
 
-  Future<Map<String, String>?> _requestGuideStepDetails(int stepNumber) =>
-      GuideStepDetailsDialog.show(context, stepNumber: stepNumber);
 
   void _showGuideMessage(String message) {
     if (!mounted) return;
@@ -3278,8 +3316,38 @@ class AssistanceFlowCoordinatorState extends State<AssistanceFlowCoordinator> {
     );
   }
 
+  /// True while ICE is connected and the data channel is open: the other
+  /// phone is demonstrably still in the call.
+  bool get _peerLinkAlive => _iceConnected && _engine.isDataChannelOpen;
+
+  /// Stops the helpee's "helper disconnected, auto-leaving" countdown once
+  /// the helper is known to be back.
+  void _endPeerAwayCountdown(String reason) {
+    _totalAloneSeconds = 0;
+    if (_disconnectCountdownSeconds == null && _disconnectCountdownTimer == null) {
+      return;
+    }
+    debugPrint('[AssistMe][SESSION] peer is back ($reason); countdown cancelled');
+    _disconnectCountdownTimer?.cancel();
+    _disconnectCountdownTimer = null;
+    if (!mounted) return;
+    setState(() {
+      _disconnectCountdownSeconds = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${widget.peerName} reconnected.'),
+        backgroundColor: AppTheme.accentEmerald,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _networkSub?.cancel();
+    _networkSwitchDebounce?.cancel();
+    _iceDisconnectedWatchdog?.cancel();
     widget.annotationModeSink?.removeListener(_onAnnotationModeChanged);
     _disconnectCountdownTimer?.cancel();
     _previewTimer?.cancel();

@@ -111,6 +111,7 @@ class LocalGuideStore {
     required List<CapturedKeyframe> frames,
     String? sessionId,
     String category = 'general',
+    bool madeByMe = false,
   }) async {
     final cleanedTitle = title.trim();
     if (cleanedTitle.isEmpty) throw ArgumentError('A guide title is required.');
@@ -180,6 +181,7 @@ class LocalGuideStore {
         steps: steps,
         transcript: transcript.trim(),
         isLocal: true,
+        madeByMe: madeByMe,
       );
       final metadataFile = File(
         '${directory.path}${Platform.pathSeparator}$guideId.guide.enc',

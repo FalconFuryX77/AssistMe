@@ -86,27 +86,52 @@ _PARKED_MAX = 64
 
 
 def _presence_key(session_id: str) -> str:
-    return f"assistme:presence:{session_id}"
+    # A hash of user id -> id of that user's latest session socket. (A new
+    # key name: earlier builds stored a plain set under "presence".)
+    return f"assistme:presence2:{session_id}"
 
 
 def _parked_key(session_id: str) -> str:
     return f"assistme:parked:{session_id}"
 
 
-async def presence_add(session_id: str, user_id: str) -> bool | None:
+# Delete the field only if it still names this connection.
+_RELEASE_IF_CURRENT = """
+if redis.call('HGET', KEYS[1], ARGV[1]) == ARGV[2] then
+  redis.call('HDEL', KEYS[1], ARGV[1])
+  return 1
+end
+return 0
+"""
+
+
+async def presence_add(
+    session_id: str, user_id: str, connection_id: str
+) -> bool | None:
+    """Record ``connection_id`` as this user's latest session socket."""
     try:
         redis = _redis()
-        await redis.sadd(_presence_key(session_id), user_id)
+        await redis.hset(_presence_key(session_id), user_id, connection_id)
         await redis.expire(_presence_key(session_id), _PRESENCE_TTL_SECONDS)
         return True
     except Exception:
         return None
 
 
-async def presence_remove(session_id: str, user_id: str) -> bool | None:
+async def presence_release(
+    session_id: str, user_id: str, connection_id: str
+) -> bool | None:
+    """Forget this socket if it is still the user's latest one.
+
+    Returns False when a newer socket (often on another worker, after a
+    Wi-Fi <-> mobile data switch) has already taken over: the close being
+    handled is stale and must not be reported as a disconnect.
+    """
     try:
-        await _redis().srem(_presence_key(session_id), user_id)
-        return True
+        removed = await _redis().eval(
+            _RELEASE_IF_CURRENT, 1, _presence_key(session_id), user_id, connection_id
+        )
+        return int(removed) == 1
     except Exception:
         return None
 
@@ -114,7 +139,7 @@ async def presence_remove(session_id: str, user_id: str) -> bool | None:
 async def others_present(session_id: str, user_id: str) -> bool | None:
     """True if another participant holds a session socket on any worker."""
     try:
-        members = await _redis().smembers(_presence_key(session_id))
+        members = await _redis().hkeys(_presence_key(session_id))
         return any(member != user_id for member in members)
     except Exception:
         return None

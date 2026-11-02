@@ -278,7 +278,7 @@ class _MobileWorkspaceScreenState extends State<MobileWorkspaceScreen>
                               )
                             : const Icon(Icons.add_photo_alternate_outlined),
                         label: Text(
-                          busy ? 'Adding step…' : 'Add redacted step to guide',
+                          busy ? 'Capturing…' : 'Capture step for guide',
                         ),
                       ),
                     ),

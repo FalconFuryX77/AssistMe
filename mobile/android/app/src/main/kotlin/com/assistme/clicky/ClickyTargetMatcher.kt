@@ -20,6 +20,18 @@ data class ClickyTargetPhrase(
 data class ClickyScreenElement(
     val label: String,
     val clickable: Boolean,
+    /** Label guessed from a view id because the element has no text; ranked lower. */
+    val weak: Boolean = false,
+)
+
+/**
+ * A step done on the screen itself rather than on a labelled control, such as
+ * "long-press an empty part of the home screen" or "swipe up".
+ */
+data class ClickyAreaHint(
+    /** What Clicky asks the user to do, e.g. "Press and hold an empty part of the screen". */
+    val prompt: String,
+    val isSwipe: Boolean,
 )
 
 data class ClickyMatch(
@@ -31,6 +43,8 @@ data class ClickyMatch(
 object ClickyTargetMatcher {
     const val MATCH_THRESHOLD = 55
     private const val CLICKABLE_BONUS = 10
+    private const val WEAK_LABEL_PENALTY = 15
+    private const val CONFIRM_SYNONYM_SCORE = 60
     private const val MAX_PHRASES = 8
     private const val MAX_PHRASE_WORDS = 6
     private const val MAX_LABEL_CHARACTERS = 160
@@ -75,7 +89,34 @@ object ClickyTargetMatcher {
         "app", "application", "button", "option", "options", "icon", "tab",
         "menu", "toggle", "switch", "link", "item", "setting", "field", "box",
     )
-    private val tokenStopWords = setOf("the", "a", "an", "to", "of", "and", "or", "on", "in", "your", "my")
+    private val tokenStopWords = setOf(
+        "the", "a", "an", "to", "of", "and", "or", "on", "in", "your", "my", "as", "for", "this", "with",
+    )
+
+    // Screens confirm with different words: a guide that says "Next" may meet
+    // "Done" or "Apply" on another phone or another branch of the same flow.
+    private val confirmWords = setOf(
+        "next", "done", "ok", "okay", "apply", "set", "save", "confirm", "continue",
+        "finish", "allow", "yes", "accept", "agree", "proceed",
+    )
+
+    private val holdPattern = Regex(
+        """(?<!\p{L})(?:long[- ]?press|long[- ]?tap|press\s+and\s+hold|tap\s+and\s+hold|touch\s+and\s+hold|hold\s+down)""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val swipePattern = Regex(
+        """(?<!\p{L})swipe\s+(up|down|left|right)(?!\p{L})""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val screenAreaPattern = Regex(
+        """home\s*screen|empty|blank|background|anywhere|the\s+screen""",
+        RegexOption.IGNORE_CASE,
+    )
+    // Words that describe the screen itself; they never name a control to point at.
+    private val areaWords = setOf(
+        "home", "screen", "homescreen", "empty", "blank", "space", "area", "background",
+        "anywhere", "part", "spot", "place",
+    )
 
     /**
      * Extracts the ordered labels a step refers to. Quoted text wins (the
@@ -83,6 +124,13 @@ object ClickyTargetMatcher {
      * used; otherwise a short, specific step title is used as a last resort.
      */
     fun extractPhrases(title: String, instruction: String): List<ClickyTargetPhrase> {
+        val phrases = extractRawPhrases(title, instruction)
+        // "Long-press the home screen": the screen is the target, not a label.
+        if (extractArea(title, instruction) == null) return phrases
+        return phrases.filterNot { phrase -> phrase.tokens.all { it in areaWords || it in tokenStopWords } }
+    }
+
+    private fun extractRawPhrases(title: String, instruction: String): List<ClickyTargetPhrase> {
         val quoted = quotedPhrases(instruction).ifEmpty { quotedPhrases(title) }
         if (quoted.isNotEmpty()) return finalize(quoted)
 
@@ -94,6 +142,18 @@ object ClickyTargetMatcher {
             return finalize(pathSeparator.split(cleanTitle))
         }
         return emptyList()
+    }
+
+    /** Finds a gesture on the screen itself (press and hold, swipe), if the step asks for one. */
+    fun extractArea(title: String, instruction: String): ClickyAreaHint? {
+        val text = "$title. $instruction"
+        swipePattern.find(text)?.let { match ->
+            return ClickyAreaHint("Swipe ${match.groupValues[1].lowercase()} on the screen", isSwipe = true)
+        }
+        if (holdPattern.containsMatchIn(text) && screenAreaPattern.containsMatchIn(text)) {
+            return ClickyAreaHint("Press and hold an empty part of the screen", isSwipe = false)
+        }
+        return null
     }
 
     private fun quotedPhrases(text: String): List<String> =
@@ -158,6 +218,11 @@ object ClickyTargetMatcher {
         val phraseTokens = phrase.tokens
         if (labelTokens.isEmpty() || phraseTokens.isEmpty()) return 0
         if (labelTokens == phraseTokens) return 100
+        if (phraseTokens.size == 1 && labelTokens.size == 1 &&
+            phraseTokens[0] in confirmWords && labelTokens[0] in confirmWords
+        ) {
+            return CONFIRM_SYNONYM_SCORE
+        }
 
         if (containsSequence(labelTokens, phraseTokens)) {
             // The label contains the whole phrase ("Wi-Fi" inside "Wi-Fi & network").
@@ -210,7 +275,7 @@ object ClickyTargetMatcher {
     ): ClickyMatch? {
         var best: ClickyMatch? = null
         elements.forEachIndexed { elementIndex, element ->
-            val raw = score(phrase, element.label)
+            val raw = score(phrase, element.label) - if (element.weak) WEAK_LABEL_PENALTY else 0
             if (raw < MATCH_THRESHOLD) return@forEachIndexed
             val ranked = raw + if (element.clickable) CLICKABLE_BONUS else 0
             if (best == null || ranked > best!!.score) {
