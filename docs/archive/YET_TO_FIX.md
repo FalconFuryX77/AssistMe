@@ -1,7 +1,7 @@
 # Yet to fix
 
 Working list, highest priority first. Details and evidence for each item are in
-`BUGS.md`. Tick items off here as they are fixed and verified on real phones.
+`docs/BUGS.md`. Tick items off here as they are fixed and verified on real phones.
 
 ## Must do before the demo
 

@@ -113,7 +113,7 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
   shareActive=false bootstrapping=true`; 2 of 14 relay-test calls failed this way.
 - **Fix:** remember that the share was waiting for signaling and start it from
   `_handleRealtimeConnected`; guard `startScreenShare` against running twice.
-  Verification results are in `YET_TO_FIX.md`.
+  Verification results are in `archive/YET_TO_FIX.md`.
 
 ### B7. Helper's audio button said "…on the other phone"
 - **Fix:** now "Start/Stop recording guide audio" (`mobile_voice_control_bar.dart`).
@@ -277,6 +277,51 @@ Status key: **FIXED** (in this branch, verified), **OPEN** (still needs work),
   remote taps and the helper's drawing both use the decoded video's real aspect, and
   flutter_webrtc captures at the true display size (the 720x1280 request is ignored),
   so there are no letterbox offsets there.
+
+### B28. Switching between Wi-Fi and mobile data mid-call froze or ended the call
+- **Causes:** (1) nothing reacted until ICE reached "failed" (~30 s); (2) the old
+  signaling socket could stay half-open on the lost network, so no new offer could be
+  exchanged; (3) a helper whose socket dropped got the helpee a 10 s auto-leave
+  countdown; (4) the helper only renegotiated after reconnecting if it had *no*
+  remote stream, but after a switch the old stream object is still there, frozen;
+  (5) `state.contains('connected')` also matched "Disconnected".
+- **Fix (code; needs a real switch test):** native `registerDefaultNetworkCallback` →
+  `NetworkMonitor` → the call drops the stale socket and reconnects at once
+  (`RealtimeService.reconnectNow`). The helpee rebuilds and offers on reconnect; the
+  helper sends `request_offer` (existing message, no backend change). A 5 s
+  "disconnected" watchdog does the same if no network callback arrives. Peer
+  connections use `continualGatheringPolicy: gather_continually`. Helpee countdown is
+  30 s. ICE state checks compare the suffix.
+- **What to look for in the log:** `[AssistMe][CALL] network changed …`, then
+  `recovering call after network change …`, `network changed; reconnecting now`,
+  a new offer/answer, and the video back within a few seconds.
+
+### B30 to B35. Clicky fixes before going public
+- **B30, voice went silent:** TextToSpeech used the media stream with no audio attributes, and phones with media volume down or audio left on the earpiece after a call played nothing. A missing voice for the phone language also failed silently. **Fix:** speak on `USAGE_ASSISTANCE_ACCESSIBILITY`, fall back to English, and log every TTS failure.
+- **B31, pointer bounced up and down while searching:** every scan could pick a different equal-scoring label, one empty scan mid-animation hid the pointer so the next one flew in from the centre on an upward arc, and the card flipped between top and bottom on small moves. **Fix:** confirm a new target on two scans, keep the current target while it is on screen, glide in a straight line when it scrolls, tolerate one empty scan, and move the card only when it would cover the target.
+- **B32, Back did not return the phone to the earlier step:** Back only changed the card. **Fix:** Clicky remembers the screen where each step's target was found and presses system Back (or Home) until that step's control or screen is showing, up to four times, then reopens that app. Stopping with ✕ partway returns to the AssistMe guide.
+- **B33, nothing highlighted for screen gestures:** "long-press the home screen" searched for a button called "home screen". **Fix:** press-and-hold and swipe steps outline the whole screen with a prompt and complete on the long press, the next screen or the scroll.
+- **B34, stuck when the screen said "Done" instead of "Next":** the wallpaper guide's "Next" did not exist on a home-screen-only wallpaper. **Fix:** confirm words (Next, Done, OK, Apply, Set, Save, Continue...) stand in for each other; if the target is missing but the next step's control is on screen, Clicky moves on; a step repeating the button just pressed counts as done.
+- **B35, Use Clicky shown on the helper's own guides:** the helper's phone may not match the helpee's. **Fix:** guides record `made_by_me`; helper-made guides hide the button. Guides saved before this build do not carry the flag and still show it.
+
+### B29. Helpee kept counting down "helper disconnected, auto-leaving" after the helper was back
+- **Seen:** after a Wi-Fi <-> mobile data switch on the helper (M346B), the helpee showed
+  "M346B test disconnected · Auto-leaving in 16s" although the call was live again. The
+  countdown ended the call, and "Wait (+30s)" only delayed it.
+- **Cause:** the helper's new socket landed on another API worker before the old worker
+  noticed the old socket had closed. The old worker then marked the helper
+  "disconnected", broadcast `user_disconnected` (after the `user_reconnected` had
+  already gone out), and started its 5 min grace timer. The helpee only stopped the
+  countdown on `user_reconnected`.
+- **Fix:** each session socket gets an id, and Redis keeps the user's latest one
+  (`presence_add` / compare-and-delete `presence_release`). A close from a socket that
+  is no longer the latest is ignored: no "disconnected" status, no broadcast, no grace
+  timer. The grace timer also spares a user stamped live after the drop, and the
+  30 s sweeper puts live sockets back to "connected". On the phone, the helpee stops the
+  countdown when ICE connects, the data channel opens or any peer data arrives, and does
+  not leave at zero while ICE and the data channel are both up.
+- **Status:** backend tests pass (243) and the test backend is rebuilt. APK built; not
+  yet installed (phones were unplugged) and not yet tested with a real switch.
 
 ### B18. "Step 1 of 0" on guides saved with notes only
 - **Fix:** the viewer shows "Session notes" for a guide with no steps.

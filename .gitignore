@@ -33,3 +33,9 @@ releases/*.apk
 
 # Local TLS certificates and private keys (runtime only)
 deploy/nginx/certs/*.pem
+
+# Local media, report material and hand-over notes (not published)
+/media/
+/report-screenshots/
+/report-screenshots.zip
+/HANDOVER.md
