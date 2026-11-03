@@ -51,23 +51,30 @@ Most remote-support tools are built for IT desks: they need accounts, session co
 ## How it works
 
 ```mermaid
-flowchart LR
-    subgraph Helpee phone
-      A[Flutter UI] --- B[WebRTC engine]
-      B --- C[Kotlin: overlay, gestures, Clicky]
+flowchart TB
+    subgraph Helpee_Phone["Helpee phone"]
+        direction TB
+        A[Flutter UI] --- B[WebRTC engine]
+        B --- C["Kotlin: overlay, gestures, Clicky"]
     end
-    subgraph Helper phone
-      D[Flutter UI] --- E[WebRTC engine]
-      E --- F[Whisper + Gemma, on device]
+
+    subgraph Helper_Phone["Helper phone"]
+        direction TB
+        D[Flutter UI] --- E[WebRTC engine]
+        E --- F["Whisper + Gemma<br/>on device"]
     end
-    B <== "screen, voice, drawings, guide steps<br/>(peer to peer, DTLS-SRTP)" ==> E
-    B -. TURN relay if needed .- T[(Metered TURN)]
-    E -. .- T
-    A -- "HTTPS + WebSockets" --> S[FastAPI backend]
-    D -- "HTTPS + WebSockets" --> S
+
+    B <-->|"Screen, voice, drawings, guide steps<br/>(Peer-to-peer, DTLS-SRTP)"| E
+
+    B -.->|"TURN relay if needed"| T[(Metered TURN)]
+    E -.->|"TURN relay if needed"| T
+
+    A -->|"HTTPS + WebSockets"| S[FastAPI backend]
+    D -->|"HTTPS + WebSockets"| S
+
     S --- P[(PostgreSQL)]
     S --- R[(Redis pub/sub)]
-    S -- ring --> FCM[Firebase push]
+    S -->|"Ring notification"| FCM[Firebase push]
 ```
 
 1. **Pair once.** `POST /devices/pairing/setup-code`, then `/claim`, then `/approve`.
