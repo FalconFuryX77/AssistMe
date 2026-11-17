@@ -4,10 +4,12 @@ import sqlite3
 import subprocess
 import time
 import hashlib
+from pathlib import Path
 
-ADB = r"C:\Users\loqav\AppData\Local\Android\Sdk\platform-tools\adb.exe"
-ARTIFACTS_DIR = r"C:\Users\loqav\.gemini\antigravity-ide\brain\f0c8e054-de93-4f74-93ca-cc263483c0bc"
-DB_PATH = r"C:\Users\loqav\Desktop\AssistMe\backend\assistme.db"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ADB = os.environ.get("ADB", "adb")
+ARTIFACTS_DIR = os.environ.get("ASSISTME_ARTIFACTS_DIR", str(REPO_ROOT / "test-artifacts"))
+DB_PATH = os.environ.get("ASSISTME_DB_PATH", str(REPO_ROOT / "backend" / "assistme.db"))
 
 DEV_HELPEE = "emulator-5554"
 DEV_HELPER = "emulator-5556"
@@ -26,6 +28,7 @@ def input_text(device: str, text: str):
     time.sleep(0.5)
 
 def capture_screenshot(device: str, name: str) -> str:
+    os.makedirs(ARTIFACTS_DIR, exist_ok=True)
     path = os.path.join(ARTIFACTS_DIR, f"{name}.png")
     cmd = [ADB, "-s", device, "exec-out", "screencap", "-p"]
     res = subprocess.run(cmd, capture_output=True)

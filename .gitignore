@@ -38,4 +38,5 @@ deploy/nginx/certs/*.pem
 /media/
 /report-screenshots/
 /report-screenshots.zip
+/test-artifacts/
 /HANDOVER.md

@@ -48,14 +48,14 @@ Phase 19 (Internet Connectivity) is **complete and merged to main**. Here's what
 
 | File | Change | Purpose |
 |------|--------|---------|
-| [app.py](file:///c:/Users/loqav/Desktop/AssistMe/backend/app.py) | Modified | Added `CORSMiddleware` with configurable `ALLOWED_ORIGINS` |
-| [config.py](file:///c:/Users/loqav/Desktop/AssistMe/backend/core/config.py) | Modified | Added `ALLOWED_ORIGINS`, `PUBLIC_TURN_URL`, `PUBLIC_STUN_URLS`, `PUBLIC_API_BASE_URL`, `PUBLIC_WS_BASE_URL` (all default `None`) |
-| [webrtc_service.py](file:///c:/Users/loqav/Desktop/AssistMe/backend/api/services/webrtc_service.py) | Modified | Returns public TURN/STUN URLs when set, falls back to internal for local dev |
-| [turnserver.conf](file:///c:/Users/loqav/Desktop/AssistMe/deploy/coturn/turnserver.conf) | Modified | Added `external-ip=${EXTERNAL_IP}`, `relay-ip=0.0.0.0`, `denied-peer-ip` ranges |
-| [docker-compose.yml](file:///c:/Users/loqav/Desktop/AssistMe/deploy/docker-compose.yml) | Modified | Passes `PUBLIC_*`, `ALLOWED_ORIGINS`, `EXTERNAL_IP` to containers; coturn uses `envsubst` |
-| [assistme.conf](file:///c:/Users/loqav/Desktop/AssistMe/deploy/nginx/conf.d/assistme.conf) | Rewritten | HTTPS/TLS (443 ssl http2), TLS 1.2/1.3 hardening, HSTS, HTTP→HTTPS redirect, `wss://` WebSocket |
-| [.env.example](file:///c:/Users/loqav/Desktop/AssistMe/deploy/.env.example) | Modified | Documented all new internet deployment variables |
-| [test_internet_connectivity.py](file:///c:/Users/loqav/Desktop/AssistMe/backend/tests/test_internet_connectivity.py) | **New** | 24 tests: CORS, ALLOWED_ORIGINS parsing, ICE public URLs, Coturn config, Nginx TLS, Docker Compose |
+| `backend/app.py` | Modified | Added `CORSMiddleware` with configurable `ALLOWED_ORIGINS` |
+| `backend/core/config.py` | Modified | Added `ALLOWED_ORIGINS`, `PUBLIC_TURN_URL`, `PUBLIC_STUN_URLS`, `PUBLIC_API_BASE_URL`, `PUBLIC_WS_BASE_URL` (all default `None`) |
+| `backend/api/services/webrtc_service.py` | Modified | Returns public TURN/STUN URLs when set, falls back to internal for local dev |
+| `deploy/coturn/turnserver.conf` | Modified | Added `external-ip=${EXTERNAL_IP}`, `relay-ip=0.0.0.0`, `denied-peer-ip` ranges |
+| `deploy/docker-compose.yml` | Modified | Passes `PUBLIC_*`, `ALLOWED_ORIGINS`, `EXTERNAL_IP` to containers; coturn uses `envsubst` |
+| `deploy/nginx/conf.d/assistme.conf` | Rewritten | HTTPS/TLS (443 ssl http2), TLS 1.2/1.3 hardening, HSTS, HTTP→HTTPS redirect, `wss://` WebSocket |
+| `deploy/.env.example` | Modified | Documented all new internet deployment variables |
+| `backend/tests/test_internet_connectivity.py` | **New** | 24 tests: CORS, ALLOWED_ORIGINS parsing, ICE public URLs, Coturn config, Nginx TLS, Docker Compose |
 | `deploy/nginx/certs/.gitignore` | **New** | Prevents accidental commit of TLS keys |
 | Self-signed dev cert | Generated | `fullchain.pem` + `privkey.pem` for local HTTPS testing |
 

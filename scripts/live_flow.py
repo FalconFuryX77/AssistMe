@@ -3,10 +3,12 @@ import time
 import sqlite3
 import hashlib
 import os
+from pathlib import Path
 
-ADB = r"C:\Users\loqav\AppData\Local\Android\Sdk\platform-tools\adb.exe"
-ARTIFACTS_DIR = r"C:\Users\loqav\.gemini\antigravity-ide\brain\f0c8e054-de93-4f74-93ca-cc263483c0bc"
-DB_PATH = r"C:\Users\loqav\Desktop\AssistMe\backend\assistme.db"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+ADB = os.environ.get("ADB", "adb")
+ARTIFACTS_DIR = os.environ.get("ASSISTME_ARTIFACTS_DIR", str(REPO_ROOT / "test-artifacts"))
+DB_PATH = os.environ.get("ASSISTME_DB_PATH", str(REPO_ROOT / "backend" / "assistme.db"))
 
 DEV_HELPEE = "emulator-5554"
 DEV_HELPER = "emulator-5556"
@@ -21,6 +23,7 @@ def tap(dev: str, x: int, y: int, delay: float = 1.0):
     time.sleep(delay)
 
 def capture(dev: str, name: str):
+    os.makedirs(ARTIFACTS_DIR, exist_ok=True)
     res = subprocess.run([ADB, "-s", dev, "exec-out", "screencap", "-p"], capture_output=True)
     open(os.path.join(ARTIFACTS_DIR, f"{name}.png"), "wb").write(res.stdout)
     print(f"[SAVED] {name}.png ({len(res.stdout)} bytes)")

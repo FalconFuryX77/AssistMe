@@ -1,12 +1,12 @@
 # Cloud Deployment – Run AssistMe Over the Internet
 
-> Local `192.168.1.39:8000` works only on same Wi-Fi. This guide puts the backend on a public HTTPS/WSS endpoint so helpee at home and helper at office/mobile data can connect via `coturn` + `Metered` TURN.
+> A local backend address (for example, `192.168.1.2:8000`) works only on the same Wi-Fi. This guide puts the backend on a public HTTPS/WSS endpoint so helpee at home and helper at office/mobile data can connect via `coturn` + `Metered` TURN.
 
 ## 1. What Changes vs Local
 
 | Local | Cloud |
 |---|---|
-| `DEFAULT_SERVER_URL=http://192.168.1.39:8000` | `https://api.yourdomain.com` |
+| `DEFAULT_SERVER_URL=http://192.168.1.2:8000` | `https://api.yourdomain.com` |
 | `STUN=stun.l.google.com` + `TURN=turn:coturn:3478` (LAN) | Public TURN over UDP/TCP plus managed TURN/TLS fallback |
 | SQLite `assistme.db` | Managed Postgres + Redis |
 | `ALLOWED_ORIGINS=*` | `https://yourdomain.com` |

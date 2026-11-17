@@ -2,7 +2,7 @@
   "generated_at": "2026-09-06T10:28:02.429723+00:00",
   "global_seed": 20260901,
   "quick_mode": true,
-  "artifact_dir": "C:\\Users\\loqav\\Desktop\\AssistMe-ACSAF\\AssistMe-main\\backend\\ml\\artifacts",
+  "artifact_dir": "backend/ml/artifacts",
   "safety": {
     "checks_performed": 14000,
     "ceiling_violations": 0,

@@ -548,7 +548,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTypography.bodySmall),
                       decoration: InputDecoration(
                         labelText: 'Server Base URL',
-                        hintText: 'http://192.168.1.39:8000',
+                        hintText: 'http://192.168.1.2:8000',
                         prefixIcon: Icon(Icons.link, color: AppTheme.textMuted, size: 20),
                         suffixIcon: IconButton(
                           icon: const Icon(Icons.clear, size: 18),
@@ -577,7 +577,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           label: const Text('Wi-Fi example', style: TextStyle(fontSize: AppTypography.caption)),
                           onPressed: () {
                             setState(() {
-                              _serverUrlController.text = 'http://192.168.1.100:8000';
+                              _serverUrlController.text = 'http://192.168.1.2:8000';
                               _testResult = null;
                             });
                           },

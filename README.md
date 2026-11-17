@@ -61,8 +61,8 @@ flowchart LR
       E --- F[Whisper + Gemma, on device]
     end
     B <== "screen, voice, drawings, guide steps<br/>(peer to peer, DTLS-SRTP)" ==> E
-    B -. TURN relay if needed .- T[(Metered TURN)]
-    E -. .- T
+    B -. TURN relay if needed .-> T[(Metered TURN)]
+    E -.-> T
     A -- "HTTPS + WebSockets" --> S[FastAPI backend]
     D -- "HTTPS + WebSockets" --> S
     S --- P[(PostgreSQL)]

@@ -1,7 +1,10 @@
 import subprocess
 import sys
+import os
+from pathlib import Path
 
-ADB = r"C:\Users\loqav\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+ADB = os.environ.get("ADB", "adb")
+ARTIFACTS_DIR = Path(os.environ.get("ASSISTME_ARTIFACTS_DIR", Path(__file__).resolve().parents[1] / "test-artifacts"))
 
 def capture(device_id: str, output_path: str):
     res = subprocess.run([ADB, "-s", device_id, "exec-out", "screencap", "-p"], capture_output=True)
@@ -15,5 +18,6 @@ def capture(device_id: str, output_path: str):
         print(f"Failed to capture {device_id}: {res.stderr.decode()}")
 
 if __name__ == "__main__":
-    capture("emulator-5554", r"C:\Users\loqav\.gemini\antigravity-ide\brain\f0c8e054-de93-4f74-93ca-cc263483c0bc\helpee_screen.png")
-    capture("emulator-5556", r"C:\Users\loqav\.gemini\antigravity-ide\brain\f0c8e054-de93-4f74-93ca-cc263483c0bc\helper_screen.png")
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    capture("emulator-5554", str(ARTIFACTS_DIR / "helpee_screen.png"))
+    capture("emulator-5556", str(ARTIFACTS_DIR / "helper_screen.png"))

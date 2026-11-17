@@ -171,7 +171,7 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
               style: TextStyle(color: AppTheme.textPrimary, fontSize: AppTypography.bodySmall),
               decoration: InputDecoration(
                 labelText: 'Server URL',
-                hintText: 'http://192.168.1.39:8000',
+                hintText: 'http://192.168.1.2:8000',
                 prefixIcon: Icon(Icons.link, color: AppTheme.textMuted),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.clear, size: 18),
@@ -191,10 +191,10 @@ class _ServerConfigDialogState extends State<ServerConfigDialog> {
               runSpacing: 6,
               children: [
                 ActionChip(
-                  label: const Text('Wi-Fi (192.168.1.39)', style: TextStyle(fontSize: AppTypography.caption)),
+                  label: const Text('Wi-Fi example', style: TextStyle(fontSize: AppTypography.caption)),
                   onPressed: () {
                     setState(() {
-                      _controller.text = 'http://192.168.1.39:8000';
+                      _controller.text = 'http://192.168.1.2:8000';
                       _testResult = null;
                     });
                   },
