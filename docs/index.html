@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AssistMe: one-tap help from someone you trust</title>
+<meta name="description" content="AssistMe connects an older adult with a trusted family member. One tap rings the helper, who sees the screen live, talks them through it and draws on it. Afterwards a private guide, written by on-device AI, replays offline with Clicky.">
+<meta name="theme-color" content="#0a111c">
+<meta name="color-scheme" content="dark">
+<meta property="og:type" content="website">
+<meta property="og:title" content="AssistMe: help when they need it, and the know-how for next time">
+<meta property="og:description" content="One tap rings someone you trust. Live screen sharing, drawing and consent-based control, then a private step-by-step guide written by on-device AI that Clicky replays offline.">
+<meta property="og:url" content="https://falconfuryx77.github.io/AssistMe/">
+<meta property="og:image" content="https://falconfuryx77.github.io/AssistMe/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230f1826'/%3E%3Cpath d='M16 25s-8.5-5.1-8.5-11A4.6 4.6 0 0 1 16 11.3 4.6 4.6 0 0 1 24.5 14c0 5.9-8.5 11-8.5 11Z' fill='%2322c38e'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Same family as Undertow and Lookout, in AssistMe's own colours: the app's
+   night-navy canvas, its emerald for help and calls, and Clicky's blue for
+   the walkthrough. Plus Jakarta Sans for text, JetBrains Mono for labels. */
+:root{
+  color-scheme:dark;
+  --bg:#0a111c; --bg-1:#0e1724; --bg-2:#142032; --bg-3:#1a293f;
+  --line:#1a2537; --line-2:#29374e;
+  --ink:#eef3f8; --ink-2:#a7b4c5; --ink-3:#7b899c;
+  --signal:#22c38e; --signal-hi:#43d6a4; --signal-dim:rgba(34,195,142,.13); --on-signal:#03140d;
+  --clicky:#5b95ff; --clicky-dim:rgba(91,149,255,.14);
+  --stop:#ef5a5a;
+  --font-sans:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"Cascadia Mono",Menlo,Consolas,monospace;
+  --step-1:1.125rem; --step-2:1.375rem;
+  --step-3:clamp(1.75rem,1.15rem + 2.3vw,2.625rem);
+  --step-4:clamp(2.4rem,1rem + 4.6vw,4rem);
+  --ease:cubic-bezier(.2,.7,.2,1);
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-padding-top:84px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-sans);font-size:1rem;line-height:1.65;-webkit-font-smoothing:antialiased}
+::selection{background:rgba(34,195,142,.3)}
+a{color:var(--ink);text-underline-offset:3px;text-decoration-thickness:1px;text-decoration-color:var(--ink-3)}
+a:hover{text-decoration-color:currentColor}
+:focus-visible{outline:2px solid var(--signal);outline-offset:3px;border-radius:8px}
+h1,h2,h3{margin:0;font-weight:700;text-wrap:balance}
+h1{font-size:var(--step-4);line-height:1.04;letter-spacing:-.035em;font-weight:800}
+h2{font-size:var(--step-3);line-height:1.1;letter-spacing:-.025em}
+h3{font-size:var(--step-1);line-height:1.3;letter-spacing:-.01em}
+p{margin:0}
+.wrap{max-width:1160px;margin-inline:auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+.skip{position:absolute;left:12px;top:-64px;z-index:50;padding:10px 14px;border-radius:10px;background:var(--signal);color:var(--on-signal);font-weight:700;text-decoration:none}
+.skip:focus{top:12px}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:44px;padding:0 16px;border-radius:10px;border:1px solid var(--line-2);background:var(--bg-2);color:var(--ink);font:600 .9375rem/1 var(--font-sans);text-decoration:none;white-space:nowrap;cursor:pointer;transition:background .15s,border-color .15s,transform .1s}
+.btn:hover{background:var(--bg-3);border-color:#3c4c66}
+.btn:active{transform:translateY(1px)}
+.btn svg{width:17px;height:17px;flex:none;fill:currentColor}
+.btn-primary{background:var(--signal);border-color:var(--signal);color:var(--on-signal);font-weight:700}
+.btn-primary:hover{background:var(--signal-hi);border-color:var(--signal-hi)}
+.btn-lg{height:52px;padding:0 20px;border-radius:12px;font-size:1rem}
+.btn-sm{height:36px;padding:0 14px;font-size:.875rem}
+.btn .note{font-family:var(--font-mono);font-size:.75rem;font-weight:400;padding-left:11px;border-left:1px solid rgba(3,20,13,.3);opacity:.85}
+.btn:not(.btn-primary) .note{border-left-color:var(--line-2);color:var(--ink-3);opacity:1}
+
+.top{position:sticky;top:0;z-index:30;background:rgba(10,17,28,.8);-webkit-backdrop-filter:saturate(160%) blur(16px);backdrop-filter:saturate(160%) blur(16px);border-bottom:1px solid var(--line)}
+.top-in{display:flex;align-items:center;gap:24px;height:64px}
+.brand{display:inline-flex;align-items:center;gap:10px;font-weight:800;font-size:1.125rem;letter-spacing:-.02em;color:var(--ink);text-decoration:none}
+.brand svg{width:26px;height:26px}
+.top nav{display:flex;gap:2px;margin-inline:auto}
+.top nav a{padding:8px 12px;border-radius:8px;font-size:.875rem;font-weight:500;line-height:1;color:var(--ink-2);text-decoration:none;transition:color .15s,background .15s}
+.top nav a:hover{color:var(--ink);background:var(--bg-2)}
+.top-actions{display:flex;align-items:center;gap:6px;margin-left:auto}
+.top nav + .top-actions{margin-left:0}
+.icon-btn{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;color:var(--ink-2)}
+.icon-btn:hover{color:var(--ink);background:var(--bg-2)}
+.icon-btn svg{width:18px;height:18px;fill:currentColor}
+@media (max-width:920px){.top nav{display:none}}
+@media (max-width:440px){.top .icon-btn{display:none}.top-in{gap:12px}}
+
+/* Hero */
+.hero{position:relative;padding-block:64px 40px;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:-25% -15% auto 40%;height:760px;background:radial-gradient(closest-side,rgba(34,195,142,.16),transparent 70%);pointer-events:none}
+.hero::after{content:"";position:absolute;inset:auto auto -30% -20%;width:640px;height:520px;background:radial-gradient(closest-side,rgba(91,149,255,.08),transparent 70%);pointer-events:none}
+.hero-grid{position:relative;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);gap:48px;align-items:center}
+@media (max-width:980px){.hero-grid{grid-template-columns:minmax(0,1fr)}}
+.eyebrow{display:inline-flex;align-items:center;gap:10px;padding:6px 12px 6px 10px;border:1px solid var(--line-2);border-radius:999px;font-family:var(--font-mono);font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);background:var(--bg-1)}
+.eyebrow i{width:7px;height:7px;border-radius:50%;background:var(--signal);box-shadow:0 0 0 4px var(--signal-dim)}
+.hero h1{margin-top:22px}
+.hero h1 em{font-style:normal;color:var(--signal);display:block}
+.lede{margin-top:20px;font-size:var(--step-1);color:var(--ink-2);max-width:56ch}
+.ctas{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}
+.smalls{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:20px;font-size:.875rem;color:var(--ink-3)}
+.smalls a{color:var(--ink-2)}
+
+/* Phones */
+.phones{position:relative;height:560px;max-width:520px;margin-inline:auto;width:100%}
+.phone{position:absolute;width:246px;border-radius:34px;padding:9px;background:#05080e;border:1px solid #2b3a52;box-shadow:0 40px 90px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.04)}
+.phone img{display:block;width:100%;height:auto;aspect-ratio:540/1110;object-fit:cover;object-position:top;border-radius:26px;background:var(--bg-2)}
+.phone .who{position:absolute;top:-30px;left:14px;font-family:var(--font-mono);font-size:.6875rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.phone.a{left:0;top:40px;transform:rotate(-4deg)}
+.phone.b{right:0;top:0;transform:rotate(3deg)}
+.link-chip{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:var(--bg-1);border:1px solid var(--signal);font-family:var(--font-mono);font-size:.6875rem;letter-spacing:.04em;color:var(--signal);white-space:nowrap;z-index:2;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.link-chip i{width:7px;height:7px;border-radius:50%;background:var(--signal);animation:pulse 1.8s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,195,142,.6)}70%{box-shadow:0 0 0 9px rgba(34,195,142,0)}100%{box-shadow:0 0 0 0 rgba(34,195,142,0)}}
+@media (max-width:560px){.phones{height:430px}.phone{width:186px;border-radius:28px;padding:7px}.phone img{border-radius:21px}}
+@media (prefers-reduced-motion:reduce){.link-chip i{animation:none}}
+
+/* Spec strip */
+.specs{position:relative;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:56px 0 0;border:1px solid var(--line);border-radius:14px;background:var(--bg-1);overflow:hidden}
+.specs div{padding:16px 18px;border-left:1px solid var(--line);display:grid;gap:4px;min-width:0}
+.specs div:first-child{border-left:0}
+.specs dt{font-family:var(--font-mono);font-size:.6875rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.specs dd{margin:0;font-weight:600;font-size:.95rem;line-height:1.35}
+@media (max-width:820px){.specs{grid-template-columns:repeat(2,minmax(0,1fr))}.specs div:nth-child(3){border-left:0}.specs div:nth-child(n+3){border-top:1px solid var(--line)}}
+
+.sec{padding-block:96px 24px}
+.sec-head{display:grid;gap:14px;max-width:760px}
+.kicker{font-family:var(--font-mono);font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.kicker b{color:var(--signal);font-weight:500;margin-right:8px}
+.sec-head p{font-size:var(--step-1);color:var(--ink-2)}
+
+/* Video */
+.video{margin-top:36px;border:1px solid var(--line-2);border-radius:18px;overflow:hidden;background:#000;box-shadow:0 30px 80px rgba(0,0,0,.45)}
+.video video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#000}
+.video-note{margin-top:12px;font-size:.875rem;color:var(--ink-3)}
+
+/* Steps */
+.steps{list-style:none;margin:40px 0 0;padding:0 0 12px;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(250px,1fr);gap:16px;overflow-x:auto;scroll-snap-type:x mandatory;counter-reset:s;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+.steps li{scroll-snap-align:start;counter-increment:s;display:grid;gap:12px;align-content:start;min-width:0}
+.steps figure{margin:0;border-radius:24px;padding:7px;background:#05080e;border:1px solid var(--line-2)}
+.steps img{display:block;width:100%;height:auto;aspect-ratio:540/1000;object-fit:cover;object-position:top;border-radius:18px;background:var(--bg-2)}
+.steps .n{font-family:var(--font-mono);font-size:.75rem;color:var(--signal)}
+.steps .n::before{content:counter(s,decimal-leading-zero) "  ·  "}
+.steps li.clicky .n{color:var(--clicky)}
+.steps h3{font-size:1.0625rem}
+.steps p{font-size:.9rem;color:var(--ink-2)}
+.scroll-hint{margin-top:10px;font-size:.8125rem;color:var(--ink-3)}
+
+/* Features */
+.feats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:40px}
+@media (max-width:980px){.feats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:620px){.feats{grid-template-columns:minmax(0,1fr)}}
+.feat{background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:22px;display:grid;gap:10px;align-content:start;min-width:0}
+.feat .ic{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;background:var(--signal-dim);color:var(--signal)}
+.feat.clicky .ic{background:var(--clicky-dim);color:var(--clicky)}
+.feat .ic svg{width:20px;height:20px;fill:currentColor}
+.feat h3{font-size:1.0625rem}
+.feat p{font-size:.9375rem;color:var(--ink-2)}
+.feat .meta{font-family:var(--font-mono);font-size:.75rem;color:var(--ink-3)}
+
+/* Privacy */
+.privacy{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:40px;margin-top:40px;align-items:start}
+@media (max-width:980px){.privacy{grid-template-columns:minmax(0,1fr)}}
+.diagram{background:var(--bg-1);border:1px solid var(--line-2);border-radius:16px;padding:18px}
+.diagram svg{display:block;width:100%;height:auto}
+.diagram text{font-family:var(--font-sans);fill:var(--ink)}
+.diagram .sub{font-family:var(--font-mono);font-size:11px;fill:var(--ink-3)}
+.never{display:grid;gap:12px}
+.never h3{font-size:1.0625rem}
+.never ul{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.never li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:12px;align-items:start;font-size:.9375rem;color:var(--ink-2)}
+.never li::before{content:"";width:18px;height:18px;margin-top:3px;border-radius:5px;background:var(--signal-dim) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='m9.5 16.2-4-4 1.4-1.4 2.6 2.6 7-7 1.4 1.4z' fill='%2322c38e'/%3E%3C/svg%3E") center/16px no-repeat}
+.never b{color:var(--ink);font-weight:600}
+.crypto{margin-top:6px;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.crypto div{display:grid;grid-template-columns:minmax(0,8.5rem) minmax(0,1fr);gap:12px;padding:10px 14px;border-top:1px solid var(--line);font-size:.875rem}
+.crypto div:first-child{border-top:0}
+.crypto span:first-child{color:var(--ink-3)}
+.crypto span:last-child{font-family:var(--font-mono);font-size:.8125rem}
+
+/* Proof */
+.proof{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:40px}
+@media (max-width:900px){.proof{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{border:1px solid var(--line);border-radius:14px;padding:20px;background:var(--bg-1);display:grid;gap:6px;min-width:0}
+.stat b{font-family:var(--font-mono);font-weight:500;font-size:clamp(1.8rem,1.3rem + 1.4vw,2.5rem);letter-spacing:-.02em;line-height:1.05;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat span{font-size:.875rem;color:var(--ink-2)}
+.stack{display:flex;flex-wrap:wrap;gap:8px;margin-top:24px}
+.stack span{font-family:var(--font-mono);font-size:.75rem;padding:6px 10px;border:1px solid var(--line-2);border-radius:8px;color:var(--ink-2);background:var(--bg-1)}
+
+/* Limits */
+.limits{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-top:40px}
+@media (max-width:760px){.limits{grid-template-columns:minmax(0,1fr)}}
+.limit{border:1px solid var(--line);border-radius:14px;padding:20px;display:grid;gap:8px;background:var(--bg-1)}
+.limit h3{font-size:1rem;display:flex;gap:10px;align-items:center}
+.limit h3::before{content:"";width:8px;height:8px;border-radius:2px;background:var(--ink-3);flex:none}
+.limit p{font-size:.9375rem;color:var(--ink-2)}
+
+/* Install */
+.install{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:40px;counter-reset:i}
+@media (max-width:900px){.install{grid-template-columns:minmax(0,1fr)}}
+.inst{border:1px solid var(--line);border-radius:14px;padding:22px;background:var(--bg-1);display:grid;gap:10px;align-content:start;counter-increment:i;min-width:0}
+.inst::before{content:counter(i);display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--signal);color:var(--on-signal);font-weight:800;font-size:.9rem}
+.inst p{font-size:.9375rem;color:var(--ink-2)}
+.inst pre{margin:4px 0 0;padding:12px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--line);overflow-x:auto;font:400 .75rem/1.6 var(--font-mono);color:var(--ink-2)}
+
+footer{margin-top:96px;border-top:1px solid var(--line);padding-block:32px 48px;color:var(--ink-3);font-size:.875rem}
+footer .row{display:flex;flex-wrap:wrap;justify-content:space-between;gap:16px}
+footer nav{display:flex;flex-wrap:wrap;gap:18px}
+footer a{color:var(--ink-2)}
+footer p{max-width:76ch}
+
+.js .rv{opacity:0;transform:translateY(14px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+.js .rv.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.js .rv{opacity:1;transform:none;transition:none}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="#top" aria-label="AssistMe, top of page">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#142032"/><path d="M16 25s-8.5-5.1-8.5-11A4.6 4.6 0 0 1 16 11.3 4.6 4.6 0 0 1 24.5 14c0 5.9-8.5 11-8.5 11Z" fill="#22c38e"/><path d="M11.5 17.2h3.2l1.3-2.4 1.6 4.2 1.2-1.8h1.7" fill="none" stroke="#03140d" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      AssistMe
+    </a>
+    <nav aria-label="Sections">
+      <a href="#video">Demo</a><a href="#how">How it works</a><a href="#features">Features</a><a href="#privacy">Privacy</a><a href="#tested">Tested</a><a href="#limits">Limits</a><a href="#install">Install</a>
+    </nav>
+    <div class="top-actions">
+      <a class="icon-btn" href="https://github.com/FalconFuryX77/AssistMe" aria-label="Source on GitHub"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg></a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/FalconFuryX77/AssistMe/releases/latest">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero" id="top">
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow"><i></i>One-tap help from someone you trust</span>
+        <h1>Help when they need it. <em>The know-how for next time.</em></h1>
+        <p class="lede">AssistMe connects an older adult with a family member or friend they trust. They tap one button and your phone rings. You see their screen live, talk them through it and draw on it to point the way. When you hang up, they keep a private guide that Clicky replays on their own phone, offline.</p>
+        <div class="ctas">
+          <a class="btn btn-primary btn-lg" href="https://github.com/FalconFuryX77/AssistMe/releases/latest"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.6 9.48 19.44 6.3a.38.38 0 0 0-.66-.38l-1.86 3.22A11.4 11.4 0 0 0 12 8.1c-1.77 0-3.43.39-4.92 1.04L5.22 5.92a.38.38 0 0 0-.66.38L6.4 9.48A10.8 10.8 0 0 0 1 18h22a10.8 10.8 0 0 0-5.4-8.52ZM7 15.25a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Zm10 0a1.25 1.25 0 1 1 0-2.5 1.25 1.25 0 0 1 0 2.5Z"/></svg>Download for Android<span class="note">v1.2.0</span></a>
+          <a class="btn btn-lg" href="#video"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5-11-6.5Z"/></svg>Watch the explainer<span class="note">2:31</span></a>
+        </div>
+        <div class="smalls"><a href="https://github.com/FalconFuryX77/AssistMe">Source on GitHub</a><span>Android 11 or newer</span><span>Free for personal use</span></div>
+      </div>
+      <div class="phones rv" aria-label="Two phones on a live call">
+        <figure class="phone a" style="margin:0"><span class="who">Grandma's phone</span><img src="img/call.webp" width="540" height="1110" alt="The helpee's home screen with a dialog: Call Ken? and a Call Now button"></figure>
+        <figure class="phone b" style="margin:0"><span class="who">Your phone</span><img src="img/helper-view.webp" width="540" height="1170" alt="The helper's phone showing the helpee's screen live, with drawing tools and a button to add a redacted step to the guide"></figure>
+        <span class="link-chip"><i></i>Live · phone to phone · encrypted</span>
+      </div>
+    </div>
+
+    <dl class="specs rv">
+      <div><dt>Screen and voice</dt><dd>30 fps WebRTC, two-way audio</dd></div>
+      <div><dt>Control</dt><dd>Only with consent. STOP always wins.</dd></div>
+      <div><dt>AI</dt><dd>Runs on the phone. Nothing uploaded.</dd></div>
+      <div><dt>Accounts</dt><dd>None. A 6-digit code pairs you.</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="sec" id="video" aria-labelledby="video-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>01</b>Demo</span>
+      <h2 id="video-title">The whole idea in two and a half minutes.</h2>
+      <p>Pairing, a one-tap call, live screen sharing with drawing, consent-based control, a private guide written on the phone, and Clicky replaying it offline.</p>
+    </header>
+    <div class="video rv">
+      <video controls preload="none" poster="media/explainer-poster.jpg" playsinline>
+        <source src="media/assistme-explainer.mp4" type="video/mp4">
+        <a href="media/assistme-explainer.mp4">Download the explainer (MP4)</a>
+      </video>
+    </div>
+    <p class="video-note">Narrated, 2:31. <a href="media/assistme-explainer.mp4">Download the MP4</a></p>
+  </div>
+</section>
+
+<section class="sec" id="how" aria-labelledby="how-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>02</b>How it works</span>
+      <h2 id="how-title">Grandma does one thing. You do the rest.</h2>
+      <p>Most remote-support tools are built for IT desks, with accounts, session codes and settings to explain. AssistMe is built for the person on the other end of the phone call.</p>
+    </header>
+    <ol class="steps rv">
+      <li><figure><img src="img/pair.webp" loading="lazy" width="540" height="1110" alt="The helper's screen with a box for the 6-digit code"></figure><span class="n">Once</span><h3>Pair with a 6-digit code</h3><p>She shows a code, you type it, she approves. No email, no password. Codes expire after 15 minutes.</p></li>
+      <li><figure><img src="img/call.webp" loading="lazy" width="540" height="1110" alt="A dialog asking: Call Ken?"></figure><span class="n">Her side</span><h3>One tap to call</h3><p>She taps your name and your phone rings. She can say what's wrong, or not.</p></li>
+      <li><figure><img src="img/sharing.webp" loading="lazy" width="540" height="1110" alt="Screen Sharing Active, with a large red Stop Sharing button"></figure><span class="n">Her side</span><h3>She shares, and stays in charge</h3><p>Android asks before anything is shared. A big STOP button stays on her screen, and only she can press it.</p></li>
+      <li><figure><img src="img/helper-view.webp" loading="lazy" width="540" height="1170" alt="The helper viewing the helpee's screen with drawing tools"></figure><span class="n">Your side</span><h3>See it, say it, draw it</h3><p>You see her screen live and circle the button to press. With her permission, you can tap for her.</p></li>
+      <li><figure><img src="img/redact.webp" loading="lazy" width="540" height="1110" alt="Review screenshot: drag over passwords and private details to cover them"></figure><span class="n">After the call</span><h3>Cover anything private</h3><p>You review each captured step and block out passwords or messages. Covered pixels are gone for good.</p></li>
+      <li><figure><img src="img/save-guide.webp" loading="lazy" width="540" height="1110" alt="Save a private guide, with an option to transcribe the call locally"></figure><span class="n">After the call</span><h3>The guide writes itself</h3><p>Whisper turns the call into text and Gemma drafts the steps, both on your phone. You check them and send.</p></li>
+      <li class="clicky"><figure><img src="img/clicky-point.webp" loading="lazy" width="540" height="1110" alt="Clicky's card says Open Bluetooth settings and points at the Settings icon"></figure><span class="n">Next time</span><h3>Clicky shows the way</h3><p>She opens the guide and taps Use Clicky. It reads each step aloud and points at the button to press. No internet needed.</p></li>
+    </ol>
+    <p class="scroll-hint">Scroll sideways for all seven steps.</p>
+  </div>
+</section>
+
+<section class="sec" id="features" aria-labelledby="features-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>03</b>Features</span>
+      <h2 id="features-title">Everything a phone call can't do.</h2>
+    </header>
+    <div class="feats">
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6l1.5 2H17v1H7v-1h1.5L10 17H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm1 2v8h14V7H5Z"/></svg></span><h3>Live screen and voice</h3><p>Screen sharing at 30 fps with two-way audio, phone to phone. A relay takes over when networks get in the way.</p><span class="meta">WebRTC · up to 2.5 Mbps · STUN/TURN</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25Zm17.7-10.2a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg></span><h3>Draw over any app</h3><p>Your strokes appear on top of whatever she has open, even above the notification shade.</p><span class="meta">~32 ms preview batches</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 1 3 5v6c0 5.5 3.8 10.7 9 12 5.2-1.3 9-6.5 9-12V5l-9-4Zm0 4a3 3 0 1 1 0 6 3 3 0 0 1 0-6Zm0 14.2a8.7 8.7 0 0 1-5.4-4.1c0-1.8 3.6-2.8 5.4-2.8s5.4 1 5.4 2.8a8.7 8.7 0 0 1-5.4 4.1Z"/></svg></span><h3>Control, only with consent</h3><p>Taps, swipes and long presses work only after she approves a clear warning. Password, banking and permission screens are detected.</p><span class="meta">Android Accessibility Service</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3Zm7 9a7 7 0 0 1-6 6.92V21h-2v-3.08A7 7 0 0 1 5 11h2a5 5 0 0 0 10 0h2Z"/></svg></span><h3>Guides written on the phone</h3><p>Whisper transcribes the call, only if she agrees, and Gemma drafts the steps. Neither ever leaves the helper's phone.</p><span class="meta">Whisper tiny + Gemma 4 E2B · LiteRT</span></article>
+      <article class="feat clicky rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M4 2l14 9.4-6.3 1.2 3.7 7.3-2.7 1.4-3.7-7.3L4 18V2Z"/></svg></span><h3>Clicky, the offline walkthrough</h3><p>A floating card speaks each step and a pointer flies to the button. It handles press-and-hold and swipes, and Back undoes a step.</p><span class="meta">Matches buttons by label · never taps</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M17 8V7a5 5 0 0 0-10 0v1H5v14h14V8h-2ZM9 7a3 3 0 0 1 6 0v1H9V7Zm4 9.7V19h-2v-2.3a2 2 0 1 1 2 0Z"/></svg></span><h3>Guides that stay private</h3><p>Sent over the call itself, or later as ciphertext the server can't read. On the phone they're encrypted with a hardware-backed key.</p><span class="meta">AES-256-GCM · Android Keystore</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 4C7 4 2.7 6.1 0 9.4L12 22 24 9.4C21.3 6.1 17 4 12 4Z"/></svg></span><h3>Calls that don't drop</h3><p>Calls survive switching from Wi-Fi to mobile data, dropped sockets and app restarts.</p><span class="meta">Redis-backed signalling</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-8 2-8 5v1h16v-1c0-3-4-5-8-5Z"/></svg></span><h3>Nothing to remember</h3><p>No email, password or meeting code. The phone is the identity, with a one-time recovery code for a new phone.</p><span class="meta">Argon2id-hashed recovery</span></article>
+      <article class="feat rv"><span class="ic"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1L6.6 10.8Z"/></svg></span><h3>Missed calls aren't lost</h3><p>Calls ring over a persistent connection, and a call you missed is waiting when you open the app. Add a Firebase project to ring phones whose app is closed.</p><span class="meta">WebSocket · optional Firebase push</span></article>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="privacy" aria-labelledby="privacy-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>04</b>Privacy</span>
+      <h2 id="privacy-title">The server connects you. It never sees the call.</h2>
+      <p>Screen, voice, drawings and guides travel straight between the two phones. The backend only pairs devices, rings phones and passes connection details.</p>
+    </header>
+    <div class="privacy">
+      <figure class="diagram rv" style="margin:0" aria-label="Diagram: the two phones talk directly; the backend only handles pairing, ringing and signalling">
+        <svg viewBox="0 0 560 330" role="img">
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#22c38e"/></marker><marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#7b899c"/></marker></defs>
+          <rect x="16" y="20" width="150" height="120" rx="16" fill="#142032" stroke="#29374e"/>
+          <text x="91" y="62" text-anchor="middle" font-weight="700" font-size="15">Her phone</text>
+          <text x="91" y="84" text-anchor="middle" class="sub">Flutter + Kotlin</text>
+          <text x="91" y="102" text-anchor="middle" class="sub">overlay · Clicky</text>
+          <rect x="394" y="20" width="150" height="120" rx="16" fill="#142032" stroke="#29374e"/>
+          <text x="469" y="62" text-anchor="middle" font-weight="700" font-size="15">Your phone</text>
+          <text x="469" y="84" text-anchor="middle" class="sub">Flutter + Kotlin</text>
+          <text x="469" y="102" text-anchor="middle" class="sub">Whisper + Gemma</text>
+          <line x1="172" y1="70" x2="388" y2="70" stroke="#22c38e" stroke-width="2.5" marker-start="url(#ah)" marker-end="url(#ah)"/>
+          <text x="280" y="54" text-anchor="middle" font-size="13" font-weight="600" fill="#22c38e">screen · voice · drawings · guide</text>
+          <text x="280" y="92" text-anchor="middle" class="sub">peer to peer · DTLS-SRTP</text>
+          <rect x="190" y="230" width="180" height="80" rx="14" fill="#0e1724" stroke="#29374e"/>
+          <text x="280" y="262" text-anchor="middle" font-weight="700" font-size="14">AssistMe server</text>
+          <text x="280" y="283" text-anchor="middle" class="sub">FastAPI · PostgreSQL · Redis</text>
+          <path d="M91 146 C91 200 140 250 184 262" fill="none" stroke="#7b899c" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+          <path d="M469 146 C469 200 420 250 376 262" fill="none" stroke="#7b899c" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ag)"/>
+          <text x="66" y="210" class="sub">pair · ring · signal</text>
+          <text x="404" y="210" class="sub">pair · ring · signal</text>
+          <rect x="226" y="150" width="108" height="34" rx="9" fill="none" stroke="#29374e" stroke-dasharray="4 4"/>
+          <text x="280" y="172" text-anchor="middle" class="sub">TURN relay, if needed</text>
+        </svg>
+      </figure>
+      <div class="never rv">
+        <h3>Never reaches the server</h3>
+        <ul>
+          <li><span><b>Screenshots.</b> They stay on the helper's phone until reviewed, then go to her phone over the call.</span></li>
+          <li><span><b>Call audio.</b> Recorded only if she agrees, at most 20 minutes, deleted right after transcription.</span></li>
+          <li><span><b>Guide text.</b> If she has already hung up, it is uploaded as ciphertext the server can't read.</span></li>
+          <li><span><b>Anything you covered.</b> Redacted pixels are replaced with solid blocks before the AI or anyone else sees them.</span></li>
+        </ul>
+        <div class="crypto">
+          <div><span>Media</span><span>DTLS-SRTP, end to end</span></div>
+          <div><span>Guides on phone</span><span>AES-256-GCM, Keystore key</span></div>
+          <div><span>Server data</span><span>AES-256-GCM envelope + blind indexes</span></div>
+          <div><span>Recovery codes</span><span>Argon2id</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="tested" aria-labelledby="tested-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>05</b>Built and tested</span>
+      <h2 id="tested-title">Tested on real phones, not just emulators.</h2>
+      <p>AssistMe was tested end to end on ASUS, Samsung and OPPO phones, on shared Wi-Fi, on hotspots and while switching from Wi-Fi to mobile data. Every bug found is logged with its cause and fix.</p>
+    </header>
+    <div class="proof">
+      <div class="stat rv"><b>300+</b><span>automated tests across the backend, the Flutter app and Clicky</span></div>
+      <div class="stat rv"><b>35</b><span>bugs found in testing, each logged with cause and fix</span></div>
+      <div class="stat rv"><b>3</b><span>phone brands, Android 13 to 16</span></div>
+      <div class="stat rv"><b>6 s</b><span>for Gemma to answer on a Galaxy M34's GPU, with no internet</span></div>
+    </div>
+    <div class="stack rv">
+      <span>Flutter 3.47</span><span>Dart</span><span>Kotlin</span><span>flutter_webrtc</span><span>MediaProjection</span><span>AccessibilityService</span><span>LiteRT</span><span>Gemma 4 E2B</span><span>Whisper tiny</span><span>FastAPI</span><span>SQLAlchemy</span><span>Alembic</span><span>PostgreSQL 16</span><span>Redis 7</span><span>Firebase Cloud Messaging</span><span>Docker Compose</span><span>nginx</span><span>Cloudflare Tunnel</span><span>Kubernetes</span>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="limits" aria-labelledby="limits-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>06</b>Limits</span>
+      <h2 id="limits-title">What to know before you install it.</h2>
+    </header>
+    <div class="limits">
+      <div class="limit rv"><h3>Android only</h3><p>Both phones need Android 11 or newer. The iOS code paths exist but aren't maintained.</p></div>
+      <div class="limit rv"><h3>The AI needs a capable phone</h3><p>On-device guides need a 64-bit ARM phone with several GB of RAM and a one-time download of about 2.75 GB. The app checks before downloading anything.</p></div>
+      <div class="limit rv"><h3>Clicky reads labels</h3><p>Clicky finds buttons by their on-screen names. Icons without a label, or screens that look very different from the guide, still need a tap on Next.</p></div>
+      <div class="limit rv"><h3>Bring your own server</h3><p>The release points at a demo server that's only online during demos. Run the backend yourself with Docker and add your own Firebase project to ring phones whose app is closed.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="install" aria-labelledby="install-title">
+  <div class="wrap">
+    <header class="sec-head rv">
+      <span class="kicker"><b>07</b>Install</span>
+      <h2 id="install-title">Two phones and ten minutes.</h2>
+    </header>
+    <div class="install">
+      <div class="inst rv"><h3>Install the app on both phones</h3><p>Download the APK from the latest release and open it on each phone. Pick a name, then turn on the AssistMe accessibility service.</p><a class="btn btn-sm" href="https://github.com/FalconFuryX77/AssistMe/releases/latest" style="justify-self:start">Latest release</a></div>
+      <div class="inst rv"><h3>Run the backend</h3><p>Copy the example settings, replace every secret, and start the stack.</p>
+<pre>cp deploy/.env.example deploy/.env
+cd deploy
+docker compose -f docker-compose.yml \
+  -f docker-compose.local.yml up -d --build
+docker compose run --rm migrate</pre></div>
+      <div class="inst rv"><h3>Point the phones at it</h3><p>On each phone open Settings → Custom Backend Server and enter your server's HTTPS address. For guides, download the AI models on the helper's phone.</p><a class="btn btn-sm" href="https://github.com/FalconFuryX77/AssistMe#getting-started" style="justify-self:start">Full setup guide</a></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <span>AssistMe began as a capstone project at NMIMS MPSTME, Mumbai.</span>
+      <nav aria-label="Links"><a href="https://github.com/FalconFuryX77/AssistMe">GitHub</a><a href="https://github.com/FalconFuryX77/AssistMe/releases">Releases</a><a href="https://github.com/FalconFuryX77/AssistMe/blob/main/docs/CODEBASE_GUIDE.md">Codebase guide</a><a href="https://github.com/FalconFuryX77/AssistMe/blob/main/LICENSE">License</a></nav>
+    </div>
+    <p style="margin-top:18px">Source-available under the PolyForm Noncommercial License 1.0.0: free to read, run and change for personal, educational and other non-commercial use. Clicky's walkthrough idea comes from the Clicky desktop app; AssistMe's version is an independent, offline Android implementation.</p>
+  </div>
+</footer>
+
+<script>
+document.documentElement.classList.add('js');
+(function(){
+  const els=document.querySelectorAll('.rv');
+  if(!('IntersectionObserver' in window)){ els.forEach(e=>e.classList.add('in')); return; }
+  const io=new IntersectionObserver(es=>es.forEach(en=>{ if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } }),{rootMargin:'0px 0px -8% 0px'});
+  els.forEach(e=>io.observe(e));
+})();
+</script>
+</body>
+</html>

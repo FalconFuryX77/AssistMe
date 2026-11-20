@@ -2,6 +2,8 @@
 
 **One-tap remote help for the people who need it most, and a guide they can follow on their own next time.**
 
+Website: **https://falconfuryx77.github.io/AssistMe/** · **[Watch the explainer](https://falconfuryx77.github.io/AssistMe/#video)** (2.5 minutes, narrated)
+
 AssistMe connects an older adult (the *helpee*) with a trusted family member or friend (the *helper*). The helpee taps one button and the helper's phone rings. The helper then sees the helpee's screen live, talks them through the problem, and draws on their screen to point the way. If the helpee allows it, the helper can also tap for them.
 
 When the call ends, the helpee keeps an encrypted step-by-step guide: screenshots the helper reviewed, with steps written on the helper's phone from what was said during the call. Next time the same problem comes up, **Clicky** replays the guide on the helpee's own phone, fully offline. It reads each step aloud and points at the button to press.
@@ -14,11 +16,11 @@ When the call ends, the helpee keeps an encrypted step-by-step guide: screenshot
 </p>
 
 <p align="center">
-  <a href="docs/media/assistme-explainer.mp4">
+  <a href="https://falconfuryx77.github.io/AssistMe/#video">
     <img src="docs/media/explainer-poster.jpg" width="720" alt="Play the 2.5-minute AssistMe explainer video">
   </a>
   <br>
-  <sub><a href="docs/media/assistme-explainer.mp4">Watch the 2.5-minute explainer</a> · <a href="https://github.com/FalconFuryX77/AssistMe/releases/latest">Download the Android app</a></sub>
+  <sub><a href="https://falconfuryx77.github.io/AssistMe/#video">Watch the 2.5-minute explainer</a> · <a href="https://github.com/FalconFuryX77/AssistMe/releases/latest">Download the Android app</a></sub>
 </p>
 
 ---
@@ -179,7 +181,7 @@ cd mobile/android && ./gradlew :app:testReleaseUnitTest            # Clicky matc
 
 ## Demo
 
-[**Watch the explainer**](docs/media/assistme-explainer.mp4) (2.5 minutes, narrated): what AssistMe is for, pairing and one-tap calls, live screen sharing with drawing, consent-based control, private guides written by on-device AI, and replaying them offline with Clicky.
+[**Watch the explainer**](https://falconfuryx77.github.io/AssistMe/#video) (2.5 minutes, narrated): what AssistMe is for, pairing and one-tap calls, live screen sharing with drawing, consent-based control, private guides written by on-device AI, and replaying them offline with Clicky.
 
 ## Project status
 
